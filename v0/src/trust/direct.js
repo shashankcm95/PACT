@@ -1,0 +1,94 @@
+// PACT P2 — trust/direct.js  (spec §5, §1.4; decisions #1/#2/#5/#6; post-build VALIDATE folds)
+//
+// DIRECT[me, agent@config_hash] — first-person, earned, PRIVATE. DERIVED-ON-READ (decision #5): a pure
+// fold over the SIG-VERIFIED behavioral log (read-gate, INV-14). No mutable trust-edge store → nothing
+// to auto-mint into (INV-18 structural).
+//
+// Behavioral, NOT truth (research/17 amendment A; L5): the signal is caught-vs-uncaught.
+//   positive r = agent's uncontested CLAIM frames (uncaught good behavior), DEDUPED by idempotency_key,
+//     time-decayed.
+//   negative s = caught defections, from CONTEST records that reference a REAL claim of the agent. The
+//     post-build VALIDATE board found three Sybil holes the fold below closes:
+//       (F2) corroboration is keyed by HUMAN (rootOf), not cheap-to-mint persona — one human minting N
+//            DIDs is ONE contester (cannot self-corroborate a crater).
+//       (F3) a CONTEST whose target_claim_id does not resolve to an actual claim of the agent is IGNORED
+//            (no real caught defection → no crater).
+//       (arch) a crater (CRATER_MULTIPLIER) needs >=2 distinct EARNED-STANDING humans; a zero-history
+//            Sybil contester INFORMS but cannot CORROBORATE (never-counts-nodes spirit, INV-13).
+//   s is time-decayed too (defection FADES — the asymmetry is the crater multiplier, not permanence).
+//
+// HONEST RESIDUAL (U1): keying by rootOf defeats persona-multiplication; a funded attacker with N
+// distinct HUMAN roots remains the U1 frontier (the registry stub does not enforce one-human-one-root).
+// Everything here is SHADOW/advisory.
+
+'use strict';
+
+const { verifiedRecords } = require('./read-gate');
+const { opinion } = require('./opinion');
+const { rootOf } = require('../identity/registry');
+const { CRATER_MULTIPLIER, DECAY_HALF_LIFE_MS } = require('./params');
+
+// Exponential time-decay weight. A record without `t` is full-weight (within-session fallback,
+// decision #6). A future `t` clamps to full weight (dt floored at 0) — conservative for P2 (advisory);
+// when decay ever GATES, reject t > now + skew.
+function decayWeight(rec, now) {
+  if (typeof rec.t !== 'number' || typeof now !== 'number') return 1;
+  const dt = Math.max(0, now - rec.t);
+  return Math.pow(0.5, dt / DECAY_HALF_LIFE_MS);
+}
+
+/**
+ * DIRECT opinion of `agentDid` from `meCtx`'s verified log.
+ * @param {{registry:object, storeOpts:object}} meCtx
+ * @param {string} agentDid
+ * @param {string|undefined} configHash bucket; undefined = all buckets; else match (config_hash ?? 'unknown')
+ * @param {number} [now] epoch ms for decay
+ * @param {object[]} [recs] pre-scanned verified records (perf: lets wcons avoid O(N) re-scans)
+ * @returns {object} a Subjective Logic opinion (carries r,s)
+ */
+function direct(meCtx, agentDid, configHash, now, recs) {
+  const all = recs || verifiedRecords(meCtx.registry, meCtx.storeOpts);
+  const reg = meCtx.registry;
+  const inBucket = (r) => configHash === undefined || (r.config_hash ?? 'unknown') === configHash;
+
+  // agent's CLAIMs in this bucket, DEDUPED by idempotency_key (the plan's counting unit).
+  const claimsByKey = new Map();
+  for (const r of all) {
+    if (r.type === 'CLAIM' && r.src_persona_did === agentDid && inBucket(r)) {
+      const k = r.idempotency_key || r.record_id;
+      if (!claimsByKey.has(k)) claimsByKey.set(k, r);
+    }
+  }
+  const agentClaims = [...claimsByKey.values()];
+  const agentClaimIds = new Set(agentClaims.map((c) => c.record_id));
+
+  // VALID contests: reference a REAL claim of the agent (F3 — a genuine caught defection).
+  const validContests = all.filter((r) =>
+    r.type === 'CONTEST' && r.payload && r.payload.target_persona === agentDid &&
+    agentClaimIds.has(r.payload.target_claim_id));
+  const contestedClaimIds = new Set(validContests.map((c) => c.payload.target_claim_id));
+
+  // positive evidence (decay-weighted, uncontested)
+  let rEv = 0;
+  for (const c of agentClaims) if (!contestedClaimIds.has(c.record_id)) rEv += decayWeight(c, now);
+
+  // a persona has EARNED STANDING if it authored >=1 CLAIM in me's log (it has interacted — not a
+  // zero-history Sybil). Non-recursive (one level).
+  const personasWithStanding = new Set(all.filter((r) => r.type === 'CLAIM').map((r) => r.src_persona_did));
+
+  // negative evidence: keyed by HUMAN (rootOf), decay-weighted; crater only with >=2 earned-standing humans.
+  const perHumanDecay = new Map(); // human -> max decayed contest weight
+  const corroboratingHumans = new Set();
+  for (const c of validContests) {
+    const human = rootOf(reg, c.src_persona_did) || c.src_persona_did;
+    perHumanDecay.set(human, Math.max(perHumanDecay.get(human) || 0, decayWeight(c, now)));
+    if (personasWithStanding.has(c.src_persona_did)) corroboratingHumans.add(human);
+  }
+  let sEv = 0;
+  for (const w of perHumanDecay.values()) sEv += w; // distinct humans inform
+  if (corroboratingHumans.size >= 2) sEv *= CRATER_MULTIPLIER; // disjoint EARNED corroboration craters
+
+  return opinion(rEv, sEv);
+}
+
+module.exports = { direct, decayWeight };

@@ -4,12 +4,13 @@ A protocol blueprint for a network of authenticated AI agents rooted in scarce h
 designed to scale the Power Loom `kernel → runtime → evolution` substrate from a single node into
 a mutually-untrusting multi-agent network.
 
-## Status: **v0 BUILT (2026-06-21)** — P0-minimal + P1 (the ATMS thesis core); 65 tests green incl. the D1–D7 definition-of-done
+## Status: **v0 + P2 BUILT (2026-06-21)** — P0-minimal + P1 (ATMS) + P2 (the trust engine, SHADOW); 83 tests green
 
 | Document | What |
 |---|---|
-| **[v0/](v0/)** | **the first buildable node — surgical transfer + the ATMS core; `v0/README.md` + the D1–D7 acceptance gate** ← the build |
-| [plans/00-v0-build-plan.md](plans/00-v0-build-plan.md) | the v0 build plan (VERIFY board + post-build VALIDATE folded; status BUILT) |
+| **[v0/](v0/)** | **the buildable node — surgical transfer + the ATMS core + the P2 trust engine; `v0/README.md` + the D1–D7 acceptance gate** ← the build |
+| [plans/00-v0-build-plan.md](plans/00-v0-build-plan.md) | the v0 build plan (VERIFY + post-build VALIDATE folded; status BUILT) |
+| [plans/01-p2-trust-engine-plan.md](plans/01-p2-trust-engine-plan.md) | the P2 trust-engine plan (VERIFY + post-build VALIDATE folded; status BUILT, SHADOW) |
 | **[PACT-spec-v1.1.md](PACT-spec-v1.1.md)** | **the *what to build* — BUILD-GRADE rev (supersedes v1.0); folds all 17 ratified decisions + the VALIDATE board** |
 | [PACT-spec.md](PACT-spec.md) | implementation spec v1.0 — **SUPERSEDED by v1.1** (kept as the historical record) |
 | [PACT-intent-and-landmines.md](PACT-intent-and-landmines.md) | the *why* — design intent, 12 landmines, 6 meta-principles |

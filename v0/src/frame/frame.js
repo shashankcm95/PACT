@@ -20,13 +20,16 @@ const { isKnownRoot, lookupPublicKey } = require('../identity/registry');
  * @returns {{ok:false,reason:string}|{ok:true,frame:object}}
  */
 function buildFrame(spec, signerOpts = {}) {
-  const { ver = 'pact/0', type = 'CLAIM', srcPersonaDid, parentHumanUid, seq, nonce, payload } = spec || {};
+  const { ver = 'pact/0', type = 'CLAIM', srcPersonaDid, parentHumanUid, seq, nonce, payload, configHash, t } = spec || {};
   const body = {
     ver, type,
     src_persona_did: srcPersonaDid,
     parent_human_uid: parentHumanUid,
     seq, nonce, payload,
   };
+  // P2 (ratified): optional, authenticated (in the content-address) frame fields.
+  if (configHash !== undefined) body.config_hash = configHash; // axis-3 config-stability (WEAK), §1.4
+  if (t !== undefined) body.t = t;                             // created_at (epoch ms) for decay, §5 dec.6
   const idempotency_key = deriveIdempotencyKey(body); // internally fail-soft -> null on a deep payload
   const withKey = idempotency_key ? { ...body, idempotency_key } : { ...body };
   let record_id;

@@ -31,13 +31,17 @@ scope, REPAIR anti-ping-pong, acyclicity) — a green run = v0 done.
 | `src/atms/` | §3 the thesis core — Premise/Claim graph, VALIDATE (acyclicity-first, fail-closed), FALSIFY/REPAIR (flag-not-collapse, authz both legs, escalating-evidence), contradiction (surface-not-suppress). |
 | `src/frame/` | §2 the authenticated frame + receipt rule (sig + content-integrity + root-valid, per-sender key). |
 | `src/identity/` | §1/§9 the U1 registry (registry-not-oracle), per-persona keypair, `effective_presence` (ratified, unwired). |
-| `test/` | 65 tests: per-module unit suites + the D1–D7 acceptance gate. |
+| `src/trust/` | **P2 (SHADOW)** §5 the trust engine — `read-gate` (INV-14 authenticated read), `opinion` (Subjective Logic), `direct` (earned, derived-on-read, config-bound, anti-grief), `consensus` (`wcons`, Sybil-~0, rootOf-keyed), `convert` (vertex-disjoint max-flow), `model` (the advisory TRUST blend). |
+| `src/independence/` | **P2** §4.5 the WEAK flag (the v1.1 spine's first consumer) — `mayGate` refuses high-stakes on WEAK; epistemic always WEAK (U2 open). |
+| `test/` | 83 tests: per-module unit suites + the D1–D7 acceptance gate. |
 
-## What v0 is NOT (deferred, by design)
+## What v0/P2 is NOT (deferred, by design)
 
 `[ADOPT]` table-stakes (DID/VC documents, A2A/JSON-RPC transport, Agent-Card discovery, RFC 6962
-Merkle inclusion/consistency proofs + STH gossip, RFC 8693/7523 delegation) → P0-complete. Trust
-(§5), grounding-scoring (§6), the independence WEAK-flag (§4.5), caps (§1.3 enforcement) → P2–P4.
+Merkle inclusion/consistency proofs + STH gossip, RFC 8693/7523 delegation) → P0-complete. P2's trust
+weights are all **SHADOW** (gate nothing). Grounding-scoring + REACH (§6), the stakes-threshold throne
++ the per-path unforgeable bar (§5.1), caps enforcement (§1.3) → P3–P4. The U2 substrate-diversity
+estimator (the only thing that lifts the permanent WEAK flag) → P5.
 
 ## Carried residue (loud, by design — spec §10.5)
 

@@ -12,12 +12,14 @@
       "description": "content-address = sha256(canonical(record minus {record_id, sig}))"
     },
     "ver": { "type": "string", "description": "PACT protocol version, e.g. 'pact/0'" },
-    "type": { "type": "string", "enum": ["CLAIM"], "description": "frame type; v0 ships CLAIM only" },
+    "type": { "type": "string", "enum": ["CLAIM", "CONTEST", "VOUCH"], "description": "frame type; v0=CLAIM, P2 adds CONTEST (caught defection) + VOUCH" },
     "src_persona_did": { "type": "string", "description": "the signing persona (spec §1)" },
     "parent_human_uid": { "type": "string", "description": "the scarce-human root anchor (spec §1)" },
     "seq": { "type": "integer", "minimum": 0, "description": "per-session sequence number" },
     "nonce": { "type": "string", "description": "anti-replay nonce" },
     "payload": { "description": "the Claim (spec §3); any JSON shape" },
+    "config_hash": { "type": "string", "description": "P2 (§1.4): self-asserted config-stability signal (WEAK axis-3); DIRECT keys on (persona, config_hash)" },
+    "t": { "type": "integer", "minimum": 0, "description": "P2 (§5 dec.6): created_at epoch ms, for exponential decay" },
     "idempotency_key": {
       "type": "string",
       "pattern": "^[a-f0-9]{64}$",
