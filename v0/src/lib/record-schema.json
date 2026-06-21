@@ -12,12 +12,22 @@
       "description": "content-address = sha256(canonical(record minus {record_id, sig}))"
     },
     "ver": { "type": "string", "description": "PACT protocol version, e.g. 'pact/0'" },
-    "type": { "type": "string", "enum": ["CLAIM", "CONTEST", "VOUCH"], "description": "frame type; v0=CLAIM, P2 adds CONTEST (caught defection) + VOUCH" },
+    "type": { "type": "string", "enum": ["CLAIM", "CONTEST", "VOUCH", "PREMISE", "CONFIRM", "ACCEPT"], "description": "frame type; v0=CLAIM, P2 adds CONTEST (caught defection) + VOUCH; P3 (spec §6) adds PREMISE (a human-owned assumption, creator-bound-on-read), CONFIRM (a cross-verify confirmation of a premise) + ACCEPT (a receiver-local REACH accept of a claim)" },
     "src_persona_did": { "type": "string", "description": "the signing persona (spec §1)" },
     "parent_human_uid": { "type": "string", "description": "the scarce-human root anchor (spec §1)" },
     "seq": { "type": "integer", "minimum": 0, "description": "per-session sequence number" },
     "nonce": { "type": "string", "description": "anti-replay nonce" },
-    "payload": { "description": "the Claim (spec §3); any JSON shape" },
+    "payload": {
+      "description": "the Claim (spec §3); any JSON shape. P3 (spec §6) payload conventions, all enforced ON READ (the store is not a sandbox): PREMISE => {statement, scope, creator} (the self-asserted human creator counts ONLY when rootOf(src_persona_did)===creator); CONFIRM/CONTEST of a premise => {target_premise_id}; ACCEPT => {target_claim_id}.",
+      "type": "object",
+      "properties": {
+        "target_premise_id": { "type": "string", "description": "P3: the ATMS content-address (sha256 of the {statement,scope,creator} premise body via makePremise().id — NOT the frame record_id) that a CONFIRM/CONTEST targets (premise-level cross-verify / contest)" },
+        "target_claim_id": { "type": "string", "description": "the claim a CONTEST (P2) or an ACCEPT (P3 REACH) targets" },
+        "statement": { "type": "string", "description": "P3 PREMISE: the assumption text" },
+        "scope": { "type": "object", "description": "P3 PREMISE: the domain-of-validity scope (spec §3.4)" },
+        "creator": { "type": "string", "description": "P3 PREMISE: the SELF-ASSERTED human_uid creator; counts only when rootOf(src_persona_did)===creator (creator-bound-on-read)" }
+      }
+    },
     "config_hash": { "type": "string", "description": "P2 (§1.4): self-asserted config-stability signal (WEAK axis-3); DIRECT keys on (persona, config_hash)" },
     "t": { "type": "integer", "minimum": 0, "description": "P2 (§5 dec.6): created_at epoch ms, for exponential decay" },
     "idempotency_key": {

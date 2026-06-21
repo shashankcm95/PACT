@@ -26,6 +26,7 @@
 const { verifiedRecords } = require('./read-gate');
 const { opinion } = require('./opinion');
 const { rootOf } = require('../identity/registry');
+const { earnedStandingPersonas } = require('./standing');
 const { CRATER_MULTIPLIER, DECAY_HALF_LIFE_MS } = require('./params');
 
 // Exponential time-decay weight. A record without `t` is full-weight (within-session fallback,
@@ -74,7 +75,9 @@ function direct(meCtx, agentDid, configHash, now, recs) {
 
   // a persona has EARNED STANDING if it authored >=1 CLAIM in me's log (it has interacted — not a
   // zero-history Sybil). Non-recursive (one level).
-  const personasWithStanding = new Set(all.filter((r) => r.type === 'CLAIM').map((r) => r.src_persona_did));
+  // (extracted to trust/standing.js (P3): DIRECT, cross-verify + creator-standing share ONE definition;
+  //  behavior is identical — the 83 P2 tests prove no regression.)
+  const personasWithStanding = earnedStandingPersonas(all);
 
   // negative evidence: keyed by HUMAN (rootOf), decay-weighted; crater only with >=2 earned-standing humans.
   const perHumanDecay = new Map(); // human -> max decayed contest weight
