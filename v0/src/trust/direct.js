@@ -27,16 +27,11 @@ const { verifiedRecords } = require('./read-gate');
 const { opinion } = require('./opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('./standing');
-const { CRATER_MULTIPLIER, DECAY_HALF_LIFE_MS } = require('./params');
+const { decayWeight } = require('./decay');
+const { CRATER_MULTIPLIER } = require('./params');
 
-// Exponential time-decay weight. A record without `t` is full-weight (within-session fallback,
-// decision #6). A future `t` clamps to full weight (dt floored at 0) — conservative for P2 (advisory);
-// when decay ever GATES, reject t > now + skew.
-function decayWeight(rec, now) {
-  if (typeof rec.t !== 'number' || typeof now !== 'number') return 1;
-  const dt = Math.max(0, now - rec.t);
-  return Math.pow(0.5, dt / DECAY_HALF_LIFE_MS);
-}
+// decayWeight now lives in ./decay (a pure leaf) — re-exported below for backward compat (trust.test.js
+// imports it from here). The local definition was extracted at the coherence checkpoint.
 
 /**
  * DIRECT opinion of `agentDid` from `meCtx`'s verified log.

@@ -20,7 +20,7 @@ const { verifiedRecords } = require('../trust/read-gate');
 const { opinion } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
-const { decayWeight } = require('../trust/direct');
+const { decayWeight } = require('../trust/decay');
 const { crossVerify, findBoundPremise } = require('./cross-verify');
 
 /**
@@ -56,7 +56,7 @@ function contestEvidence(recs, reg, premiseId, now) {
 function premiseScore(premiseId, meCtx, now) {
   const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts);
   const reg = meCtx.registry;
-  const r = crossVerify(premiseId, meCtx, now).r; // confirmation survival (the r-leg)
+  const r = crossVerify(premiseId, meCtx, now, recs).r; // pass the scan (no O(N+1) re-read) — the r-leg
   const s = contestEvidence(recs, reg, premiseId, now);
   return { ...opinion(r, s), advisory: true }; // SHADOW marker — uniform with the other score-objects
 }

@@ -6,6 +6,8 @@ a mutually-untrusting multi-agent network.
 
 ## Status: **v0 + P2 + P3 BUILT (2026-06-21)** — P0-minimal + P1 (ATMS) + P2 (the trust engine) + P3 (the grounding engine + REACH), all SHADOW; 112 tests green
 
+> **All weights are SHADOW (gate nothing) because two residuals remain open:** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but a funded attacker with N distinct *human* roots is the open frontier) and **integrity ≠ provenance** (a record verifying as self-consistent does not prove the legitimate producer minted it — a same-uid co-forge still inflates an advisory weight). Closing the latter (an **authenticated minter** — signed/kernel-owned writer edges) is the next step, and the precondition for any weight ever leaving SHADOW. v0+P2+P3 passed a 3-lens coherence checkpoint ([plans/03](plans/03-coherence-checkpoint.md)).
+
 | Document | What |
 |---|---|
 | **[v0/](v0/)** | **the buildable node — surgical transfer + the ATMS core + the P2 trust engine + the P3 grounding engine; `v0/README.md` + the D1–D7 acceptance gate** ← the build |

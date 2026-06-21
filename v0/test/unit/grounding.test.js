@@ -238,6 +238,22 @@ test('cross-verify: an OLD confirmation DECAYS (reuse DECAY_HALF_LIFE_MS) but st
   w.cleanup();
 });
 
+test('cross-verify: a pre-scanned recs arg equals self-scanning (the O(N+1) fix is behavior-neutral)', () => {
+  const { verifiedRecords } = require('../../src/trust/read-gate');
+  const w = freshWorld();
+  w.add('did:key:zHuman'); w.add('did:key:zC');
+  w.emit('did:key:zC', 'CLAIM', { claim: { content: 'std' } });
+  const prem = emitPremise(w, 'did:key:zHuman', 'premise');
+  w.emit('did:key:zC', 'CONFIRM', { target_premise_id: prem.id });
+  const recs = verifiedRecords(w.registry, w.meCtx.storeOpts); // the caller-threaded scan (no re-read)
+  const selfScan = crossVerify(prem.id, w.meCtx);              // self-scans internally
+  const threaded = crossVerify(prem.id, w.meCtx, undefined, recs);
+  assert.equal(threaded.strength, selfScan.strength, 'threaded-recs path == self-scan path (identical result)');
+  assert.equal(threaded.n_confirmers, selfScan.n_confirmers);
+  assert.equal(threaded.r, selfScan.r);
+  w.cleanup();
+});
+
 // ============================ premise-score (SL opinion) ============================
 
 test('premise-score: rises on a distinct-human confirm; CONTESTED lowers but does not erase', () => {

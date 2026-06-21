@@ -1,7 +1,7 @@
 ---
 lifecycle: persistent
 phase: P3
-status: BUILT (VERIFY + post-build VALIDATE folded; D8 ratified; 112 tests green; SHADOW; UNCOMMITTED)
+status: BUILT + COMMITTED 23249c2 (VERIFY + post-build VALIDATE folded; D8 ratified; 112 tests green; SHADOW)
 created: 2026-06-21
 revised: 2026-06-21 (3-lens VERIFY §9 + 3-lens post-build VALIDATE §10 folded; D8 = defer both seams to P4, USER-ratified)
 supersedes-seams-parked-by: plans/01-p2-trust-engine-plan.md §10

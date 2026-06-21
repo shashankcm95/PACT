@@ -14,6 +14,7 @@
 'use strict';
 
 const { getNode } = require('../atms/claim');
+const { verifiedRecords } = require('../trust/read-gate');
 const { crossVerify } = require('./cross-verify');
 
 /**
@@ -49,9 +50,10 @@ function collectRootPremises(graph, startId) {
 function verificationStrength(claimId, graph, meCtx, now) {
   const roots = collectRootPremises(graph, claimId);
   if (roots.length === 0) return 0; // MIN of an EMPTY set = 0, NEVER +Infinity (the catastrophe)
+  const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts); // load ONCE, pass to each root (no O(N+1))
   let min = Infinity;
   for (const premiseId of roots) {
-    const strength = crossVerify(premiseId, meCtx, now).strength;
+    const strength = crossVerify(premiseId, meCtx, now, recs).strength;
     if (strength < min) min = strength;
   }
   return Number.isFinite(min) ? min : 0; // belt-and-suspenders: never leak +Infinity

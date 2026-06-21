@@ -24,7 +24,7 @@ const { verifiedRecords } = require('../trust/read-gate');
 const { opinion, expectation } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
-const { decayWeight } = require('../trust/direct');
+const { decayWeight } = require('../trust/decay');
 const { CRATER_MULTIPLIER } = require('../trust/params');
 const { crossVerify, premiseIdOf } = require('./cross-verify');
 
@@ -84,8 +84,9 @@ function creatorStanding(humanUid, meCtx, now) {
     if (!premiseId) continue; // malformed premise body — skip (fail-soft)
     nPremises += 1;
 
-    // r-leg: the premise's confirmation survival (decay-weighted distinct humans).
-    rAgg += crossVerify(premiseId, meCtx, now).r;
+    // r-leg: the premise's confirmation survival (decay-weighted distinct humans). Pass the outer scan
+    // so this is ONE verifiedRecords read for the whole human, not N+1 (the coherence-checkpoint fix).
+    rAgg += crossVerify(premiseId, meCtx, now, recs).r;
 
     // s-leg: contests (decay-weighted distinct EARNED humans), with the asymmetric crater on >=2 earned roots.
     const s = contestSurvival(recs, reg, premiseId, now, earned);

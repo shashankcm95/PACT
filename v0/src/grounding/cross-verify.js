@@ -25,7 +25,7 @@ const { opinion, expectation } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
 const { independenceLabel } = require('../independence/weak-flag');
-const { decayWeight } = require('../trust/direct');
+const { decayWeight } = require('../trust/decay');
 const { makePremise } = require('../atms/claim');
 
 // A PREMISE record's canonical premise id = the ATMS content-address of its {statement, scope, creator}
@@ -67,24 +67,27 @@ function findBoundPremise(recs, reg, premiseId) {
 
 /**
  * crossVerify — the distinct earned-standing, rootOf-keyed, non-self confirmation strength of a premise.
+ * @param {string} premiseId  the ATMS content-address premise id
  * @param {{registry:object, storeOpts:object}} meCtx
- * @param {string} premiseId  the PREMISE record_id
  * @param {number} [now] epoch ms for decay
- * @returns {{strength:number, n_confirmers:number, label:object, advisory:true}}
+ * @param {object[]} [recs] pre-scanned verifiedRecords output — pass it to avoid an O(N+1) re-scan when a
+ *   caller (creatorStanding / verificationStrength / premiseScore) already loaded the verified log. The
+ *   contract mirrors direct(): `recs` MUST be verifiedRecords output (INV-14); omit it to self-scan.
+ * @returns {{strength:number, r:number, n_confirmers:number, label:object, advisory:true}}
  */
-function crossVerify(premiseId, meCtx, now) {
-  const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts);
+function crossVerify(premiseId, meCtx, now, recs) {
+  const all = recs || verifiedRecords(meCtx.registry, meCtx.storeOpts);
   const reg = meCtx.registry;
   const FLOOR = { strength: 0, r: 0, n_confirmers: 0, label: independenceLabel({ topological: 0 }), advisory: true };
 
-  const premise = findBoundPremise(recs, reg, premiseId);
+  const premise = findBoundPremise(all, reg, premiseId);
   if (!premise) return FLOOR; // unverified creator-claim -> floor 0 (the premise scores for no one)
   const creator = premise.payload.creator;
-  const earned = earnedStandingPersonas(recs);
+  const earned = earnedStandingPersonas(all);
 
   // confirmations: real-target + earned + non-self, keyed by HUMAN (one human = one confirmation).
   const perHumanDecay = new Map();
-  for (const r of recs) {
+  for (const r of all) {
     if (r.type !== 'CONFIRM' || !r.payload) continue;
     if (r.payload.target_premise_id !== premiseId) continue;       // F3-symmetric: must hit the real premise
     if (!earned.has(r.src_persona_did)) continue;                  // earned-standing gate

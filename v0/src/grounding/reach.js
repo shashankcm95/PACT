@@ -15,6 +15,7 @@
 'use strict';
 
 const { rootOf } = require('../identity/registry');
+const { getNode } = require('../atms/claim');
 const { verifiedRecords } = require('../trust/read-gate');
 const { verificationStrength } = require('./verification-strength');
 
@@ -56,7 +57,7 @@ function reach(claimId, claimCtx = {}) {
   // caller supplies the claim graph; otherwise the flag is 'unknown' (never a default-pass).
   let threshold_flag = 'unknown';
   if (claimCtx.graph && meCtx.registry) {
-    const claim = claimCtx.graph.nodes ? claimCtx.graph.nodes[claimId] : null;
+    const claim = getNode(claimCtx.graph, claimId); // canonical access (not graph.nodes[] internals)
     const claimed = groundingClaim(claim);
     const actual = verificationStrength(claimId, claimCtx.graph, meCtx, claimCtx.now);
     threshold_flag = claimed > actual ? 'provisional' : 'grounded';

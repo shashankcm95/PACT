@@ -43,9 +43,14 @@ function mayGate(label, { highStakes } = {}) {
  * Guard against the live correctness cliff: NEVER read AND(axis1, axis2, axis3) as epistemic
  * independence (axis 4). Returns the honest epistemic verdict, which is always WEAK in P2 regardless
  * of how strong the scarcity/topology/stability axes look.
+ *
+ * *** P5 LIFT-POINT (the single most load-bearing line of the forward contract): this is the SOLE
+ * function the U2 substrate-diversity estimator replaces. Everything downstream (mayGate, every
+ * SHADOW weight, the eventual convert.actionable flip) reads through here — so the WEAK flag lifts
+ * here and ONLY here. Do not scatter epistemic judgments elsewhere. ***
  */
 function epistemicIndependence() {
-  return 'WEAK'; // axis 4 is OPEN; the cheap axes can never substitute for it
+  return 'WEAK'; // axis 4 is OPEN; the cheap axes can never substitute for it (until P5 replaces THIS fn)
 }
 
 module.exports = { independenceLabel, mayGate, epistemicIndependence };
