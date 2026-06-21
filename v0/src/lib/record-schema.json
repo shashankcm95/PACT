@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PACT v0 frame/Claim record",
+  "description": "Re-authored from kernel transaction-record.schema.json (TRANSFER-PROVENANCE.md). required[] is the ONLY part the lenient runtime validator (record.js validateRecord) enforces; additionalProperties + patterns are the strict/documentary schema. A v0 record is a PACT frame (spec §2) carrying a Claim payload (spec §3).",
+  "type": "object",
+  "required": ["record_id", "ver", "type", "src_persona_did", "parent_human_uid", "seq", "nonce"],
+  "additionalProperties": false,
+  "properties": {
+    "record_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "content-address = sha256(canonical(record minus {record_id, sig}))"
+    },
+    "ver": { "type": "string", "description": "PACT protocol version, e.g. 'pact/0'" },
+    "type": { "type": "string", "enum": ["CLAIM"], "description": "frame type; v0 ships CLAIM only" },
+    "src_persona_did": { "type": "string", "description": "the signing persona (spec §1)" },
+    "parent_human_uid": { "type": "string", "description": "the scarce-human root anchor (spec §1)" },
+    "seq": { "type": "integer", "minimum": 0, "description": "per-session sequence number" },
+    "nonce": { "type": "string", "description": "anti-replay nonce" },
+    "payload": { "description": "the Claim (spec §3); any JSON shape" },
+    "idempotency_key": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "optional INV-22 key, re-derivable from the body (record.js deriveIdempotencyKey)"
+    },
+    "sig": {
+      "type": "string",
+      "description": "optional ed25519 signature over record_id (base64); verified by the frame layer (spec §2)"
+    }
+  }
+}
