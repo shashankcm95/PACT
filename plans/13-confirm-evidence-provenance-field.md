@@ -144,6 +144,9 @@ it. This is a material scope change from the menu's "touches the actual U2 axis,
 USER (thin-carrier-reservation vs defer-and-do-the-world-anchored-signal-first vs pivot to U1-stake) rather
 than power-through.
 
-## §9 VALIDATE board (post-build) — TO BE RECORDED
+## §9 VALIDATE board (post-build) — N/A (wave DEFERRED at VERIFY)
 
-## §9 VALIDATE board (post-build) — TO BE RECORDED
+No build, no VALIDATE: the VERIFY board (§8) recalibrated this wave — the disjointness count was theater
+(dropped) and the carrier field is contingent on a world-anchored provenance source that does not yet exist
+(the open U2 frontier — see `research/24`). The carrier is DEFERRED pending a real source (`docs/FORKS.md`
+FORK-3). Nothing was built.
