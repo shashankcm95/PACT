@@ -90,7 +90,10 @@ test('broker gate -- authorized caller signs (SUDO_UID in allowlist) -> sig on s
   const r = runBroker({ recordId: rid, keyFile, sudoUid: '501', allowlist: '501,600' });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(verifyRecordSig(rid, r.stdout.trim(), { publicKeyPem: pair.publicKeyPem }), 'sig must verify');
-  assert.equal(r.stderr.trim(), '', 'no DISABLED notice when the allowlist IS set');
+  // the allowlist IS set -> no caller-auth (R2-WHO) DISABLED notice. (require-frame is off in this legacy
+  // spawn, so the R2-WHAT loud-when-off notice DOES appear -- asserted in request-auth's own integration set.)
+  assert.doesNotMatch(r.stderr, /caller-auth DISABLED/, 'no R2-WHO DISABLED notice when the allowlist IS set');
+  assert.doesNotMatch(r.stderr, /PRIVATE KEY|BEGIN/, 'never any key material on stderr');
 });
 test('broker gate -- unauthorized caller -> FIXED reject, empty stdout, exit 1', () => {
   const { keyFile } = freshKey();

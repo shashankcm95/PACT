@@ -11,6 +11,14 @@ const { computeRecordId, deriveIdempotencyKey, validateRecord } = require('../li
 const { signRecordId, verifyRecordSig } = require('../lib/edge-attestation');
 const { isKnownRoot, lookupPublicKey } = require('../identity/registry');
 
+// Return a NEW object with undefined-valued keys removed (immutable; never mutates the input). A no-op when
+// no value is undefined. See the §1.4 note at the call site for why undefined keys must not enter the hash.
+function stripUndefinedKeys(obj) {
+  const out = {};
+  for (const k of Object.keys(obj)) if (obj[k] !== undefined) out[k] = obj[k];
+  return out;
+}
+
 /**
  * Assemble + sign a frame. record_id is the content-address (excludes record_id + sig); sig is
  * ed25519 over record_id via the signer seam (signerOpts: {privateKeyPem} or {signer} — Option B).
@@ -31,11 +39,18 @@ function buildFrame(spec, signerOpts = {}) {
   if (configHash !== undefined) body.config_hash = configHash; // axis-3 config-stability (WEAK), §1.4
   if (t !== undefined) body.t = t;                             // created_at (epoch ms) for decay, §5 dec.6
   const idempotency_key = deriveIdempotencyKey(body); // internally fail-soft -> null on a deep payload
-  const withKey = idempotency_key ? { ...body, idempotency_key } : { ...body };
+  // Strip undefined-valued top-level keys (the only one is `payload` when a spec omits it -- config_hash/t
+  // are already conditional). canonicalJsonSerialize emits `undefined`, `null`, and an omitted key as THREE
+  // distinct hashes, and only `undefined` does NOT survive a JSON round-trip; normalizing it out makes the
+  // host->wire->broker recompute an identity (R2-WHAT, plans/11 §1.4) WITHOUT changing any frame whose
+  // payload is defined (a no-op when nothing is undefined). Stays broker-agnostic.
+  const withKey = stripUndefinedKeys(idempotency_key ? { ...body, idempotency_key } : { ...body });
   let record_id;
   try { record_id = computeRecordId(withKey); } // a pathologically deep payload trips the canonical
   catch { return { ok: false, reason: 'uncomputable-payload' }; } // bound — fail-closed, symmetric w/ receiveFrame
-  const sig = signRecordId(record_id, signerOpts);
+  // pass withKey (the EXACT preimage that hashed to record_id) as the optional body; an in-process signer
+  // ignores it, a custody-boundary broker presents it for per-request recompute-binding.
+  const sig = signRecordId(record_id, signerOpts, withKey);
   if (!sig) return { ok: false, reason: 'sign-failed (no signer / non-ed25519 key / bad output)' };
   return { ok: true, frame: { ...withKey, record_id, sig } };
 }

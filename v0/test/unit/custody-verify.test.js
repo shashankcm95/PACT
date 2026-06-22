@@ -228,6 +228,18 @@ test('verifyCrossUidCustody — full pipe with a REAL broker signer, same-uid: r
   assert.ok(!('custodyReal' in r));
 });
 
+test('gatherCustodyFacts — C3 liveness PASSES against a REQUIRE-FRAME broker (deployed verifier keeps working, plans/11 §1.8)', () => {
+  const { keyFile, pair } = freshKey(0o600);
+  const registry = reg.createRegistry();
+  reg.registerPersona(registry, { personaDid: 'did:key:zBroker', humanUid: 'human:h', publicKeyPem: pair.publicKeyPem });
+  // the broker child runs in require-frame mode (persona in its allowlisted env). A bare-hex probe would be
+  // REFUSED; C3 presents a P-frame body (§1.8), so the deployed verifier still passes once require-frame is on.
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER_SIGN], keyFile, env: { PACT_BROKER_PERSONA_DID: 'did:key:zBroker' } });
+  const facts = V.gatherCustodyFacts({ keyFile, signer, registry, personaDid: 'did:key:zBroker' });
+  assert.equal(facts.sign.signed, true, 'C3 presents a P-frame -> the require-frame broker signs it');
+  assert.equal(facts.sign.personaMatches, true, 'the sig verifies under the broker persona key');
+});
+
 test('crossUidSudoArgs REJECTS a NUL / control-char in the wrapperPath (fail at validation, not spawn)', () => {
   assert.throws(() => L.crossUidSudoArgs({ brokerUser: 'b', wrapperPath: '/usr/local/bin/w\x00-x' }), /NUL or control/);
   assert.throws(() => L.crossUidSudoArgs({ brokerUser: 'b', wrapperPath: '/usr/local/bin/w\n-x' }), /NUL or control/);

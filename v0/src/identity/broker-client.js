@@ -23,6 +23,7 @@
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { isHex64, isCanonicalBase64, verifyRecordSig } = require('../lib/edge-attestation');
+const { computeRecordId } = require('../lib/record');
 const { lookupPublicKey } = require('./registry');
 
 // opts.env is a caller-allowlisted EXTRAS channel — but it must not re-open the code-loading hole the env
@@ -57,13 +58,18 @@ function brokerSigner(opts = {}) {
       env[k] = opts.env[k];
     }
   }
-  return function sign(recordId) {
+  return function sign(recordId, body) {
     if (!isHex64(recordId)) return null; // never spawn on a bad id (and never let argv smuggle a flag)
+    // R2-WHAT (plans/11): when a preimage `body` is presented, write it on the child's stdin so a
+    // require-frame broker can recompute-bind. Absent a body, stdin stays 'ignore' (legacy, back-compat).
+    const spawnOpts = { timeout, maxBuffer, env, stdio: ['ignore', 'pipe', 'ignore'] };
+    if (body !== undefined && body !== null) {
+      spawnOpts.input = typeof body === 'string' ? body : JSON.stringify(body);
+      spawnOpts.stdio = ['pipe', 'pipe', 'ignore'];
+    }
     let out;
     try {
-      out = execFileSync(command, [...args, recordId], {
-        timeout, maxBuffer, env, stdio: ['ignore', 'pipe', 'ignore'],
-      });
+      out = execFileSync(command, [...args, recordId], spawnOpts);
     } catch { return null; } // spawn error / non-zero exit / timeout / maxBuffer overflow -> fail closed
     const sig = out.toString('utf8').trim();
     if (!isCanonicalBase64(sig)) return null;             // defense-in-depth (signRecordId re-gates too)
@@ -83,11 +89,15 @@ function assertBrokerPersona(signer, { registry, personaDid } = {}) {
   if (typeof signer !== 'function') throw new TypeError('assertBrokerPersona: signer must be a function');
   const pub = lookupPublicKey(registry, personaDid);
   if (!pub) throw new Error('assertBrokerPersona: no registered key for ' + personaDid);
-  // a RANDOM per-call 64-hex probe (NOT a fixed constant): a signer cannot special-case a value it cannot
-  // predict, so a probe-special-casing decoy can't false-PASS the smoke check (VALIDATE hacker F2).
-  const PROBE = crypto.randomBytes(32).toString('hex');
-  const sig = signer(PROBE);
-  if (!sig || !verifyRecordSig(PROBE, sig, { publicKeyPem: pub })) {
+  // Present a minimal well-formed P-frame body with a RANDOM nonce (NOT a fixed/predictable id): the random
+  // nonce makes the probe id unpredictable, so a probe-special-casing decoy can't false-PASS (VALIDATE
+  // hacker F2), AND declaring src_persona_did = personaDid lets the probe pass a require-frame broker's
+  // persona-bind (R2-WHAT, plans/11 §1.8). Works in BOTH modes (legacy ignores the body). This also
+  // STRENGTHENS the check: it confirms the broker signs a frame FOR personaDid, not just an arbitrary hex.
+  const probeBody = { src_persona_did: personaDid, nonce: crypto.randomBytes(16).toString('hex') };
+  const probeId = computeRecordId(probeBody);
+  const sig = signer(probeId, probeBody);
+  if (!sig || !verifyRecordSig(probeId, sig, { publicKeyPem: pub })) {
     throw new Error('assertBrokerPersona: signer does NOT sign as ' + personaDid + ' (broker key != registered key — mis-wired custody)');
   }
   return true;
