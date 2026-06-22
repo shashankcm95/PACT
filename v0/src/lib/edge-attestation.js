@@ -9,10 +9,12 @@
 //   * loadPublicKey takes opts.publicKeyPem ONLY — NO LOOM_EDGE_VERIFY_KEY env fallback.
 //     Each sender's verify key is resolved PER-SENDER from the U1 registry (a shared default
 //     would make verify accept-all-from-the-default-minter, collapsing the multi-root distinction).
-//   * the signing key still has an env-PEM default (LOOM_EDGE_SIGNING_KEY) — but that path is
-//     Option-A-equivalent (same-uid forgeable; INTEGRITY, not PROVENANCE). The v0 PROVENANCE gate
-//     (spec §10.5) requires an injected separate-uid opts.signer AND clears the env key so signing
-//     only succeeds via the injected path (proven OUT-OF-BAND — crypto cannot show separateness).
+//   * the signing key has NO ambient env default (the LOOM_EDGE_SIGNING_KEY fallback was REMOVED at
+//     P-minter — it was Option-A-equivalent: same-uid readable, INTEGRITY not PROVENANCE). Signing now
+//     REQUIRES an injected opts.signer (a custody boundary) OR an explicit opts.privateKeyPem (tests
+//     only; a grep gate keeps it out of non-test src/). Custody REQUIRES real out-of-band separation
+//     (separate uid / enclave / HSM) — a deployment property, proven OUT-OF-BAND; crypto cannot show
+//     separateness, and same-uid in-process custody stays OPEN by physics (see plans/04 §0/§7).
 //
 // PURE crypto: parameterized over (recordId, sig, key) only.
 
@@ -35,10 +37,11 @@ function isCanonicalBase64(s) {
   return buf.toString('base64') === s;
 }
 
-// Resolve an ed25519 PRIVATE KeyObject from opts/env, or null. PINS ed25519 (a non-ed25519
-// key is refused — algorithm-confusion defense). The env default is Option-A-equivalent.
+// Resolve an ed25519 PRIVATE KeyObject from opts.privateKeyPem ONLY (the ambient env default was
+// REMOVED at P-minter — no LOOM_EDGE_SIGNING_KEY fallback). PINS ed25519 (a non-ed25519 key is refused
+// — algorithm-confusion defense). opts.privateKeyPem is test-only (a grep gate keeps it out of src/).
 function loadPrivateKey(opts) {
-  const pem = (opts && opts.privateKeyPem) || process.env.LOOM_EDGE_SIGNING_KEY || null;
+  const pem = (opts && opts.privateKeyPem) || null;
   if (typeof pem !== 'string' || pem.length === 0) return null;
   let key;
   try { key = crypto.createPrivateKey(pem); } catch { return null; }
@@ -67,7 +70,9 @@ function generateEdgeKeypair() {
 // resolveSigner(opts) -> a signer fn (hex64) -> base64-sig | null, or null. THE Option-B
 // trust-domain SEAM: an injected opts.signer routes signing into a domain the host cannot read()
 // (a separate-uid broker), so the host process never holds the key. opts.signer takes precedence;
-// a non-function opts.signer is IGNORED (falls through to the PEM default — fail-safe).
+// a non-function opts.signer is IGNORED and falls through to an explicit opts.privateKeyPem (tests
+// only — there is NO ambient env default anymore), so absent both it returns null → sign fails CLOSED.
+// (The minter layer hard-throws on a non-fn signer so a custody-wiring bug surfaces loudly upstream.)
 function resolveSigner(opts = {}) {
   if (opts && typeof opts.signer === 'function') return opts.signer;
   const key = loadPrivateKey(opts);

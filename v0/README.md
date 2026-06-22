@@ -34,7 +34,8 @@ scope, REPAIR anti-ping-pong, acyclicity) — a green run = v0 done.
 | `src/trust/` | **P2 (SHADOW)** §5 the trust engine — `read-gate` (INV-14 authenticated read), `opinion` (Subjective Logic), `direct` (earned, derived-on-read, config-bound, anti-grief), `consensus` (`wcons`, Sybil-~0, rootOf-keyed), `convert` (vertex-disjoint max-flow), `model` (the advisory TRUST blend). |
 | `src/independence/` | **P2** §4.5 the WEAK flag (the v1.1 spine's first consumer) — `mayGate` refuses high-stakes on WEAK; epistemic always WEAK (U2 open). |
 | `src/grounding/` | **P3 (SHADOW)** §6 the grounding engine — `cross-verify` (distinct earned-standing, rootOf-keyed, non-self, creator-bound-on-read confirmations), `premise-score` (SL opinion), `creator-standing` (reliability-as-a-source, human-keyed, asymmetric crater), `verification-strength` (weakest-link MIN, empty→0), `reach` (emergent-descriptive rootOf-union + the INV-9 threshold flag). All derived-on-read, all advisory. |
-| `test/` | 112 tests: per-module unit suites + the D1–D7 acceptance gate. |
+| `src/identity/minter.js` | **P-minter** the authenticated-writer (custody) abstraction — structurally key-free (throws rather than touch raw key material), per-persona bound (no throne by config). The sole supported `src/` producer; signs ONLY via an injected custody `signer`. |
+| `test/` | 121 tests: per-module unit suites + the D1–D7 acceptance gate. |
 
 ## What v0/P2/P3 is NOT (deferred, by design)
 
@@ -43,12 +44,16 @@ Merkle inclusion/consistency proofs + STH gossip, RFC 8693/7523 delegation) → 
 weights + P3's grounding scores are all **SHADOW** (gate nothing). The stakes-threshold throne + the
 per-path unforgeable bar (§5.1, §1.5), caps enforcement (§1.3) → P4. The U2 substrate-diversity
 estimator (the only thing that lifts the permanent WEAK flag, and the precondition for `convert.actionable`
-ever flipping true) → P5. The authenticated minter that closes integrity≠provenance → v-next.
+ever flipping true) → P5.
 
 ## Carried residue (loud, by design — spec §10.5)
 
-The env-PEM signing default is **integrity-only** (a same-uid process can read the key and sign as
-itself). The DoD proves provenance OUT-OF-BAND (it clears the env key so signing only succeeds via an
-injected separate-uid signer; `receiveFrame` verifies per-sender against the *registered* key, so a
-foreign env key signing "as Alice" is rejected). Full provenance close (signed/kernel-writer custody)
-is post-v0. No weight gates any action in v0.
+**P-minter REQUIRES custody (it NARROWS; it does not CLOSE).** The ambient env-PEM signing default was
+REMOVED (plans/04): signing now requires an injected custody `signer` (or a test-only `privateKeyPem`, a
+grep gate keeps it out of `src/`), and the minter abstraction is structurally key-free. But provenance is
+established by **custody**, which crypto cannot prove in-process — a same-uid attacker re-exports any
+in-process key from memory. So integrity≠provenance is **closed only when the `signer` routes to a real
+out-of-band boundary** (separate OS uid / enclave / HSM — a *deployment* property, proven OUT-OF-BAND);
+in-process the minter only MODELS the boundary. **Still OPEN (loud):** same-uid in-process custody (by
+physics); **own-key forgery** (a same-uid holder of a registered key mints authentic records — U1's
+issuance-cost problem); read-side provenance is undecidable in-process. No weight gates any action.

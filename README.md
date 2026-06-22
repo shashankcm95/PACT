@@ -4,16 +4,18 @@ A protocol blueprint for a network of authenticated AI agents rooted in scarce h
 designed to scale the Power Loom `kernel → runtime → evolution` substrate from a single node into
 a mutually-untrusting multi-agent network.
 
-## Status: **v0 + P2 + P3 BUILT (2026-06-21)** — P0-minimal + P1 (ATMS) + P2 (the trust engine) + P3 (the grounding engine + REACH), all SHADOW; 112 tests green
+## Status: **v0 + P2 + P3 + P-minter BUILT (2026-06-21)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody hardening), all SHADOW; 121 tests green
 
-> **All weights are SHADOW (gate nothing) because two residuals remain open:** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but a funded attacker with N distinct *human* roots is the open frontier) and **integrity ≠ provenance** (a record verifying as self-consistent does not prove the legitimate producer minted it — a same-uid co-forge still inflates an advisory weight). Closing the latter (an **authenticated minter** — signed/kernel-owned writer edges) is the next step, and the precondition for any weight ever leaving SHADOW. v0+P2+P3 passed a 3-lens coherence checkpoint ([plans/03](plans/03-coherence-checkpoint.md)).
+> **All weights are SHADOW (gate nothing) because residuals remain open.** **P-minter** removed the ambient env-PEM signing default and named a structurally key-free custody writer — but it **NARROWS, it does not CLOSE** integrity≠provenance: provenance is a key-custody property crypto cannot prove in-process (a same-uid attacker re-exports any in-process key), so it closes only when the signer routes to a real out-of-band boundary (separate OS uid / enclave / HSM — a *deployment* property). **Still open (loud):** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but N distinct *human* roots is the frontier); **own-key forgery** (a same-uid holder of a registered key mints authentic records — U1's issuance-cost problem); same-uid in-process custody (by physics). v0+P2+P3 passed a 3-lens coherence checkpoint ([plans/03](plans/03-coherence-checkpoint.md)); P-minter passed a 3-lens VERIFY that reframed it close→narrow ([plans/04](plans/04-authenticated-minter-plan.md)).
 
 | Document | What |
 |---|---|
-| **[v0/](v0/)** | **the buildable node — surgical transfer + the ATMS core + the P2 trust engine + the P3 grounding engine; `v0/README.md` + the D1–D7 acceptance gate** ← the build |
+| **[v0/](v0/)** | **the buildable node — surgical transfer + the ATMS core + the P2 trust engine + the P3 grounding engine + the P-minter custody writer; `v0/README.md` + the D1–D7 acceptance gate** ← the build |
 | [plans/00-v0-build-plan.md](plans/00-v0-build-plan.md) | the v0 build plan (VERIFY + post-build VALIDATE folded; status BUILT) |
 | [plans/01-p2-trust-engine-plan.md](plans/01-p2-trust-engine-plan.md) | the P2 trust-engine plan (VERIFY + post-build VALIDATE folded; status BUILT, SHADOW) |
 | [plans/02-p3-grounding-reach-plan.md](plans/02-p3-grounding-reach-plan.md) | the P3 grounding-engine + REACH plan (VERIFY + post-build VALIDATE folded; status BUILT, SHADOW; both seams deferred to P4 per D8) |
+| [plans/03-coherence-checkpoint.md](plans/03-coherence-checkpoint.md) | the v0+P2+P3 coherence checkpoint (3-lens CLOSEABLE; folded hygiene + the N+1 fix) |
+| [plans/04-authenticated-minter-plan.md](plans/04-authenticated-minter-plan.md) | the P-minter plan (3-lens VERIFY reframed close→narrow; honest-narrow ratified; status BUILT, SHADOW) |
 | **[PACT-spec-v1.1.md](PACT-spec-v1.1.md)** | **the *what to build* — BUILD-GRADE rev (supersedes v1.0); folds all 17 ratified decisions + the VALIDATE board** |
 | [PACT-spec.md](PACT-spec.md) | implementation spec v1.0 — **SUPERSEDED by v1.1** (kept as the historical record) |
 | [PACT-intent-and-landmines.md](PACT-intent-and-landmines.md) | the *why* — design intent, 12 landmines, 6 meta-principles |

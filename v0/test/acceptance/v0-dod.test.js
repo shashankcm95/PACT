@@ -113,19 +113,23 @@ test('D2: distinct keys — cross-verification fails both ways', () => {
   assert.equal(verifyRecordSig(bobBuilt.frame.record_id, bobBuilt.frame.sig, { publicKeyPem: alice.publicKeyPem }), false);
 });
 
-// ---- D3: separate-uid provenance, proven OUT-OF-BAND ----
-test('D3: with the env signing key cleared, signing works ONLY via an injected signer (no fall-through)', () => {
+// ---- D3: custody REQUIRED — the ambient env key is IGNORED (P-minter). HONEST CEILING: this proves
+//      env-removal + that signing requires an injected custody signer; it does NOT and CANNOT prove
+//      provenance against a same-uid attacker (crypto can't distinguish a co-forge — plans/04 §0/§3.3). ----
+test('D3: the env signing key is IGNORED even when SET — signing works ONLY via an injected signer', () => {
   const prev = process.env.LOOM_EDGE_SIGNING_KEY;
-  delete process.env.LOOM_EDGE_SIGNING_KEY;
+  process.env.LOOM_EDGE_SIGNING_KEY = alice.privateKeyPem; // SET it: the strong statement is "ignored", not "cleared"
   try {
-    // no signer + no key material -> build FAILS (no silent integrity-only fall-through)
+    // an ambient env key must NOT enable signing -> build FAILS (no Option-A fall-through)
     const none = buildFrame({ srcPersonaDid: ALICE_DID, parentHumanUid: ALICE_HUMAN, seq: 1, nonce: 'n3a', payload }, {});
-    assert.equal(none.ok, false, 'must not sign without key material');
-    // an injected separate-uid signer (the host process never holds the key) STILL works
+    assert.equal(none.ok, false, 'an ambient env key must NOT enable signing (env path removed)');
+    // an injected custody signer (the host process need not hold the key) STILL works
     const signer = (rid) => crypto.sign(null, Buffer.from(rid, 'utf8'), crypto.createPrivateKey(alice.privateKeyPem)).toString('base64');
     const inj = buildFrame({ srcPersonaDid: ALICE_DID, parentHumanUid: ALICE_HUMAN, seq: 1, nonce: 'n3b', payload }, { signer });
     assert.ok(inj.ok, inj.reason);
     assert.ok(receiveFrame(inj.frame, { registry }).ok);
+    // HONEST: this is NOT a provenance proof — a same-uid process WITH the key (here, in-process) signs
+    // identically. Real custody is an out-of-band deployment property; in-process it only MODELS it.
   } finally {
     if (prev === undefined) delete process.env.LOOM_EDGE_SIGNING_KEY; else process.env.LOOM_EDGE_SIGNING_KEY = prev;
   }

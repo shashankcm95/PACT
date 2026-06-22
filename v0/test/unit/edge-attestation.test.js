@@ -65,12 +65,13 @@ test('Option-B seam: an injected signer is used (separate-uid vehicle)', () => {
   assert.equal(EA.verifyRecordSig(ID, sig, { publicKeyPem: alice.publicKeyPem }), true);
 });
 
-test('OUT-OF-BAND provenance: no env key + no opts key + no signer -> sign returns null (no silent fallthrough)', () => {
+test('ambient env default REMOVED: LOOM_EDGE_SIGNING_KEY is IGNORED even when SET (P-minter hardening)', () => {
   const prev = process.env.LOOM_EDGE_SIGNING_KEY;
-  delete process.env.LOOM_EDGE_SIGNING_KEY;
+  // SET the env key — the strong statement: it must be IGNORED (not merely "cleared so it can't fall through")
+  process.env.LOOM_EDGE_SIGNING_KEY = bob.privateKeyPem;
   try {
-    assert.equal(EA.signRecordId(ID, {}), null, 'with no key material, signing must FAIL, not silently succeed');
-    // but an injected signer STILL works with the env cleared (proves the host need not hold the key)
+    assert.equal(EA.signRecordId(ID, {}), null, 'an ambient env key must NOT enable signing — no env path remains');
+    // an injected signer STILL works (the host need not hold the key — the custody path)
     const signer = (rid) => crypto.sign(null, Buffer.from(rid, 'utf8'), crypto.createPrivateKey(bob.privateKeyPem)).toString('base64');
     const sig = EA.signRecordId(ID, { signer });
     assert.ok(sig && EA.verifyRecordSig(ID, sig, { publicKeyPem: bob.publicKeyPem }));
