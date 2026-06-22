@@ -19,7 +19,7 @@ const { computeRecordId } = require('../../src/lib/record');
 const { direct, decayWeight } = require('../../src/trust/direct');
 const { wcons } = require('../../src/trust/consensus');
 const { convert, disjointPaths } = require('../../src/trust/convert');
-const { independenceLabel, mayGate, epistemicIndependence } = require('../../src/independence/weak-flag');
+const { independenceLabel, mayGate, epistemicIndependence, configStability } = require('../../src/independence/weak-flag');
 const { trust } = require('../../src/trust/model');
 const { CRATER_MULTIPLIER } = require('../../src/trust/params');
 
@@ -289,6 +289,25 @@ test('P4 SEQUENCING GUARD: actionable=false + mayGate refuses high-stakes + epis
   assert.equal(mayGate(independenceLabel({ topological: 99 }), { highStakes: true }), false, 'high-stakes stays refused (symptom)');
   assert.equal(epistemicIndependence(), 'WEAK', 'the SOLE P5 lift-point — the CAUSE; U2 replaces THIS fn (weak-flag.js:52)');
   w.cleanup();
+});
+
+// ---- derivation guard (plans/12): independenceLabel DERIVES every open-axis verdict from its lift-point,
+// never a hardcoded literal. Proves WIRING via sentinel-INJECTION (a plain === would pass vacuously today —
+// both sides are literally 'WEAK'). RED against the pre-refactor hardcoded label; GREEN once the label reads
+// the injected verdict fns (default = the lift-points). This is the seam the U2 estimator swaps in at P5.
+test('DERIVATION GUARD: independenceLabel derives epistemic + config_stability from the lift-points (not literals)', () => {
+  // sentinel-injection proves the wiring (NOT coincident 'WEAK' values): a stubbed verdict fn must reach the label.
+  const injected = independenceLabel({ topological: 99 }, { verdictFn: () => 'STRONG-TEST', configFn: () => 'CONF-TEST' });
+  assert.equal(injected.epistemic, 'STRONG-TEST', 'epistemic DERIVES from the injected verdict fn (the U2 lift-point seam)');
+  assert.equal(injected.config_stability, 'CONF-TEST', 'config_stability DERIVES from the injected config fn (its sibling lift-point seam)');
+  // default args ⇒ the label IS the lift-point verdict (the single-source-of-truth identity, the P5-swap guard)
+  assert.equal(independenceLabel({ topological: 99 }).epistemic, epistemicIndependence(), 'default epistemic IS the lift-point verdict');
+  assert.equal(independenceLabel({ topological: 99 }).config_stability, configStability(), 'default config_stability IS the sibling lift-point verdict');
+  // a strong topological COUNT alone never flips overall (topological is a count, not a verdict — the L4 landmine).
+  // NOTE: this does NOT prove `overall` is DERIVED — both ternary branches are 'WEAK' today, so this passes
+  // against a hardcoded literal too. A future wave defining non-WEAK overall semantics MUST add a sentinel
+  // assertion exercising the non-WEAK branch, else it silently re-introduces a literal (VALIDATE code-rev MED).
+  assert.equal(independenceLabel({ topological: 999 }).overall, 'WEAK', 'a strong topological count alone does NOT flip overall');
 });
 
 // ---- no rank throne: vouches are receiver-scoped ----

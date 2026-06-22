@@ -1,0 +1,74 @@
+# PACT — Fork Ledger
+
+> A running record of decision **forks**: at each fork, the full option set, the chosen branch (with
+> rationale), and the **deferred-with-a-home** branches carrying enough detail to pick up cold. Purpose:
+> a future session can revisit a not-taken branch without re-deriving it.
+>
+> Distinct from **`PACT-NORTH-STAR.md` §5** (the terse "directions decided / rejected" canon — amend by
+> dated edit) and from **`_SESSION-RESUME.md`** (ephemeral continuity). This ledger keeps the FULL option
+> set + the why, so "we chose X over Y, Z" stays legible. Newest fork on top.
+>
+> Convention: each fork has a stable id (`FORK-NN`), a date, the options, the **CHOSEN** branch, the
+> **DEFERRED** branches (with a one-line revisit trigger), and any **REJECTED** branch (do not revive
+> without amending the north-star).
+
+---
+
+## FORK-2 (2026-06-22) — the foundational entry: which trust-hardening sub-direction first?
+
+Within the foundational pivot (FORK-1 chose it), which sub-direction does the first wave take? Per OQ-NS-6,
+NONE of these *harden* trust in-process — they differ in how foundational/meaty they are.
+
+- **CHOSEN → U2 lift-point seam-harden + estimator interface-contract RFC** (`plans/12`). Make
+  `independenceLabel` DERIVE the epistemic/overall verdict from the single `epistemicIndependence()`
+  lift-point (today it hardcodes literals that bypass it — a confirmed latent P5-swap drift) + author
+  `research/23` codifying the **world-anchored-only** estimator contract. Most actionable, zero OQ-NS-6 risk
+  (pure correctness + a design doc), squarely in the U2 (gate-enabler) direction. NARROWS/readies — does NOT
+  harden. *Status: PLAN authored, in the per-wave cadence.*
+- **DEFERRED → CONFIRM evidence-provenance field.** Add an evidence-provenance field to the CONFIRM record so
+  `cross-verify` can measure evidence DISJOINTNESS — the one direction that touches the actual open U2 axis,
+  riding the authenticated-minter signal. Heavier (a producer-schema change). Honest caveat: disjointness
+  only *hardens* if the provenance is world-anchored; a self-asserted provenance field only narrows.
+  **Revisit when:** the `research/23` RFC needs its first concrete estimator input, or when an
+  authenticated/world-anchored provenance source exists to make disjointness real.
+- **DEFERRED → U1 stake.** A non-transferable, slashable issuance stake on the identity seam (`research/21`) —
+  the one engineered mechanism that *leans* toward hardening (real economic cost). Different axis
+  (human-uniqueness, not independence); orthogonal to U2, does NOT close when U2 closes.
+  **Revisit when:** the U1 frontier (N-distinct-human-roots) becomes the priority, or a real
+  registry-not-oracle stake substrate is available.
+
+---
+
+## FORK-1 (2026-06-22) — next frontier after R2-WHAT (per-request auth) merged
+
+R2-WHAT narrowed the broker's WHAT axis. What does the next wave pursue?
+
+- **CHOSEN → the foundational trust-hardening pivot** (→ FORK-2). Per OQ-NS-6 / north-star §2.6, more
+  in-process SHADOW narrowing does NOT advance the apex; pivot toward the foundational frontiers
+  (U1 / U2 / world-anchored). *USER directive: "more foundational ... 1 and 2 recorded as deferred."*
+- **DEFERRED → multi-persona broker.** The build-ready extension present-the-frame enabled: a uid→persona
+  policy map + per-persona key selection, where the uid↔persona entitlement map finally becomes load-bearing.
+  Concrete SHADOW code, coherent with R2-WHAT. But it NARROWS the WHAT axis further — does not harden.
+  **Revisit when:** a real deployment needs one broker to serve several personas, or when narrowing the
+  WHAT axis further has concrete value.
+- **DEFERRED → capability token.** Human-root-signed grants ("uid U may obtain P's signature over frames
+  matching C") — the path toward the AUTHENTICATED minter the integrity≠provenance residual actually needs.
+  Heavier (minting authority + key + token format + revocation). Also narrowing, not hardening — but the
+  closest of the narrowing options to a real authenticated writer.
+  **Revisit when:** cross-party entitlement is needed, or when closing integrity≠provenance with a signed
+  (not store-re-hash) minter becomes the priority.
+
+---
+
+## REJECTED branches (do not revive without amending `PACT-NORTH-STAR.md` §5)
+
+Recorded so they are not re-proposed as if new:
+
+- **Transferable-token / NFT provenance** — laundering risk (a transferable token detaches provenance from
+  the scarce human root). Smart-contracts are admitted ONLY as the U1 issuance *stake* (non-transferable,
+  registry-not-oracle, chain-behind-the-seam).
+- **Global PageRank / EigenTrust ranking** — the "throne." PACT uses *personalized* propagation only
+  (personalized-yes / global-no); a global rank re-introduces a single trust authority.
+- **Standalone-persona product** — collapses to a plugin (researched → killed; see the persona-jardin verdict).
+- **Vendor-exfil cross-model review** — sends substrate deltas to a third-party vendor; the pre-egress
+  scrubber + governance opt-in is the path if ever revisited.

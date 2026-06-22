@@ -10,16 +10,27 @@
 
 /**
  * Build the independence label for a record/edge. `topological` is the computed value (a max-flow
- * disjoint-path count, §convert). Every other axis is WEAK in P2.
+ * disjoint-path COUNT, §convert) — a count, NEVER a verdict. The two OPEN axes (epistemic, config_stability)
+ * DERIVE from their lift-points, never hardcoded literals (plans/12): so when the U2 estimator replaces
+ * `epistemicIndependence()` at P5, the label lifts everywhere — the "lifts here and ONLY here" contract is
+ * true in code. The optional `{ verdictFn, configFn }` is the DI seam (defaults = the lift-points): a test
+ * injects a sentinel to PROVE derivation (a same-module call cannot be stubbed via `module.exports`); the
+ * future per-record estimator becomes the new default `verdictFn`. Production callers pass nothing.
  * @param {{topological:number}} axes
+ * @param {{verdictFn?:Function, configFn?:Function}} [seam]
  */
-function independenceLabel({ topological }) {
-  return {
-    topological: typeof topological === 'number' ? topological : 0, // computed (Menger max-flow)
-    epistemic: 'WEAK',         // U2 — no substrate-diversity estimator (P5)
-    config_stability: 'WEAK',  // self-asserted config_hash, no attestation (P5)
-    overall: 'WEAK',           // ANY WEAK axis ⇒ overall WEAK (always WEAK until P5)
-  };
+function independenceLabel({ topological }, { verdictFn = epistemicIndependence, configFn = configStability } = {}) {
+  const epistemic = verdictFn();          // the SOLE U2 lift-point (default) — derived, not a literal
+  const config_stability = configFn();    // the SOLE config-stability lift-point (default) — derived
+  const top = typeof topological === 'number' ? topological : 0; // computed Menger count (a count, not a verdict)
+  // overall = WEAK while ANY verdict axis is WEAK. The non-WEAK branch (<computed>) is INTENTIONALLY pinned
+  // 'WEAK' until a future wave defines non-WEAK overall semantics — so a strong topological COUNT can NEVER
+  // alone flip overall (the L4 authenticity!=independence landmine in structural form). DERIVED, never literal.
+  // NOTE: because BOTH branches are 'WEAK' today, the §3 derivation guard CANNOT prove overall is derived
+  // (only epistemic/config_stability are sentinel-proven). The future wave that defines the non-WEAK branch
+  // MUST add an injection assertion exercising it, or it silently re-introduces a literal (VALIDATE code-rev).
+  const overall = (epistemic === 'WEAK' || config_stability === 'WEAK') ? 'WEAK' : /* TODO(P5): <computed> */ 'WEAK';
+  return { topological: top, epistemic, config_stability, overall };
 }
 
 /**
@@ -56,4 +67,15 @@ function epistemicIndependence() {
   return 'WEAK'; // axis 4 is OPEN; the cheap axes can never substitute for it (until P5 replaces THIS fn)
 }
 
-module.exports = { independenceLabel, mayGate, epistemicIndependence };
+/**
+ * The config-stability axis lift-point (the SIBLING of `epistemicIndependence`). Config stability is also
+ * [OPEN] (a self-asserted config_hash, no attestation) → permanently WEAK until its own P5 lift. It is a
+ * SEPARATE lift-point so `independenceLabel` derives this axis too — leaving it a hardcoded literal would
+ * re-introduce the exact two-sources-of-truth drift this module exists to prevent (plans/12, VERIFY arch).
+ * Self-asserted provenance is NOT world-anchored (integrity != provenance, NS-2): the WEAK here is honest.
+ */
+function configStability() {
+  return 'WEAK'; // config attestation is OPEN; a self-asserted config_hash never substitutes (until P5 replaces THIS fn)
+}
+
+module.exports = { independenceLabel, mayGate, epistemicIndependence, configStability };
