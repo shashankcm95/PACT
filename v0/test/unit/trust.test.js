@@ -29,9 +29,15 @@ function test(name, fn) {
   catch (e) { fail++; console.error('  FAIL - ' + name + '\n         ' + (e && e.message)); }
 }
 
+// Drain every freshWorld() tmpdir on exit, so an assertion-failure mid-test can't leak temp state into later
+// tests (the per-test w.cleanup() only runs on the success path — mirrors broker.test.js). (CodeRabbit PR#2)
+const _allDirs = [];
+process.on('exit', () => { for (const d of _allDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* */ } } });
+
 // --- world setup: a registry + keypairs; ME's per-receiver store is the behavioral log ---
 function freshWorld() {
   const STATE = fs.mkdtempSync(path.join(os.tmpdir(), 'pact-p2-'));
+  _allDirs.push(STATE);
   const registry = reg.createRegistry();
   const personas = {};
   let seq = 0;
@@ -298,6 +304,7 @@ test('no rank throne: the SAME vouch yields DIFFERENT wcons for two receivers (n
   const meView = wcons(w.meCtx, w.ME, 'did:key:zTarget'); // weights Alice (earned) → ~0.2
   // a second receiver OTHER that earns Bob instead, over its OWN store
   const STATE2 = fs.mkdtempSync(path.join(os.tmpdir(), 'pact-p2b-'));
+  _allDirs.push(STATE2);
   const otherCtx = { registry: w.registry, storeOpts: { receiverId: 'did:key:zME', stateDir: STATE2 } };
   // reuse the emit machinery against STATE2 by direct append (own seq counter)
   let s2 = 0;
