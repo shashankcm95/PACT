@@ -1,0 +1,10 @@
+{
+  "name": "pact",
+  "version": "0.0.0",
+  "private": true,
+  "description": "PACT — premise-anchored coordination/trust substrate (v0). ZERO runtime dependencies (pure node); dev tooling is fetched ephemerally via npx, never committed.",
+  "scripts": {
+    "test": "node test/run.js",
+    "lint": "npx --yes eslint@9 ."
+  }
+}

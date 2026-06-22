@@ -4,7 +4,7 @@ A protocol blueprint for a network of authenticated AI agents rooted in scarce h
 designed to scale the Power Loom `kernel → runtime → evolution` substrate from a single node into
 a mutually-untrusting multi-agent network.
 
-## Status: **v0 + P2 + P3 + P-minter BUILT (2026-06-21)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody hardening), all SHADOW; 121 tests green
+## Status: **v0 + P2 + P3 + P-minter + P-broker BUILT + CI (2026-06-22)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody) + P-broker (out-of-band custody mechanism), all SHADOW; 148 tests green; a CI workflow (vacuous-pass-guarded test runner + eslint + a layering tripwire) is committed — it **will run** on push/PR (first GitHub Actions run pending)
 
 > **All weights are SHADOW (gate nothing) because residuals remain open.** **P-minter** removed the ambient env-PEM signing default and named a structurally key-free custody writer — but it **NARROWS, it does not CLOSE** integrity≠provenance: provenance is a key-custody property crypto cannot prove in-process (a same-uid attacker re-exports any in-process key), so it closes only when the signer routes to a real out-of-band boundary (separate OS uid / enclave / HSM — a *deployment* property). **Still open (loud):** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but N distinct *human* roots is the frontier); **own-key forgery** (a same-uid holder of a registered key mints authentic records — U1's issuance-cost problem); same-uid in-process custody (by physics). v0+P2+P3 passed a 3-lens coherence checkpoint ([plans/03](plans/03-coherence-checkpoint.md)); P-minter passed a 3-lens VERIFY that reframed it close→narrow ([plans/04](plans/04-authenticated-minter-plan.md)).
 
@@ -16,6 +16,8 @@ a mutually-untrusting multi-agent network.
 | [plans/02-p3-grounding-reach-plan.md](plans/02-p3-grounding-reach-plan.md) | the P3 grounding-engine + REACH plan (VERIFY + post-build VALIDATE folded; status BUILT, SHADOW; both seams deferred to P4 per D8) |
 | [plans/03-coherence-checkpoint.md](plans/03-coherence-checkpoint.md) | the v0+P2+P3 coherence checkpoint (3-lens CLOSEABLE; folded hygiene + the N+1 fix) |
 | [plans/04-authenticated-minter-plan.md](plans/04-authenticated-minter-plan.md) | the P-minter plan (3-lens VERIFY reframed close→narrow; honest-narrow ratified; status BUILT, SHADOW) |
+| [plans/05-out-of-band-broker-plan.md](plans/05-out-of-band-broker-plan.md) | the P-broker plan (out-of-band signing broker; 3-lens VERIFY + VALIDATE; VALIDATE hacker won a live TOCTOU race → O_NOFOLLOW fix; custody MECHANISM, custody-real is deployment-contingent; status BUILT, SHADOW) |
+| [plans/06-ci-quality-gates-plan.md](plans/06-ci-quality-gates-plan.md) | the CI plan (borrow the toolkit's gates PACT skipped: vacuous-pass-guarded test runner + eslint + layering tripwire; 2-lens VERIFY caught a vacuous-pass CRITICAL; status BUILT) |
 | **[PACT-spec-v1.1.md](PACT-spec-v1.1.md)** | **the *what to build* — BUILD-GRADE rev (supersedes v1.0); folds all 17 ratified decisions + the VALIDATE board** |
 | [PACT-spec.md](PACT-spec.md) | implementation spec v1.0 — **SUPERSEDED by v1.1** (kept as the historical record) |
 | [PACT-intent-and-landmines.md](PACT-intent-and-landmines.md) | the *why* — design intent, 12 landmines, 6 meta-principles |
@@ -32,6 +34,22 @@ a mutually-untrusting multi-agent network.
 | **[research/20-spec-v1.1-validation.md](research/20-spec-v1.1-validation.md)** | **3-lens VALIDATE of the v1.1 *draft*: BUILD-GRADE after folding** — 2 BUILD_GRADE + 1 NEEDS_REVISION; 3 MAJORs (FALSIFY/REPAIR authz+anti-ping-pong, FALSIFY-WEAK circularity, INV-13-vs-disjoint-count) + MINORs, all folded into v1.1 §13 |
 | [WORKFLOW-ORPHANING-BUG.md](WORKFLOW-ORPHANING-BUG.md) | handoff bug report — background Workflow tasks orphaned on session compaction/rotation; evidence, repro, workaround, investigation steps |
 | [research/00-research-plan.md](research/00-research-plan.md) | how the proto-planning research was run |
+
+## Development
+
+PACT has **zero runtime dependencies** (pure node); dev tooling is fetched ephemerally via `npx`, never committed.
+
+```sh
+npm test          # run all v0/test/**/*.test.js (pure-node runner, vacuous-pass-guarded)
+npm run lint      # eslint (recommended ruleset, fetched via npx --yes eslint@9)
+node test/run.js  # the runner directly (what CI runs)
+```
+
+CI (`.github/workflows/ci.yml`) **will run** the suite on a **node 20 + 22** matrix plus eslint, on every push/PR
+to `main` (the workflow is committed; the first GitHub Actions run is pending). The runner FAILS loudly if zero
+test files are discovered, if any file executes zero tests, or if the grand total is zero — a green means tests
+actually **ran**, not merely "nothing failed". (It trusts each file's first-party `N passed, M failed` self-report;
+it does not independently count assertions.)
 
 ### Research evidence base
 - `research/prior-art/` — credible-field contrast: [a2a-protocols](research/prior-art/a2a-protocols.md) · [trust-reputation-sybil](research/prior-art/trust-reputation-sybil.md) · [epistemics](research/prior-art/epistemics.md) · [power-loom-mapping](research/prior-art/power-loom-mapping.md)

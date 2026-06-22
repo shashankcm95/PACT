@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: a test + lint workflow needs only to read the repo (secure default).
+permissions:
+  contents: read
+
+# Cancel an in-progress run when a newer commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 22 = dev baseline; 20 = current LTS leg (catches any 22-only API reliance).
+        # Revisit the lower leg at node-20 EOL (~2026-04) -> 22 + 24.
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The runner is pure-node (zero deps) and vacuous-pass-guarded: it FAILS if zero test files are
+      # discovered, if any file executes zero tests, or if the grand total is zero (a green = work ran).
+      - name: Run the test suite
+        run: node test/run.js
+
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Split FETCH from RUN (VERIFY board, architect HIGH): the toolkit hit intermittent `npx` socket-hang
+      # failures fetching tooling on CI. Warm the npx cache with a RETRIED `--version` (network-sensitive,
+      # harmless to retry) so a transient blip self-heals; THEN run the real lint against the warm cache,
+      # where exit 1 means a REAL violation (never retried). eslint@9 is pinned for reproducibility.
+      - name: Warm eslint (retry on transient fetch failure)
+        run: |
+          ok=false
+          for i in 1 2 3; do
+            npx --yes eslint@9 --version && { ok=true; break; }
+            echo "eslint fetch attempt $i failed; retrying in 5s"; sleep 5
+          done
+          # a for-loop's exit code is its LAST body command (the echo) — so without this explicit check the
+          # step would false-GREEN when all 3 fetches fail. Fail the job loudly instead (VALIDATE HIGH).
+          $ok || { echo "[ci] FATAL: eslint unreachable after 3 attempts"; exit 1; }
+      - name: Run eslint
+        run: npx --yes eslint@9 .
