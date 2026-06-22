@@ -39,13 +39,15 @@ Generate a persona keypair (`v0/src/identity/keypair.js` → `newPersonaKeypair(
 key where only `pact-broker` can read it, and register the **public** key with the host (step 5).
 
 ```sh
-sudo install -d -o pact-broker -g pact-broker -m 0700 /etc/pact            # locked key DIR (host can't even stat the key)
+sudo install -d -o pact-broker -g pact-broker -m 0755 /etc/pact            # traversable key DIR (key stays 0600) so the verifier can read the key's OWNER
 sudo install -o pact-broker -g pact-broker -m 0600 broker.key /etc/pact/broker.key
 sudo rm -f broker.key                                                      # remove the host-side copy
 ```
 
-The mode-0700 directory is the stronger posture: the host uid cannot even `lstat` the key, so the verifier's
-non-vacuity check rests entirely on the live sign (C3) — which is the load-bearing proof anyway.
+The key DIR is **0755** (the key itself is **0600**) on purpose: the host uid can then `lstat` the key and
+CONFIRM it is owned by a *different* uid — the verifier's necessary condition. A **0700** dir would BLIND the
+verifier (it cannot read the owner → reports owner-unknown → **FAILs**, telling you to relax the dir to 0755).
+Custody comes from the key's `0600` + a different owner, NOT from the dir mode; do not lock the dir to 0700.
 
 ## 3. Install a wrapper the broker uid runs (owned root, NOT host-writable)
 
@@ -114,7 +116,7 @@ node /opt/pact/v0/src/identity/custody-verify.js \
   --registry /etc/pact/registry.json
 ```
 
-Expect: `C0`/`C1`/`C2`/`C3`/`C2.5` and `custodyMechanismVerified: true` with
+Expect: `C0`/`C1`/`C2`/`C3`/`C2.5` and `hostObservableChecksPassed: true` with
 `requiresOutOfBandUidConfirmation: true`. The tool **deliberately exits non-zero** until you attest — its exit
 code is never greener than the truth. Now do the out-of-band check the tool structurally cannot:
 

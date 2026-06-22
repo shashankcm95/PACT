@@ -35,7 +35,7 @@ verified **out-of-band** — it cannot be delivered or proven by in-process code
   **uid separation** (a different uid owns the key), not merely a restrictive file mode. The kernel's EACCES
   under a genuinely separate uid **is** the world-anchored signal (NS-7) — an OS fact, out-of-band of PACT's
   own code. The verifier checks the necessary condition and the mechanism; the **operator closes the loop**.
-- **HONESTY GUARD (NS-9, the close→narrow reflex):** the verifier reports `custodyMechanismVerified` +
+- **HONESTY GUARD (NS-9, the close→narrow reflex):** the verifier reports `hostObservableChecksPassed` +
   `requiresOutOfBandUidConfirmation: true` — **never** a bald `custodyReal: true`. The tool narrows to
   "mechanism verified + necessary condition met"; only the operator's out-of-band uid attestation closes it.
 
@@ -78,26 +78,26 @@ Three new files + a runbook:
 
 2. **`v0/src/identity/custody-verify.js`** — `verifyCrossUidCustody({ keyFile, signer, registry, personaDid })`
    → a structured, **non-vacuous** report. Checks, in order:
-   - **C0 (root guard):** if `process.getuid?.() === 0` → `custodyMechanismVerified:false`, residual "running
+   - **C0 (root guard):** if `process.getuid?.() === 0` → `hostObservableChecksPassed:false`, residual "running
      as root — root bypasses file perms; uid separation is meaningless from here." (Windows: `getuid`
      undefined → report "uid model N/A on this platform.")
    - **C1 (non-vacuity precondition):** the key file EXISTS and is non-empty. Absent/empty → ERROR
      "vacuous: there is no key to protect" (NOT a pass — the §0a containment-oracle lesson: a denial proof
      needs a PRESENT secret).
    - **C2 (the custody leg):** attempt to read the key as the host uid (`openSync(O_RDONLY|O_NOFOLLOW)` then
-     read). SUCCESS → `custodyMechanismVerified:false`, residual "the host uid CAN read the key — custody is
+     read). SUCCESS → `hostObservableChecksPassed:false`, residual "the host uid CAN read the key — custody is
      NOT real (R1 same-uid/over-permissive)." EACCES → the necessary condition is met (record `hostReadDenied`)
      **but** set `requiresOutOfBandUidConfirmation:true` — the tool cannot distinguish uid-separation from a
      mode-000 same-owner file; the operator confirms uid separation out-of-band (`ls -l` owner ≠ `id` uid).
    - **C3 (liveness — the broker actually signs):** sign a `crypto.randomBytes(32)` probe through `signer` and
      `verifyRecordSig` it against `lookupPublicKey(registry, personaDid)` (reuse `assertBrokerPersona`'s
-     random-probe logic — a fixed probe is special-caseable). Fail → `custodyMechanismVerified:false`, "broker
+     random-probe logic — a fixed probe is special-caseable). Fail → `hostObservableChecksPassed:false`, "broker
      cannot sign as the persona — mechanism not functional / mis-wired." This proves C2's denial is NOT just a
      broken/unused key.
-   - **Conclusion:** `custodyMechanismVerified = !root && C1 && C2==EACCES && C3` (all four). Even then,
+   - **Conclusion:** `hostObservableChecksPassed = !root && C1 && C2==EACCES(+ key owned by a DIFFERENT uid) && C3` (all four; refined at §10/§11 — owner-unknown + null-uid FAIL closed). Even then,
      `custodyReal` is **never asserted** — the report carries `requiresOutOfBandUidConfirmation:true` and the
      operator instruction. A thin CLI (`require.main === module`) prints the report + exits non-zero unless
-     `custodyMechanismVerified`.
+     `hostObservableChecksPassed`.
 
 3. **`v0/test/unit/custody-verify.test.js`** — TDD (see §5).
 
@@ -156,19 +156,19 @@ reused unchanged (a `git diff` check, not a threat-test).
    launcher returns a functioning signer (the cross-uid leg is the deployment, not the test).
 
 `custody-verify.js`:
-5. **C1 vacuity:** absent key → report is an ERROR ("vacuous"), `custodyMechanismVerified===false` — NOT a pass.
+5. **C1 vacuity:** absent key → report is an ERROR ("vacuous"), `hostObservableChecksPassed===false` — NOT a pass.
 6. **C1 vacuity:** empty key file → same.
-7. **C2 same-uid OPEN (the in-env default):** a readable key (mode 0600, owned by us) → `custodyMechanismVerified
+7. **C2 same-uid OPEN (the in-env default):** a readable key (mode 0600, owned by us) → `hostObservableChecksPassed
    ===false`, residual names R1 same-uid. (This is the honest result in any same-uid env — the test PROVES the
    tool reports custody NOT real here.)
 8. **C2 denial leg (simulated via mode 000):** a present, non-empty, mode-000 key (EACCES same-owner — probed)
-   + a working signer + matching registry ⇒ `hostReadDenied===true`, C3 passes, `custodyMechanismVerified===true`
+   + a working signer + matching registry ⇒ `hostReadDenied===true`, C3 passes, `hostObservableChecksPassed===true`
    AND `requiresOutOfBandUidConfirmation===true`. (Simulates the perm-denial leg; the test header says it
    SIMULATES the denial — true uid separation is the deployment.) **Skips if `getuid()===0`** (root bypass).
 9. **C0 root guard:** if `getuid()===0`, the report fails closed with the root residual (assert the branch, or
    skip-with-note off-root).
 10. **C3 liveness:** a denial-leg key but a signer that returns null / signs as the WRONG persona ⇒
-    `custodyMechanismVerified===false` ("broker cannot sign as the persona") — even though C1/C2 passed.
+    `hostObservableChecksPassed===false` ("broker cannot sign as the persona") — even though C1/C2 passed.
 11. **honesty:** the report NEVER contains a truthy `custodyReal` field; it carries
     `requiresOutOfBandUidConfirmation` whenever the denial leg is taken.
 
@@ -180,7 +180,7 @@ install a wrapper `/usr/local/bin/pact-broker-sign` (owned root, 0755) that sets
 `exec`s `node broker-sign.js "$@"`; `sudoers`: `hostuser ALL=(pact-broker) NOPASSWD: /usr/local/bin/pact-broker-sign`
 (default `env_reset`); register `pact-broker`'s **public** key in the host registry; wire the host with
 `crossUidBrokerSigner({ brokerUser:'pact-broker', wrapperPath:'/usr/local/bin/pact-broker-sign' })`; **run
-`node custody-verify.js` as the host uid and confirm `custodyMechanismVerified` + then attest OUT-OF-BAND**
+`node custody-verify.js` as the host uid and confirm `hostObservableChecksPassed` + then attest OUT-OF-BAND**
 (`ls -l <key>` owner is `pact-broker`, `id` shows you are NOT `pact-broker`, and `cat <key>` → Permission denied).
 The runbook states loudly: the tool verifies the mechanism + necessary condition; **you** close custody-real via
 the out-of-band uid attestation (NS-7/NS-9). R2 oracle-abuse remains open at this layer (next frontier).
@@ -208,7 +208,7 @@ the out-of-band uid attestation (NS-7/NS-9). R2 oracle-abuse remains open at thi
       honest result (#7), the simulated denial leg with the out-of-band-required flag (#8), the root guard (#9),
       and the C3 liveness gate (#10).
 - [ ] launcher argv-validation rejects flag-injection users + bad paths; `-n` non-interactive.
-- [ ] the verifier NEVER asserts `custodyReal`; it reports `custodyMechanismVerified` +
+- [ ] the verifier NEVER asserts `custodyReal`; it reports `hostObservableChecksPassed` +
       `requiresOutOfBandUidConfirmation` (NS-9 honesty).
 - [ ] runbook present with exact OS steps + the loud "you close it out-of-band" framing.
 - [ ] `git diff` confirms ZERO edit to the signer seam (`broker-sign`/`broker-client`/`minter`/`frame`).
@@ -220,7 +220,7 @@ the out-of-band uid attestation (NS-7/NS-9). R2 oracle-abuse remains open at thi
 - NS-7 honored: the wave's *hardening* is explicitly the world-anchored cross-uid deployment, NOT the in-repo
   code — the code NARROWS (builds the anchorable mechanism + the verifier); the operator's out-of-band uid
   attestation HARDENS. No SHADOW machinery is claimed to harden trust.
-- NS-9 honored: `custodyMechanismVerified` ≠ `custodyReal`; the close→narrow reflex is baked into the report shape.
+- NS-9 honored: `hostObservableChecksPassed` ≠ `custodyReal`; the close→narrow reflex is baked into the report shape.
 - NS-2 honored: this is the *provenance/custody* layer (§4 frontier), distinct from integrity (verify-on-read)
   and validity (derived-on-read) — not collapsed.
 - NS-8 honored: all SHADOW; no weight gates an action; R2/U1/U2 stay open.
