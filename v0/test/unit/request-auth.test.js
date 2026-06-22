@@ -115,11 +115,9 @@ test('authorizeRequest: require ON + broker persona unset/empty -> DENY (fail cl
   }
 });
 test('authorizeRequest: require ON + the BOTH-NULL bypass (persona-less body + unset env) -> DENY', () => {
-  const b = bodyFor(undefined); // no src_persona_did after JSON round-trip (undefined drops)
-  const raw = JSON.stringify({ ver: 'pact/0', type: 'CLAIM', seq: 0, nonce: 'x' }); // genuinely persona-less
+  const raw = JSON.stringify({ ver: 'pact/0', type: 'CLAIM', seq: 0, nonce: 'x' }); // genuinely persona-less (no src_persona_did)
   const r = A({ requireFrame: true, claimedRecordId: computeRecordId(JSON.parse(raw)), presentedBodyRaw: raw, brokerPersonaDid: undefined });
   assert.equal(r.decision, 'deny');
-  void b;
 });
 test('authorizeRequest: require ON + no body presented -> DENY', () => {
   for (const raw of [null, undefined, '']) {

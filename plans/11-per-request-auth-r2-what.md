@@ -145,7 +145,7 @@ box with no persona-did set stays legacy (loud notice). The flag is parsed by a 
 | File | Change |
 |---|---|
 | `v0/src/identity/request-auth.js` | NEW — pure `authorizeRequest(...)` with two named, separately-tested predicates `recomputeBinds` + `personaBinds`; strict flag parse; reject non-plain-object; both-operands-non-empty-string persona check. Mirrors `caller-auth.js`. |
-| `v0/src/identity/broker-sign.js` | NEW gate (0.5): drain stdin (MAX_BYTES + read deadline) BEFORE the exit-capable gates -> `authorizeRequest` -> sign the computed id. Default-on-when-persona-set; loud DISABLED notice on the legacy path. Update HONEST-SCOPE header (R2-WHAT narrowed, residuals verbatim). |
+| `v0/src/identity/broker-sign.js` | NEW gate (0.5): drain stdin (MAX_BYTES + read deadline) BEFORE the exit-capable gates -> `authorizeRequest` -> sign the computed id. Default-on-when-persona-set; loud DISABLED notice on the legacy path. Update `HONEST SCOPE` header (broker-sign.js:11, spaced not hyphenated) (R2-WHAT narrowed, residuals verbatim). |
 | `v0/src/identity/broker-client.js` | `brokerSigner` returns `sign(recordId, body?)` -> serialize + write on the child's stdin (`stdio[0]='pipe'`, `input:`) when body present; back-compat when absent. `assertBrokerPersona` liveness presents a minimal P-frame body (§1.8). |
 | `v0/src/lib/edge-attestation.js` | `signRecordId(recordId, opts, body?)` threads the optional body to `signer(recordId, body)`. resolveSigner's closure ignores it. Stays broker-agnostic. |
 | `v0/src/frame/frame.js` | `buildFrame` strips `undefined`-valued top-level keys from `withKey` (A1), then passes the normalized body to `signRecordId`. Stays broker-agnostic. |
@@ -179,7 +179,16 @@ signs the computed id and verifies under P's key; argv/body mismatch refuses wit
 mismatch refuses; no-body-in-require-mode refuses; mode-off path still signs hex-only + emits the loud
 notice. Back-compat: every existing broker/frame/minter test stays green (the optional 2nd param is inert).
 
-## §6 Runtime Probes (verified against the repo NOW — not memory)
+## §6 Runtime Probes (verified against the repo at PLAN-TIME — not memory)
+
+> **Line numbers are the PRE-BUILD snapshot** (probed when this plan was written, before the gate code
+> landed). The build intentionally shifted `broker-sign.js` (the new stdin-drain + gate (0.5) pushed the
+> argv/`isHex64` path down) and added lines to `broker-client.js`/`custody-verify.js` (the liveness-probe
+> change). Post-build the loci moved (`broker-sign.js` argv+`isHex64` -> ~100/114; `broker-client.js` signer
+> call -> ~99; `custody-verify.js` -> ~165; the `edge-attestation.js:80` resolveSigner closure is unchanged).
+> P1 in particular documents the PRE-build blind-oracle the wave CHANGED; read it as the motivating state.
+> (CodeRabbit PR #6 Major flagged the decay — a stale-line-number is exactly the decay class the discipline
+> names; the probes' FACTS still hold, only the line numbers moved.)
 
 - **P1** broker signs an opaque 64-hex, no preimage: `broker-sign.js:52-53` (`argv[2]` -> `isHex64`) +
   `edge-attestation.js:82` (`crypto.sign(null, Buffer.from(recordId,'utf8'), key)`). CONFIRMED.
@@ -203,7 +212,7 @@ notice. Back-compat: every existing broker/frame/minter test stays green (the op
 - [ ] hacker live-re-probes the BUILT broker (T1-T8) at VALIDATE — green TDD is NOT proof (Rule 2a).
 - [ ] runbook documents the default-on semantics; the §0 residuals (single-operator-payload-authority,
       persona-did-not-bound-to-key, payload-semantics-ceiling) appear VERBATIM in broker-sign.js's
-      HONEST-SCOPE header AND in `_SESSION-RESUME.md` (grep each string -> a hit); no summary line uses
+      `HONEST SCOPE` header (broker-sign.js:11, spaced not hyphenated) AND in `_SESSION-RESUME.md` (grep each string -> a hit); no summary line uses
       "closes" for this wave (honesty HIGH — falsifiable, not "carried LOUD").
 - [ ] full gate green (`npm test` + eslint, ASCII-only) + CodeRabbit real-surface clean.
 
@@ -278,7 +287,7 @@ fall-through). FOLDED a deployment-hardening note: a recommended wrapper guard t
 key is configured but the persona is unset (turns the silent fall-through into a startup fail-closed).
 
 **honesty-auditor — VERDICT HONEST** — ran the falsifiable greps: the three §0 residual strings appear
-VERBATIM in broker-sign.js's HONEST-SCOPE header; ZERO "closes R2 / closes the oracle / makes custody real"
+VERBATIM in broker-sign.js's `HONEST SCOPE` header (broker-sign.js:11, spaced not hyphenated); ZERO "closes R2 / closes the oracle / makes custody real"
 over-claims in the diff; recompute-bind genuinely signs `computeRecordId(parsed)` not the argv id; SHADOW
 stated; test names narrowed to what they assert. Outstanding DoD #5 obligation: `_SESSION-RESUME.md` must
 carry the same three residual strings verbatim + describe R2-WHAT as NARROWED (done in the resume update).
