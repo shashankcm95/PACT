@@ -14,6 +14,23 @@
 
 ---
 
+## FORK-3 (2026-06-22) — after the U2 seam: which FORK-2 deferred branch, post-recalibration?
+
+The USER first picked **CONFIRM evidence-provenance**, but its VERIFY board (`plans/13` §8) recalibrated it:
+the advisory disjointness COUNT is theater (no consumer; self-asserted = evasion-trivial; a `distinct_provenance`
+count next to `n_confirmers` is the L4 "asserted-distinctness as real independence" landmine), and the carrier
+FIELD is contingent on a world-anchored source that does NOT yet exist (the open U2 frontier) — so building it
+now reserves an empty slot. The USER then chose the logically-PRIOR step:
+
+- **CHOSEN → world-anchored U2 signal feasibility RFC** (`research/24`, in progress). Design what a
+  world-anchored substrate-diversity signal (model-family / corpus / checkpoint independence) could even be —
+  the only thing that HARDENS U2 (OQ-NS-6) and the thing that would populate the CONFIRM carrier. Research/
+  design-stage; may honestly conclude "still mostly open." It is the real blocker the board surfaced.
+- **DEFERRED → CONFIRM evidence-provenance carrier** (`plans/13`, scoped to carrier-only; COUNT killed as
+  theater). **Revisit when:** the world-anchored signal RFC (`research/24`) identifies a real source that would
+  populate + consume the field. Until then it is an empty schema reservation — not worth a wave.
+- **DEFERRED → U1 stake** (unchanged from FORK-2; the hardening-leaning, U2-independent branch).
+
 ## FORK-2 (2026-06-22) — the foundational entry: which trust-hardening sub-direction first?
 
 Within the foundational pivot (FORK-1 chose it), which sub-direction does the first wave take? Per OQ-NS-6,

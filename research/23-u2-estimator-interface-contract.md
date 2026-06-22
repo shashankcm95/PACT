@@ -20,6 +20,18 @@ sibling `config_stability`) verdict through that lift-point via a DI seam
 estimator lands the label lifts everywhere — "the WEAK flag lifts here and ONLY here" is now true in code.
 The three consumers (`convert.js`, `cross-verify.js` x2) read the LABEL, never the lift-point directly.
 
+> **AMENDED by `research/24` (2026-06-22) — the estimator is DEMOTE-ONLY.** The world-anchored U2 *signal*
+> feasibility study concluded the POSITIVE direction is not establishable: `[SOURCED]` independence is not
+> identifiable from observables (arXiv:2604.07650), `[PACT-INFERENCE]` and the only world-anchored handle
+> (substrate-distinctness attestation) is necessary-not-sufficient. So `epistemicIndependence()` must NEVER
+> return a positive STRONG. Its honest range is `{WEAK, ENTANGLEMENT-DETECTED}` — `ENTANGLEMENT-DETECTED` is a
+> DEMOTE-only flag (the absence of a detected-entanglement signal is NOT evidence of independence; it stays
+> WEAK). The demotion lands on the **advisory WEIGHT the label feeds** (`convert`/`cross-verify`), NOT on
+> `overall`/`mayGate` (which only LIFT WEAK / fail-close — a demotion fed there is silently swallowed); and a
+> negative verdict is EXEMPT from §4.4's NS-8 stakes-throne gate (it only tightens, never unlocks). The §2
+> per-record signature below now stages a DEMOTING estimator — the positive one it originally staged will
+> never exist. See `research/24` §4.
+
 ## §2 Signature evolution (the only API change the estimator needs)
 
 - **Today:** `epistemicIndependence()` — zero-arity, returns `'WEAK'`.
