@@ -187,7 +187,7 @@ notice. Back-compat: every existing broker/frame/minter test stays green (the op
 > change). Post-build the loci moved (`broker-sign.js` argv+`isHex64` -> ~100/114; `broker-client.js` signer
 > call -> ~99; `custody-verify.js` -> ~165; the `edge-attestation.js:80` resolveSigner closure is unchanged).
 > P1 in particular documents the PRE-build blind-oracle the wave CHANGED; read it as the motivating state.
-> (CodeRabbit PR #6 Major flagged the decay — a stale-line-number is exactly the decay class the discipline
+> (CodeRabbit PR #6 Major flagged the decay — a stale-line-number is the decay class the discipline
 > names; the probes' FACTS still hold, only the line numbers moved.)
 
 - **P1** broker signs an opaque 64-hex, no preimage: `broker-sign.js:52-53` (`argv[2]` -> `isHex64`) +
@@ -210,10 +210,12 @@ notice. Back-compat: every existing broker/frame/minter test stays green (the op
 - [ ] broker recompute-binds + persona-binds in require-frame mode; signs the COMPUTED id; loud notice when off.
 - [ ] seam widened additively; ALL existing tests green (back-compat proven, not assumed).
 - [ ] hacker live-re-probes the BUILT broker (T1-T8) at VALIDATE — green TDD is NOT proof (Rule 2a).
-- [ ] runbook documents the default-on semantics; the §0 residuals (single-operator-payload-authority,
-      persona-did-not-bound-to-key, payload-semantics-ceiling) appear VERBATIM in broker-sign.js's
-      `HONEST SCOPE` header (broker-sign.js:11, spaced not hyphenated) AND in `_SESSION-RESUME.md` (grep each string -> a hit); no summary line uses
-      "closes" for this wave (honesty HIGH — falsifiable, not "carried LOUD").
+- [ ] runbook documents the default-on semantics; the §0 residuals appear as NAMED PHRASES (the spaced-prose
+      form, NOT kebab tokens) in broker-sign.js's `HONEST SCOPE` header (broker-sign.js:11) AND in
+      `_SESSION-RESUME.md` -- the greppable phrases are "single-operator payload authority" /
+      "payload-semantics ceiling" / "NOT cryptographically bound to the held key" / "integrity != provenance"
+      (CodeRabbit honesty: the kebab form "single-operator-payload-authority" does NOT grep -- claim corrected
+      from "VERBATIM" to "named phrases"); no summary line uses "closes" for this wave (honesty HIGH).
 - [ ] full gate green (`npm test` + eslint, ASCII-only) + CodeRabbit real-surface clean.
 
 ## §8 Anchor check (north-star §6 pre-flight)
@@ -286,8 +288,10 @@ OUT, named LOUD): the blind oracle is reachable by OMITTING `PACT_BROKER_PERSONA
 fall-through). FOLDED a deployment-hardening note: a recommended wrapper guard that refuses to start when the
 key is configured but the persona is unset (turns the silent fall-through into a startup fail-closed).
 
-**honesty-auditor — VERDICT HONEST** — ran the falsifiable greps: the three §0 residual strings appear
-VERBATIM in broker-sign.js's `HONEST SCOPE` header (broker-sign.js:11, spaced not hyphenated); ZERO "closes R2 / closes the oracle / makes custody real"
+**honesty-auditor — VERDICT HONEST** — ran the falsifiable greps: the three §0 residuals appear as named
+phrases (spaced prose, not kebab tokens) in broker-sign.js's `HONEST SCOPE` header (broker-sign.js:11 — the
+greppable forms are "single-operator payload authority" / "payload-semantics ceiling" / "NOT cryptographically
+bound to the held key"; CodeRabbit incremental corrected the earlier "VERBATIM" wording); ZERO "closes R2 / closes the oracle / makes custody real"
 over-claims in the diff; recompute-bind genuinely signs `computeRecordId(parsed)` not the argv id; SHADOW
 stated; test names narrowed to what they assert. Outstanding DoD #5 obligation: `_SESSION-RESUME.md` must
 carry the same three residual strings verbatim + describe R2-WHAT as NARROWED (done in the resume update).
