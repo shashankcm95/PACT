@@ -324,5 +324,110 @@ test('broker-client.js references NO raw key material (the broker holds the key,
   assert.ok(!/privateKeyPem\s*:|\.privateKeyPem/.test(src), 'broker-client.js is key-free (broker-sign.js is the sole key-loader, allowlisted in minter.test.js)');
 });
 
+// ====================== R2-WHAT: per-request auth (require-frame mode, plans/11) ======================
+
+const { computeRecordId } = require('../../src/lib/record');
+
+// spawn broker-sign directly with a presented frame body on stdin (the require-frame channel). `input`
+// always provided so stdin is a CLOSED pipe (an unprovided stdin would inherit + block on the read deadline).
+function runFrame({ keyFile, persona, recordId, body, requireFrame }) {
+  const env = { PACT_BROKER_KEY_FILE: keyFile };
+  if (persona !== undefined) env.PACT_BROKER_PERSONA_DID = persona;
+  if (requireFrame !== undefined) env.PACT_BROKER_REQUIRE_FRAME = requireFrame;
+  return spawnSync(process.execPath, [BROKER, recordId], { env, input: body === undefined ? '' : body, encoding: 'utf8' });
+}
+// the preimage body buildFrame would hash: src/parent/seq/nonce/payload (+ idempotency_key is added by
+// buildFrame, but for these direct-spawn gate tests a minimal body that round-trips is enough).
+const frameBody = (persona, extra) => ({ ver: 'pact/0', type: 'CLAIM', src_persona_did: persona, parent_human_uid: 'human:' + persona, seq: 0, nonce: 'n1', payload: { claim: { content: 'hi' } }, ...extra });
+
+test('R2-WHAT: require-frame (persona set) + valid P-frame + matching id -> signs the COMPUTED id, verifies', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const b = frameBody(w.ME);
+  const rid = computeRecordId(b);
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, recordId: rid, body: JSON.stringify(b) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(verifyRecordSig(rid, r.stdout.trim(), { publicKeyPem: me.kp.publicKeyPem }), 'sig over the computed id verifies');
+  w.cleanup();
+});
+test('R2-WHAT: foreign-persona body -> REFUSE (persona-bind), empty stdout, fixed no-echo message', () => {
+  const w = freshWorld(); w.add('did:key:zAttacker');
+  const me = w.personas[w.ME];
+  const b = frameBody('did:key:zAttacker'); // declares a DIFFERENT persona than the broker's
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, recordId: computeRecordId(b), body: JSON.stringify(b) });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '', 'no sig on a refuse');
+  assert.match(r.stderr, /request not authorized/);
+  assert.doesNotMatch(r.stderr, /zAttacker|zME/, 'reject echoes neither persona');
+  w.cleanup();
+});
+test('R2-WHAT: body hashing to a DIFFERENT id than argv -> REFUSE (sign nothing the caller asserts)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const b = frameBody(w.ME);
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, recordId: 'b'.repeat(64), body: JSON.stringify(b) });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '');
+  w.cleanup();
+});
+test('R2-WHAT: no body presented (empty stdin) in require-frame -> REFUSE', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, recordId: 'a'.repeat(64), body: '' });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '');
+  w.cleanup();
+});
+test('R2-WHAT: REQUIRE_FRAME=1 but PACT_BROKER_PERSONA_DID UNSET -> REFUSE (both-null bypass closed, fail closed)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const b = frameBody(w.ME);
+  // explicit require-frame on, but no broker persona configured -> persona-bind cannot run -> deny
+  const r = runFrame({ keyFile: me.keyFile, persona: undefined, requireFrame: '1', recordId: computeRecordId(b), body: JSON.stringify(b) });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '');
+  w.cleanup();
+});
+test('R2-WHAT: a JSON ARRAY body -> REFUSE (non-plain-object; computeRecordId([..]) is a valid 64-hex)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, recordId: computeRecordId([1, 2, 3]), body: '[1,2,3]' });
+  assert.equal(r.status, 1);
+  assert.equal(r.stdout.trim(), '');
+  w.cleanup();
+});
+test('R2-WHAT: legacy mode (no persona, no flag) STILL signs the argv hex + LOUD R2-WHAT DISABLED notice', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const rid = RID;
+  // legacy: brokerFor presents no body; the broker must behave exactly as pre-R2-WHAT (sign the argv id).
+  const sig = brokerFor(me.keyFile)(rid);
+  assert.ok(sig && verifyRecordSig(rid, sig, { publicKeyPem: me.kp.publicKeyPem }), 'legacy still signs the argv id');
+  // and the loud-when-off notice is observable on a direct spawn
+  const r = spawnSync(process.execPath, [BROKER, rid], { env: { PACT_BROKER_KEY_FILE: me.keyFile }, encoding: 'utf8' });
+  assert.match(r.stderr, /per-request-auth DISABLED \(require-frame off\)/);
+  w.cleanup();
+});
+test('R2-WHAT FULL SEAM: buildFrame -> brokerSigner presents the body -> receiveFrame ACCEPTS', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  // the broker child runs in require-frame mode (persona in its allowlisted env); buildFrame threads the body.
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, env: { PACT_BROKER_PERSONA_DID: w.ME } });
+  const built = buildFrame({ srcPersonaDid: w.ME, parentHumanUid: me.human, type: 'CLAIM', seq: 0, nonce: 'seam1', payload: { claim: { content: 'real' } } }, { signer });
+  assert.ok(built.ok, 'buildFrame succeeds through the require-frame broker: ' + built.reason);
+  assert.ok(receiveFrame(built.frame, { registry: w.registry }).ok, 'the frame the broker signed is accepted end-to-end');
+  w.cleanup();
+});
+test('R2-WHAT FULL SEAM: a payload-less frame round-trips (A1 undefined-key normalization)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, env: { PACT_BROKER_PERSONA_DID: w.ME } });
+  // NO payload field -> withKey would carry payload:undefined pre-normalization; the broker recompute must match.
+  const built = buildFrame({ srcPersonaDid: w.ME, parentHumanUid: me.human, type: 'CLAIM', seq: 1, nonce: 'noPayload' }, { signer });
+  assert.ok(built.ok, 'payload-less frame signs through the broker (undefined-key normalized): ' + built.reason);
+  assert.ok(receiveFrame(built.frame, { registry: w.registry }).ok, 'payload-less frame accepted end-to-end');
+  w.cleanup();
+});
+
 console.log(`\n[broker] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

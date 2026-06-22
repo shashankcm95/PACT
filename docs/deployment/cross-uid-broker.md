@@ -59,7 +59,8 @@ could edit the script `sudo` runs as `pact-broker`), so it MUST be owned by root
 sudo tee /usr/local/bin/pact-broker-sign >/dev/null <<'EOF'
 #!/bin/sh
 export PACT_BROKER_KEY_FILE=/etc/pact/broker.key
-export PACT_BROKER_ALLOWED_UIDS=501          # R2 caller-auth: host uid(s) allowed to request a signature (comma-separated)
+export PACT_BROKER_ALLOWED_UIDS=501          # R2-WHO caller-auth: host uid(s) allowed to request a signature (comma-separated)
+export PACT_BROKER_PERSONA_DID=did:key:zME   # R2-WHAT per-request auth: the persona this broker keys (enables require-frame by default)
 exec /usr/bin/node /opt/pact/v0/src/identity/broker-sign.js "$@"
 EOF
 sudo chown root:root /usr/local/bin/pact-broker-sign
@@ -71,9 +72,14 @@ be a **hardcoded literal** here in the root-owned wrapper (the host can't tamper
 any host-supplied value). Its VALUE's provenance — not just the wrapper file's integrity — is the trust anchor
 (integrity ≠ provenance): never interpolate it from a host-influenced source (a `/tmp` file, a host env var).
 **OMIT the line to leave caller-auth OFF** (opt-in; the broker then signs for any sudoers-permitted caller and
-prints a loud `caller-auth DISABLED` notice). Honest scope: this is **coarse uid-level caller-auth** — an
-allowlisted caller can still request a signature over an *arbitrary* `record_id` (per-request auth is a separate,
-deeper frontier; R2's WHAT-can-be-signed stays open).
+prints a loud `caller-auth DISABLED` notice). Honest scope: this is **coarse uid-level caller-auth (R2-WHO)**.
+
+`PACT_BROKER_PERSONA_DID` is the persona this broker keys, and setting it **enables R2-WHAT require-frame mode
+by DEFAULT** (per-request auth, see §9): the broker then signs only a `record_id` it can RECOMPUTE from a
+presented frame body that declares this persona — not an arbitrary 64-hex. Because it is **default-on once the
+persona is set**, a *dropped* `PACT_BROKER_REQUIRE_FRAME` env fails CLOSED (refuse), never silently reopening the
+blind oracle. Explicit `export PACT_BROKER_REQUIRE_FRAME=0` is the only escape hatch back to legacy hex-only (the
+broker then prints a loud `per-request-auth DISABLED` notice). OMIT the persona line to stay legacy entirely.
 
 ## 4. Authorize the host uid to run ONLY that wrapper as `pact-broker` — and PIN the env policy
 
@@ -176,16 +182,55 @@ sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX" | head -c 20; echo
 
 The deployment is only caller-auth-enabled once the allowlist is set to your uid(s) AND the flip test refuses a
 non-member. Omit the allowlist → caller-auth OFF (the broker signs for any sudoers-permitted caller + prints a
-loud `caller-auth DISABLED` notice on stderr; R2 open).
+loud `caller-auth DISABLED` notice on stderr; R2-WHO open).
+
+## 9. Enable + verify per-request auth (R2-WHAT)
+
+Setting `PACT_BROKER_PERSONA_DID` in the wrapper (step 3) enables **require-frame mode by default**: the broker
+signs only a `record_id` it can RECOMPUTE from a presented frame body declaring that persona. The host wiring
+(step 6, `brokerSigner` + `buildFrame`) presents the body automatically — **zero seam change**; a frame minted
+through the broker just works. To confirm the gate actually refuses a request it cannot account for:
+
+```sh
+# A. a well-formed P-frame the broker can recompute -> SIGNS (the happy path; node prints a base64 sig).
+#    (the host's buildFrame/brokerSigner do this for you; this is the manual equivalent.)
+#
+# B. the gate refuses what it cannot account for. Ask the broker to sign a BARE 64-hex (no presented frame):
+HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
+printf '' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"
+#   -> "broker-sign: request not authorized", empty stdout, exit 1  (no preimage -> refuse)
+#
+# C. a frame for a DIFFERENT persona is refused (persona-bind):
+printf '{"src_persona_did":"did:key:zAttacker","nonce":"x"}' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"
+#   -> "broker-sign: request not authorized", empty stdout, exit 1
+```
+
+OMIT `PACT_BROKER_PERSONA_DID` → R2-WHAT OFF (legacy hex-only; the broker prints a loud `per-request-auth
+DISABLED` notice on stderr; the blind oracle is open). A *dropped* `PACT_BROKER_REQUIRE_FRAME` with the persona
+still set fails CLOSED (stays ON) — only an explicit `=0` reverts to legacy.
+
+**Recommended: make the wrapper fail-closed on a forgotten persona.** Require-frame is default-on *only* when
+`PACT_BROKER_PERSONA_DID` is set, so a wrapper that wires the key but forgets the persona silently runs the blind
+oracle (a copy-paste hazard). Turn that silent fall-through into a startup refusal by guarding the wrapper:
+
+```sh
+# add to /usr/local/bin/pact-broker-sign, ABOVE the exec line:
+[ -n "$PACT_BROKER_PERSONA_DID" ] || { echo 'pact-broker-sign: refusing to start -- PACT_BROKER_PERSONA_DID unset (R2-WHAT would be the blind oracle)' >&2; exit 78; }
+```
+
+This makes the per-request-auth posture a deployment invariant, not a thing the operator must remember.
 
 ## Residuals (open — NOT closed by this deployment)
 
-- **R2 — oracle-abuse: the WHO is NARROWED (when caller-auth is enabled), the WHAT stays OPEN.** With
-  `PACT_BROKER_ALLOWED_UIDS` set, the broker signs only for an allowlisted *caller uid* — coarse caller-auth, and
-  the policy is held by the key-holder (not only by `sudoers`). But an **allowlisted caller can still request a
-  signature over an *arbitrary* `record_id`** → still forge as this persona. Per-request authorization (the
-  caller proves entitlement to the specific record) is the deeper frontier — **not** built. And with the
-  allowlist OMITTED, caller-auth is OFF entirely (R2 fully open). All SHADOW.
+- **R2-WHO — oracle-abuse, caller axis.** With `PACT_BROKER_ALLOWED_UIDS` set, the broker signs only for an
+  allowlisted *caller uid* — coarse caller-auth, policy held by the key-holder (not only by `sudoers`). Allowlist
+  OMITTED → R2-WHO open. SHADOW.
+- **R2-WHAT — per-request auth NARROWS, does not close.** With `PACT_BROKER_PERSONA_DID` set (require-frame on),
+  the broker signs only a `record_id` it can recompute from a presented P-frame — no longer a blind oracle for an
+  arbitrary 64-hex. But the **entitled operator can still make P assert ANY payload** (payload-semantics ceiling),
+  and `PACT_BROKER_PERSONA_DID` is a **policy declaration, NOT cryptographically bound to the held key** broker-side
+  (integrity ≠ provenance — only the host-side `assertBrokerPersona` round-trip proves the key matches). R2 stays
+  open. All SHADOW.
 - **R3 — own-key forgery (U1).** A legitimate holder of their own persona key still mints authentic records;
   issuance cost is untouched.
 - **Single-uid is identical to in-process at rest.** If you skip the separate uid (run the broker as your own

@@ -84,15 +84,20 @@ function resolveSigner(opts = {}) {
   };
 }
 
-// signRecordId(recordId, opts) -> base64 ed25519 signature over a 64-hex content-address, or null.
+// signRecordId(recordId, opts, body?) -> base64 ed25519 signature over a 64-hex content-address, or null.
 // Fail-soft: a non-HEX64 id (input gate FIRST), no signer, a throwing signer, or a malformed/
 // non-canonical/non-64-byte signer OUTPUT -> null. Never throws.
-function signRecordId(recordId, opts = {}) {
+//
+// `body` (optional) is the frame PREIMAGE that hashed to recordId. It is passed through to the signer as an
+// OPTIONAL 2nd arg (signer(recordId, body)) so a custody-boundary signer (the cross-uid broker) can present
+// it for per-request recompute-binding (R2-WHAT, plans/11). This stays broker-AGNOSTIC: the in-process
+// resolveSigner closure ignores the 2nd arg, so every existing call site is unaffected (Open/Closed).
+function signRecordId(recordId, opts = {}, body) {
   if (!isHex64(recordId)) return null;
   const signer = resolveSigner(opts);
   if (typeof signer !== 'function') return null;
   let sig;
-  try { sig = signer(recordId); } catch { return null; }
+  try { sig = signer(recordId, body); } catch { return null; }
   if (!isCanonicalBase64(sig)) return null;
   return Buffer.from(sig, 'base64').length === 64 ? sig : null;
 }

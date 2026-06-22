@@ -18,6 +18,7 @@
 const fs = require('fs');
 const crypto = require('crypto');
 const { verifyRecordSig } = require('../lib/edge-attestation');
+const { computeRecordId } = require('../lib/record');
 const { lookupPublicKey } = require('./registry');
 
 // the denial leg counts ONLY for these (hacker F1) — any OTHER open error (ELOOP symlink / ENXIO FIFO /
@@ -153,11 +154,15 @@ function gatherCustodyFacts(opts = {}) {
     hostRead = { ok: true };
   } catch (e) { hostRead = { ok: false, errno: (e && e.code) || 'EUNKNOWN' }; }
 
-  // C3 — the live sign probe: a RANDOM, un-special-caseable 64-hex (mirrors assertBrokerPersona).
+  // C3 — the live sign probe: present a minimal P-frame body with a RANDOM nonce (mirrors assertBrokerPersona,
+  // broker-client.js). The random nonce keeps the probe id un-special-caseable; declaring src_persona_did =
+  // personaDid lets the probe pass a require-frame broker's persona-bind (R2-WHAT, plans/11 §1.8) so the
+  // DEPLOYED verifier keeps working once require-frame is enabled. Works in BOTH modes (legacy ignores the body).
   let sign = { signed: false, personaMatches: false };
   try {
-    const probe = crypto.randomBytes(32).toString('hex');
-    const sig = typeof signer === 'function' ? signer(probe) : null;
+    const probeBody = { src_persona_did: personaDid, nonce: crypto.randomBytes(16).toString('hex') };
+    const probe = computeRecordId(probeBody);
+    const sig = typeof signer === 'function' ? signer(probe, probeBody) : null;
     if (sig) {
       sign.signed = true;
       const pub = lookupPublicKey(registry, personaDid);
