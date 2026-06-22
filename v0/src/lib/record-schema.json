@@ -18,7 +18,7 @@
     "seq": { "type": "integer", "minimum": 0, "description": "per-session sequence number" },
     "nonce": { "type": "string", "description": "anti-replay nonce" },
     "payload": {
-      "description": "the Claim (spec §3); any JSON shape. P3 (spec §6) payload conventions, all enforced ON READ (the store is not a sandbox): PREMISE => {statement, scope, creator} (the self-asserted human creator counts ONLY when rootOf(src_persona_did)===creator); CONFIRM/CONTEST of a premise => {target_premise_id}; ACCEPT => {target_claim_id}.",
+      "description": "the Claim (spec §3); any JSON shape. P3 (spec §6) payload conventions, all enforced ON READ (the store is not a sandbox): PREMISE => {statement, scope, creator} (the self-asserted human creator counts ONLY when rootOf(src_persona_did)===creator); CONFIRM/CONTEST of a premise => {target_premise_id}; ACCEPT => {target_claim_id}. DISCRIMINANT (plans/08, ENFORCED type-blind in record.js validateRecord): a record carries AT MOST ONE of {target_claim_id, target_premise_id} — the present field selects the axis (target_claim_id => trust/direct claim-defection or ACCEPT/REACH; target_premise_id => grounding premise-contest). Both is the one cross-layer two-way path; a contest needing both axes MINTS TWO RECORDS.",
       "type": "object",
       "properties": {
         "target_premise_id": { "type": "string", "description": "P3: the ATMS content-address (sha256 of the {statement,scope,creator} premise body via makePremise().id — NOT the frame record_id) that a CONFIRM/CONTEST targets (premise-level cross-verify / contest)" },

@@ -42,17 +42,20 @@ function main() {
   const keyFile = process.env.PACT_BROKER_KEY_FILE;
   if (typeof keyFile !== 'string' || keyFile.length === 0) fail('PACT_BROKER_KEY_FILE is required');
   let fd;
-  try { fd = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); }
+  // O_NONBLOCK so a FIFO/device key-path does NOT block at open waiting for a writer (POSIX) — it opens
+  // immediately and the fstat().isFile() check below rejects it BEFORE any read (a no-op for a regular file).
+  try { fd = fs.openSync(keyFile, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
   catch (e) { return fail(e && e.code === 'ELOOP' ? 'key file must not be a symlink' : 'key file not found / unreadable'); }
+  // close-before-fail (VERIFY): fail() calls process.exit, which SKIPS a finally — so the interior reject
+  // paths close the fd explicitly. CHECK-before-READ preserved (never read a FIFO/device/writable file's
+  // content first). A minimal try/finally wraps ONLY the read so a readFileSync throw also closes the fd.
   let pem;
   try {
     const st = fs.fstatSync(fd);                                  // the OPEN fd's inode — swap-immune
-    if (!st.isFile()) fail('key file must be a regular file');
-    if (st.mode & 0o022) fail('key file must not be group- or world-writable');
-    pem = fs.readFileSync(fd, 'utf8');                            // reads the SAME fd we fstat'd
-  } finally {
-    try { fs.closeSync(fd); } catch { /* */ }
-  }
+    if (!st.isFile()) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be a regular file'); }
+    if (st.mode & 0o022) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must not be group- or world-writable'); }
+  } catch { try { fs.closeSync(fd); } catch { /* */ } return fail('key file unstattable'); }
+  try { pem = fs.readFileSync(fd, 'utf8'); } finally { try { fs.closeSync(fd); } catch { /* */ } }
 
   // (3) load + sign via the SAME fail-soft crypto leaf the host uses (alg-pinned ed25519, output re-gated).
   const sig = signRecordId(recordId, { privateKeyPem: pem });

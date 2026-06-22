@@ -26,6 +26,9 @@ function independenceLabel({ topological }) {
  * The consumer obligation. A WEAK record may inform, never GATE a high-stakes action. The CALLER
  * asserts `highStakes` — P2 owns NO stakes threshold (that relocated throne is named + bound at P3).
  * In P2 every label is WEAK, so this refuses every high-stakes caller (fail-closed).
+ * NOTE (plans/08): mayGate is currently UNCONSUMED by any action path (only tests call it); its true-branch
+ * (low-stakes) authorizes NOTHING today. A future caller wiring it into a real call-site inherits the SHADOW
+ * obligation (INV-16) explicitly — it does not silently become a gate.
  * @param {object} label  an independenceLabel
  * @param {{highStakes:boolean}} ctx
  * @returns {boolean} true iff acting is permitted

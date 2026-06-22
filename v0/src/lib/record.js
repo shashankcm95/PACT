@@ -152,6 +152,16 @@ function validateRecord(record) {
     if (record[f] != null && typeof record[f] !== 'string') errors.push(f + ' must be a string');
   }
   if (record.sig != null && typeof record.sig !== 'string') errors.push('sig must be a string');
+  // CONTEST discriminant (plans/08): a record may carry AT MOST ONE of payload.target_claim_id /
+  // payload.target_premise_id — the field selects the axis (target_claim_id => trust/direct claim-defection
+  // or ACCEPT/REACH; target_premise_id => grounding premise-contest). BOTH is the one cross-layer two-way
+  // path in the otherwise one-way DAG. TYPE-BLIND (a forged type must not bypass it — the store is not a
+  // sandbox); a contest needing both axes mints two records.
+  if (record.payload &&
+      record.payload.target_claim_id != null &&
+      record.payload.target_premise_id != null) {
+    errors.push('payload may carry at most one of target_claim_id / target_premise_id (both => cross-layer contamination)');
+  }
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
 }
 

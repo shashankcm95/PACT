@@ -97,5 +97,26 @@ test('validateRecord rejects a required field set to undefined (not just absent)
   assert.equal(R.validateRecord({ ...rec, src_persona_did: undefined }).valid, false);
 });
 
+// ===== CONTEST discriminant: the one two-way seam in the lib->atms->trust->grounding DAG (plans/08 #1) =====
+// A record carrying BOTH payload.target_claim_id (read by trust/direct) AND payload.target_premise_id (read
+// by grounding/creator-standing) would feed both layers at once. The guard is TYPE-BLIND (the store is not
+// a sandbox — a forged type must not bypass it) and keyed on the payload fields.
+
+test('validateRecord REJECTS both payload.target_claim_id + payload.target_premise_id (cross-layer seam)', () => {
+  const rec = buildRecord({ type: 'CONTEST', payload: { target_claim_id: 'a'.repeat(64), target_premise_id: 'b'.repeat(64) } });
+  assert.equal(R.validateRecord(rec).valid, false, 'a both-target_* record must be rejected');
+});
+
+test('validateRecord both-target_* rejection is TYPE-BLIND (a forged CLAIM with both also fails)', () => {
+  const rec = buildRecord({ type: 'CLAIM', payload: { content: 'x', target_claim_id: 'a'.repeat(64), target_premise_id: 'b'.repeat(64) } });
+  assert.equal(R.validateRecord(rec).valid, false, 'store is not a sandbox — a forged type must not bypass the guard');
+});
+
+test('validateRecord ACCEPTS legit single-target records (no false positive)', () => {
+  assert.ok(R.validateRecord(buildRecord({ type: 'CONTEST', payload: { target_claim_id: 'a'.repeat(64) } })).valid, 'claim-contest');
+  assert.ok(R.validateRecord(buildRecord({ type: 'CONFIRM', payload: { target_premise_id: 'b'.repeat(64) } })).valid, 'premise-confirm');
+  assert.ok(R.validateRecord(buildRecord({ type: 'CLAIM', payload: { content: 'x' } })).valid, 'neither field');
+});
+
 console.log(`\n[record] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
