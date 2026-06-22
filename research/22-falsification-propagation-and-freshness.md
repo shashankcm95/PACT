@@ -1,7 +1,7 @@
 ---
 lifecycle: persistent
 created: 2026-06-22
-status: DEFERRED requirement (intra-node GUARANTEED today; cross-network bound is a future requirement)
+status: DEFERRED requirement (intra-node GUARANTEED today; cross-network bound future) + §4 the CONFIRM dual (cross-agent premise validation) BUILT, hardening-blocked on U2-at-the-evidence-level
 topic: falsification-propagation, freshness-gate, dissemination, CRDT-fold
 ---
 
@@ -65,11 +65,57 @@ Three controls — and they are **coupled**, not independent:
    + authz** (the anti-ping-pong ordering), not a timestamp or a G-set. It must converge regardless of
    delivery order and not flap.
 
-## §4 Net + cross-links
+## §4 The positive dual — cross-agent premise VALIDATION (the `CONFIRM` anchor): BUILT, hardening-blocked on U2
+
+Same seam, opposite sign. Where §1–3 propagate *falsification* (`CONTEST`), the receiver-side **"verify
+yourself"** — agent B independently re-grounds premise P on its OWN evidence, and that becomes the anchor
+that sets P's propagation weight — is the `CONFIRM` dual. Side-chat design Q (2026-06-22), then code-verified.
+
+**The correction the design chat needed: this is NOT a slot to add — it is BUILT and consumed today.**
+
+- `CONFIRM` + `payload.target_premise_id` → `crossVerify(premiseId)` (`grounding/cross-verify.js`) =
+  decay-weighted **distinct-human** confirmation evidence (the support leg `r`); `premiseScore`
+  (`grounding/premise-score.js`) = an SL opinion over `r` (crossVerify survival) and `s` (CONTEST disbelief),
+  **derived-on-read over the SIG-verified log** (`INV-14`), SHADOW/advisory.
+- So the propagation weight rides the **signed `CONFIRM` frame** (authenticated minter = B's key), NEVER
+  store presence — the `#273` invariant (*a trust input needs an authenticated minter, never a store re-hash;
+  integrity ≠ provenance*) is closed **by construction** here. Forging "B confirmed P" requires B's key.
+- Sybil is already gated symmetrically with the contest leg: confirmers are `rootOf`-keyed (persona-mult
+  collapses to one human) **and** earned-standing (the confirmer authored ≥1 `CLAIM`) — a zero-history
+  sock-puppet can neither support nor slander for free.
+
+**The ceiling — U2, but precisely at the EVIDENCE level, not the agent level** (the chat mis-framed it as
+agent-independence; the code shows the real gap):
+
+- `crossVerify` counts distinct **humans** (`rootOf`), NOT distinct **evidence**. Two genuinely distinct,
+  non-colluding `rootOf` humans both citing the SAME upstream source each contribute FULL confirmation
+  weight — over-counting correlated evidence. That is landmine **L4** (authenticity/distinctness treated as
+  independence) wearing a `CONFIRM` hat. Three things, only the first two solved: distinct personas (`rootOf`
+  ✓) · distinct humans (`rootOf` + earned ✓) · **disjoint evidence (U2 — unbuilt, the ceiling).**
+- It bites *within* a single verifier too: if B "confirms" P by **re-reading A's record** (no new evidence),
+  that is an echo, not a re-grounding, and must not harden — **L5** ("untampered = true") in `CONFIRM`
+  costume. `crossVerify` cannot tell an echo from a disjoint re-grounding because **the `CONFIRM` record does
+  not carry WHAT evidence the confirmer used.**
+- Abuse: **mutual-confirmation weight-pump** — a ring of distinct humans confirming each other's premises on
+  correlated evidence. `rootOf` kills the same-human ring; DAG cycle-rejection kills direct loops; the longer
+  correlated-evidence ring is, again, U2.
+- It stays honest only because `premiseScore` is **derived-on-read** — caching "P has confirm-weight X" as a
+  stored field would be a mutable score store (NS-5/NS-11 drift).
+
+**The open sub-problem (the buildable, U2-shaped next step):** give a `CONFIRM` record an
+**evidence-provenance** field so disjointness becomes *measurable* instead of *assumed-from-distinct-roots*.
+That is the **positive-direction analog of §3's multi-path/independent-path requirement** — a confirmation
+hardens to exactly the degree its evidence is disjoint from what it confirms. Until then the signal is the
+most valuable in the system *and* the one whose cross-agent hardening cannot be unlocked.
+
+## §5 Net + cross-links
 
 The foundation is right and code-verified: a node never knowingly propagates a falsified premise; it
 self-heals on re-read; the CONTEST record is the vehicle ([[plans/08]] hardened it). The cross-network
 latency bound is a real requirement for the network+gating phase — coupled trio (freshness-gate TTL ≥
 multi-path-priority-dissemination latency; non-monotone repair-aware fold), Byzantine-robust, U2-gated.
 Related: [[research/14]] (swarm: split dissemination from tally; gossip/CRDT), [[research/21]] (the other
-deferred-directions note), U2 (the gate-enabler — nothing gates until it closes).
+deferred-directions note), U2 (the gate-enabler — nothing gates until it closes). §4 is the positive dual
+(`CONFIRM` validation, built); its worked example on the OPERATOR axis is [[plans/09]]'s `custody-verify.js`
+— "verify yourself" done right: a self-verifier that structurally refuses to claim it hardened (it reports
+`hostObservableChecksPassed`, never custody-real, and defers the hardening to the out-of-band attestation).
