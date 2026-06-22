@@ -168,10 +168,13 @@ the phase close→narrow. **Forks ratified honest-narrow (§4).**
 ## §10 — post-build VALIDATE result (3-lens board, 2026-06-21)
 
 **Board:** hacker (adversarial, LIVE PROBES) + honesty (claim-vs-evidence) + code-reviewer (correctness).
-**Note on independence:** the hacker + honesty lenses ran as independent agents and both PASSED; the
-correctness lens could not be spawned (sustained API 529 overload, 3 attempts) and was **self-performed
-by the orchestrator** (read + 6 edge-case probes + the env-removal diff) — flagged honestly, not claimed
-as independent. Re-running an independent correctness agent before merge is available if desired.
+**Independence: fully independent 3/3 PASS.** The hacker + honesty lenses ran as independent agents and
+both PASSED. The correctness lens initially could not be spawned (sustained API 529 overload, 3 attempts)
+and was self-performed (read + 6 edge-case probes + the env-removal diff, PASS); once the API recovered it
+was **re-run as an independent agent against the committed `2b5fe1b`** and also PASSED (0 BLOCKER/MAJOR;
+1 MINOR — a comment-phrasing nit on the snake_case guard, empirically inert, "no fix required" — matching
+the self-review exactly). The self-performed pass is retained here for the honest record; the independent
+re-run supersedes it.
 
 - **hacker: PASS** — 7 live `/tmp` probes against the REAL built modules, **0 bypasses**. Confirmed: the
   env default is genuinely dead (no `process.env` read remains; `buildFrame({},{})` fail-closed even with
