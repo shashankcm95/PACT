@@ -59,11 +59,21 @@ could edit the script `sudo` runs as `pact-broker`), so it MUST be owned by root
 sudo tee /usr/local/bin/pact-broker-sign >/dev/null <<'EOF'
 #!/bin/sh
 export PACT_BROKER_KEY_FILE=/etc/pact/broker.key
+export PACT_BROKER_ALLOWED_UIDS=501          # R2 caller-auth: host uid(s) allowed to request a signature (comma-separated)
 exec /usr/bin/node /opt/pact/v0/src/identity/broker-sign.js "$@"
 EOF
 sudo chown root:root /usr/local/bin/pact-broker-sign
 sudo chmod 0755 /usr/local/bin/pact-broker-sign          # NOT group/world-writable (the verifier checks this)
 ```
+
+`PACT_BROKER_ALLOWED_UIDS` is the **caller-auth allowlist (R2)** — the uid(s) the broker will sign for. It MUST
+be a **hardcoded literal** here in the root-owned wrapper (the host can't tamper it; sudo `env_reset` also strips
+any host-supplied value). Its VALUE's provenance — not just the wrapper file's integrity — is the trust anchor
+(integrity ≠ provenance): never interpolate it from a host-influenced source (a `/tmp` file, a host env var).
+**OMIT the line to leave caller-auth OFF** (opt-in; the broker then signs for any sudoers-permitted caller and
+prints a loud `caller-auth DISABLED` notice). Honest scope: this is **coarse uid-level caller-auth** — an
+allowlisted caller can still request a signature over an *arbitrary* `record_id` (per-request auth is a separate,
+deeper frontier; R2's WHAT-can-be-signed stays open).
 
 ## 4. Authorize the host uid to run ONLY that wrapper as `pact-broker` — and PIN the env policy
 
@@ -85,11 +95,19 @@ Defaults!/usr/local/bin/pact-broker-sign env_reset, !setenv
 parse `sudoers`):
 
 ```sh
-sudo -l -U <hostuser>           # confirm NO env_keep carries NODE_OPTIONS / BASH_ENV / LD_* / DYLD_*
+sudo -l -U <hostuser>           # human-scan: NO env_keep carries NODE_OPTIONS / BASH_ENV / LD_* / DYLD_*
+
+# SUDO_* is the LOAD-BEARING one for caller-auth (R2) — assert it explicitly. This MUST print nothing:
+sudo -l -U <hostuser> | grep -iE 'env_keep.*SUDO_' \
+  && echo 'FAIL: env_keep carries SUDO_* -- the caller-auth premise is VOID; fix the policy before trusting this deployment'
 ```
 
-If any of those survive into the broker's environment, the cross-uid env-injection defense is void — fix the
-policy before trusting the deployment.
+If any code-loading var survives into the broker's environment, the cross-uid env-injection defense is void.
+**`SUDO_*` is load-bearing for caller-auth (R2):** the whole gate rests on sudo SETTING `SUDO_UID` from the real
+caller uid; if `env_keep` carried a host-supplied `SUDO_UID`, a host could forge its caller identity. On a
+default `env_reset` policy sudo overwrites `SUDO_UID` regardless — verified live on the reference deployment
+(`SUDO_UID=999999 sudo -u pact-broker printenv SUDO_UID` → `501`) — but the asserted `grep` above pins it so a
+future `env_keep` mistake fails loudly rather than silently voiding the gate.
 
 ## 5. Register the broker's PUBLIC key with the host
 
@@ -132,13 +150,42 @@ Only if the owner is a **different** uid AND the read is denied is custody real.
 node …/custody-verify.js … --attested-cross-uid   # exits 0 ONLY now
 ```
 
+## 8. Enable + verify caller-auth (R2)
+
+Caller-auth is enabled by the `PACT_BROKER_ALLOWED_UIDS` line in the wrapper (step 3). Two out-of-band checks:
+
+**(a) Confirm the allowlist VALUE is a hardcoded literal** — its provenance is the trust anchor; the verifier's
+C2.5 checks the wrapper's integrity, NOT its contents:
+
+```sh
+sudo grep -n 'PACT_BROKER_ALLOWED_UIDS' /usr/local/bin/pact-broker-sign
+# must be a literal `export PACT_BROKER_ALLOWED_UIDS=<uids>` — never interpolated from a host-influenced source
+```
+
+**(b) Live caller-auth test — prove the gate actually rejects a non-member.** Your uid signs; a different uid is
+refused:
+
+```sh
+HEX=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
+sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX" | head -c 20; echo '   <- a sig = authorized'
+# now flip the allowlist to a uid that is NOT yours and confirm the broker REFUSES, then RESTORE:
+#   sudo sed -i '' 's/ALLOWED_UIDS=501/ALLOWED_UIDS=999/' /usr/local/bin/pact-broker-sign
+#   sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"   # -> "broker-sign: caller not authorized", empty stdout, exit 1
+#   sudo sed -i '' 's/ALLOWED_UIDS=999/ALLOWED_UIDS=501/' /usr/local/bin/pact-broker-sign   # RESTORE
+```
+
+The deployment is only caller-auth-enabled once the allowlist is set to your uid(s) AND the flip test refuses a
+non-member. Omit the allowlist → caller-auth OFF (the broker signs for any sudoers-permitted caller + prints a
+loud `caller-auth DISABLED` notice on stderr; R2 open).
+
 ## Residuals (open — NOT closed by this deployment)
 
-- **R2 — oracle-abuse (FULLY OPEN).** Any caller the `sudoers` rule permits can ask the broker to sign an
-  **arbitrary** `record_id` → forge a record as this persona. The broker provides non-exfiltration, NOT
-  authorization. Caller-authentication (peer-uid check / capability tokens) is the next frontier — and it is
-  *meaningful only at this cross-uid boundary*, which is why it follows this spike. This deployment adds NO
-  authorization.
+- **R2 — oracle-abuse: the WHO is NARROWED (when caller-auth is enabled), the WHAT stays OPEN.** With
+  `PACT_BROKER_ALLOWED_UIDS` set, the broker signs only for an allowlisted *caller uid* — coarse caller-auth, and
+  the policy is held by the key-holder (not only by `sudoers`). But an **allowlisted caller can still request a
+  signature over an *arbitrary* `record_id`** → still forge as this persona. Per-request authorization (the
+  caller proves entitlement to the specific record) is the deeper frontier — **not** built. And with the
+  allowlist OMITTED, caller-auth is OFF entirely (R2 fully open). All SHADOW.
 - **R3 — own-key forgery (U1).** A legitimate holder of their own persona key still mints authentic records;
   issuance cost is untouched.
 - **Single-uid is identical to in-process at rest.** If you skip the separate uid (run the broker as your own

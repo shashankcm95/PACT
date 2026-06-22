@@ -13,14 +13,17 @@
 //     property, verified OUT-OF-BAND. SAME-UID this is the env-pointed file-key read P-minter removed,
 //     moved one process over: the host uid can still read the key file (a test demonstrates this) and —
 //     by same-uid physics — ptrace this process / read /proc/<pid>/mem (open regardless; NOT separately exercised).
-//   * The broker provides NON-EXFILTRATION (HSM-shaped), NOT access-control: it signs ANY 64-hex it is
-//     handed (R2 oracle-abuse), so any permitted caller can forge as this persona. Caller-auth
-//     (SO_PEERCRED / capability tokens) is the orthogonal NEXT frontier, not built here.
+//   * Access-control (caller-auth, R2) is now a COARSE uid-level gate (gate (0) below, opt-in via
+//     PACT_BROKER_ALLOWED_UIDS) that narrows WHO may request a signature -- keyed on SUDO_UID, the sudo-native
+//     caller signal (NOT SO_PEERCRED: this is a sudo-command, not a socket). It does NOT close R2: an
+//     allowlisted caller still signs an ARBITRARY 64-hex (WHAT-can-be-signed / per-request auth is the open
+//     frontier). The broker's core guarantee remains NON-EXFILTRATION (HSM-shaped). See plans/10.
 
 'use strict';
 
 const fs = require('fs');
 const { isHex64, signRecordId } = require('../lib/edge-attestation');
+const { authorizeCaller } = require('./caller-auth');
 
 // stderr ONLY (never the key / never err.stack); empty stdout; non-zero exit.
 function fail(msg) {
@@ -29,6 +32,21 @@ function fail(msg) {
 }
 
 function main() {
+  // (0) caller-auth gate (R2, plans/10) -- BEFORE input validation + the key open, so an unauthorized caller
+  // never triggers the key open / fstat / TOCTOU surface and learns nothing about the input format. The broker
+  // enforces its OWN caller policy (WHO may request a signature), not just the sudoers transition. SUDO_UID is
+  // sudo-injected from the REAL invoking uid (LIVE-PROBED: sudo overwrites a host-forged value under
+  // env_reset,!setenv); SUDO_USER is root-spoofable (man sudoers) -- NEVER authorize on SUDO_USER. The allowlist
+  // is set BROKER-SIDE in the root-owned wrapper. Reject is a FIXED message (no uid / no allowlist echo -- an
+  // echo gives an unauthorized caller an allowlist-probing oracle). All SHADOW; R2 WHAT-can-be-signed stays open.
+  const auth = authorizeCaller({ sudoUid: process.env.SUDO_UID, allowlistRaw: process.env.PACT_BROKER_ALLOWED_UIDS });
+  if (auth.decision === 'deny') fail('caller not authorized');
+  if (auth.decision === 'disabled') {
+    // opt-in OFF: an explicit, named R2-stays-open residual (NOT an accidental fall-through). LOUD, not silent
+    // (NS-9), so a fat-fingered/un-enabled deployment is observable rather than silently signing for everyone.
+    process.stderr.write('broker-sign: caller-auth DISABLED (PACT_BROKER_ALLOWED_UIDS unset) -- R2 open\n');
+  }
+
   // (1) the broker's OWN input gate — defense-in-depth: the CLI is directly invokable, so the client's
   // hex64 gate is NOT the broker's defense. A leading-'-' / uppercase / wrong-length id is refused here.
   const recordId = process.argv[2];

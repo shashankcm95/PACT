@@ -206,11 +206,13 @@ test('the broker emits ONLY the sig — no key/PEM/DER fragment on stdout OR std
   const w = freshWorld();
   const a = w.personas['did:key:zME'];
   const keyBody = a.kp.privateKeyPem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '').slice(0, 40);
-  // happy path: stdout is just the 88-char b64 sig; stderr empty; no key body anywhere
+  // happy path: stdout is just the 88-char b64 sig; stderr carries ONLY the benign caller-auth DISABLED notice
+  // (allowlist unset, plans/10 R2) — assert it leaks NO key, not that it is empty.
   const ok = spawnSync(process.execPath, [BROKER, RID], { env: { PACT_BROKER_KEY_FILE: a.keyFile }, encoding: 'utf8' });
   assert.equal(ok.status, 0);
   assert.equal(ok.stdout.trim().length, 88, 'stdout is exactly the base64 sig');
-  assert.equal(ok.stderr, '', 'happy path: empty stderr');
+  assert.ok(!/PRIVATE KEY|BEGIN |MC4C|MII/.test(ok.stderr), 'happy path: no PEM/DER fragment on stderr');
+  assert.match(ok.stderr, /caller-auth DISABLED/, 'the only stderr content is the unset-allowlist R2 notice');
   assert.ok(!ok.stdout.includes(keyBody) && !ok.stderr.includes(keyBody), 'no key body in output');
   // malformed-key error path: non-zero, empty stdout, NO PEM/DER/key fragment on stderr (no err.stack)
   const bad = path.join(w.STATE, 'bad.key'); fs.writeFileSync(bad, 'definitely not a pem');
