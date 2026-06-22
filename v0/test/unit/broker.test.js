@@ -1,0 +1,313 @@
+#!/usr/bin/env node
+'use strict';
+
+// PACT P-broker — out-of-band signing-broker tests (plans/05 §5 + §8 VERIFY-board folds).
+//
+// HONEST SCOPE (plans/05 §0): these prove the custody MECHANISM (the key lives in a SEPARATE process;
+// the host signs through it; the seam is unchanged), NOT custody-real. Every test runs SAME-UID — which
+// can demonstrate the mechanism (key absent from the host heap; sig from a separate process) but CANNOT
+// demonstrate SEPARATION (the host uid still reaches the broker). Custody is real only cross-uid /
+// enclave / HSM — a DEPLOYMENT property, verified out-of-band. The residual tests below assert R1
+// (same-uid key-readable) and R2 (oracle-abuse) are OPEN, openly — a guard that can't be shown to fail
+// is theater.
+
+const assert = require('node:assert/strict');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { spawnSync } = require('child_process');
+
+const reg = require('../../src/identity/registry');
+const { newPersonaKeypair } = require('../../src/identity/keypair');
+const { createMinter } = require('../../src/identity/minter');
+const { buildFrame, receiveFrame } = require('../../src/frame/frame');
+const { appendRecord } = require('../../src/lib/record-store');
+const { makePremise } = require('../../src/atms/claim');
+const { crossVerify } = require('../../src/grounding/cross-verify');
+const { creatorStanding } = require('../../src/grounding/creator-standing');
+const { direct } = require('../../src/trust/direct');
+const { verifyRecordSig } = require('../../src/lib/edge-attestation');
+const { brokerSigner, assertBrokerPersona } = require('../../src/identity/broker-client');
+
+const BROKER = path.join(__dirname, '..', '..', 'src', 'identity', 'broker-sign.js');
+
+let pass = 0; let fail = 0;
+function test(name, fn) {
+  try { fn(); pass++; console.log('  ok   - ' + name); }
+  catch (e) { fail++; console.error('  FAIL - ' + name + '\n         ' + (e && e.message)); }
+}
+
+// drain tmpdirs even on an assertion throw (don't leak /tmp on failure — cleanup() is best-effort per test)
+const _allDirs = [];
+process.on('exit', () => { for (const d of _allDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* */ } } });
+
+const SCOPE = { constraints: {}, edge_confidence: 1 };
+let seq = 0;
+const RID = crypto.createHash('sha256').update('a-probe-record-id').digest('hex'); // a valid 64-hex id
+
+function freshWorld() {
+  const STATE = fs.mkdtempSync(path.join(os.tmpdir(), 'pact-broker-'));
+  _allDirs.push(STATE);
+  const registry = reg.createRegistry();
+  const personas = {};
+  function add(did) {
+    const kp = newPersonaKeypair();
+    const human = 'human:' + did;
+    reg.registerPersona(registry, { personaDid: did, humanUid: human, publicKeyPem: kp.publicKeyPem });
+    const keyFile = path.join(STATE, did.replace(/[^\w]/g, '_') + '.key');
+    fs.writeFileSync(keyFile, kp.privateKeyPem);
+    fs.chmodSync(keyFile, 0o600); // deterministic perms (don't depend on the ambient umask — CI may be 0000)
+    personas[did] = { kp, human, keyFile };
+    return did;
+  }
+  const ME = add('did:key:zME');
+  const meCtx = { registry, storeOpts: { receiverId: ME, stateDir: STATE } };
+  const store = { receiverId: ME, stateDir: STATE };
+  return { STATE, registry, personas, meCtx, ME, add, store,
+    cleanup: () => { try { fs.rmSync(STATE, { recursive: true, force: true }); } catch { /* */ } } };
+}
+const brokerFor = (keyFile, extra) => brokerSigner({ command: process.execPath, args: [BROKER], keyFile, ...(extra || {}) });
+
+// ====================== input gate ======================
+
+test('brokerSigner returns null on a non-hex64 id (never spawns the broker)', () => {
+  const sign = brokerFor('/nonexistent');
+  for (const bad of ['', '-', 'xyz', 'A'.repeat(64), 'a'.repeat(63), 'g'.repeat(64), 123, null]) {
+    assert.equal(sign(bad), null, 'rejects ' + JSON.stringify(bad));
+  }
+});
+
+// ====================== the custody MECHANISM: sign through a separate process ======================
+
+test('end-to-end: a sig from the REAL broker child verifies under the persona registered key', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  const a = w.personas['did:key:zAlice'];
+  const sig = brokerFor(a.keyFile)(RID);
+  assert.ok(sig, 'the broker produced a sig');
+  assert.ok(verifyRecordSig(RID, sig, { publicKeyPem: a.kp.publicKeyPem }), 'verifies under Alice key');
+  assert.equal(verifyRecordSig(RID, sig, { publicKeyPem: w.personas['did:key:zME'].kp.publicKeyPem }), false, 'does NOT verify under a different key');
+  w.cleanup();
+});
+
+test('integrated: broker-signed records flow through the real P2/P3 read path', () => {
+  const w = freshWorld();
+  w.add('did:key:zHuman'); w.add('did:key:zConfirmer');
+  const human = w.personas['did:key:zHuman'];
+  const conf = w.personas['did:key:zConfirmer'];
+  const humanMinter = createMinter({ signer: brokerFor(human.keyFile), personaDid: 'did:key:zHuman', humanUid: human.human });
+  const confMinter = createMinter({ signer: brokerFor(conf.keyFile), personaDid: 'did:key:zConfirmer', humanUid: conf.human });
+  const put = (r) => { assert.ok(r.ok, r.reason); assert.ok(appendRecord(r.frame, w.store).ok); };
+
+  put(confMinter.mint({ type: 'CLAIM', seq: seq++, nonce: 'c1', payload: { claim: { content: 'earns' } } }));
+  const statement = 'a broker-minted premise';
+  put(humanMinter.mint({ type: 'PREMISE', seq: seq++, nonce: 'p1', payload: { statement, scope: SCOPE, creator: human.human } }));
+  const premId = makePremise({ statement, scope: SCOPE, creator: human.human }).id;
+  put(confMinter.mint({ type: 'CONFIRM', seq: seq++, nonce: 'cf1', payload: { target_premise_id: premId } }));
+
+  assert.ok(crossVerify(premId, w.meCtx).strength > 0, 'a broker-minted premise+confirm scores via the real read path');
+  assert.equal(creatorStanding(human.human, w.meCtx).n_premises, 1, 'the human accrues their broker-minted premise');
+  assert.ok(direct(w.meCtx, 'did:key:zConfirmer', undefined).r > 0, 'a broker-minted CLAIM reads as DIRECT evidence');
+  w.cleanup();
+});
+
+// ====================== seam UNCHANGED (mechanical: zero blast radius) ======================
+
+test('zero blast radius: buildFrame/minter/resolveSigner are byte-unchanged (git-checkable)', () => {
+  // mechanical check, NOT a threat-test (honesty MINOR): the broker plugs into the existing sync seam.
+  const seamFiles = ['frame/frame.js', 'identity/minter.js', 'lib/edge-attestation.js'];
+  for (const f of seamFiles) {
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', f), 'utf8');
+    // actual COUPLING (a require / call of the broker module), NOT a prose mention — the seam headers
+    // legitimately say "a separate-uid broker / enclave / HSM client" to document the opts.signer seam.
+    assert.ok(!/require\([^)]*broker|brokerSigner|assertBrokerPersona|broker-client|broker-sign/.test(src),
+      f + ' has no broker coupling (the broker drops into the existing opts.signer seam)');
+  }
+});
+
+// ====================== broker-side input gate (hacker MED-1: the CLI is directly invokable) ======================
+
+test('broker-sign.js has its OWN hex64 gate (direct invocation, bypassing the client)', () => {
+  const w = freshWorld();
+  const key = w.personas['did:key:zME'].keyFile;
+  for (const bad of ['-', '--', 'A'.repeat(64), 'a'.repeat(63), 'g'.repeat(64), 'xyz', '../etc']) {
+    const r = spawnSync(process.execPath, [BROKER, bad], { env: { PACT_BROKER_KEY_FILE: key }, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'broker exits non-zero on ' + JSON.stringify(bad));
+    assert.equal((r.stdout || '').trim(), '', 'no stdout on ' + JSON.stringify(bad));
+  }
+  // and the broker with NO arg at all
+  const none = spawnSync(process.execPath, [BROKER], { env: { PACT_BROKER_KEY_FILE: key }, encoding: 'utf8' });
+  assert.notEqual(none.status, 0);
+  w.cleanup();
+});
+
+// ====================== HIGH-1: env-allowlist defeats NODE_OPTIONS into the key-holding child ======================
+
+test('PROVES the env-allowlist defeats NODE_OPTIONS injection into the broker child', () => {
+  const w = freshWorld();
+  const key = w.personas['did:key:zME'].keyFile;
+  const preload = path.join(w.STATE, 'evil-preload.js');
+  const touched = path.join(w.STATE, 'TOUCHED');
+  fs.writeFileSync(preload, 'require("fs").writeFileSync(' + JSON.stringify(touched) + ', "x");');
+  const prev = process.env.NODE_OPTIONS;
+  process.env.NODE_OPTIONS = '--require ' + preload; // a host-env attacker
+  try {
+    const sig = brokerFor(key)(RID);
+    assert.ok(sig, 'the happy path still works with a scrubbed (allowlisted) child env');
+    assert.ok(!fs.existsSync(touched), 'NODE_OPTIONS was NOT inherited into the key-holding broker child');
+  } finally {
+    if (prev === undefined) delete process.env.NODE_OPTIONS; else process.env.NODE_OPTIONS = prev;
+  }
+  w.cleanup();
+});
+
+// ====================== HIGH-2: key-file vet (symlink / world-writable / absent / non-ed25519) ======================
+
+test('broker refuses a symlinked / world-or-group-writable / absent / non-ed25519 key file', () => {
+  const w = freshWorld();
+  const a = w.personas['did:key:zME'];
+  // absent
+  assert.equal(brokerFor(path.join(w.STATE, 'nope.key'))(RID), null, 'absent key -> null');
+  // symlink
+  const link = path.join(w.STATE, 'key.link'); fs.symlinkSync(a.keyFile, link);
+  assert.equal(brokerFor(link)(RID), null, 'symlinked key file refused (swap defense)');
+  // world-writable
+  const ww = path.join(w.STATE, 'ww.key'); fs.writeFileSync(ww, fs.readFileSync(a.keyFile)); fs.chmodSync(ww, 0o666);
+  assert.equal(brokerFor(ww)(RID), null, 'world-writable key file refused');
+  // group-writable
+  const gw = path.join(w.STATE, 'gw.key'); fs.writeFileSync(gw, fs.readFileSync(a.keyFile)); fs.chmodSync(gw, 0o620);
+  assert.equal(brokerFor(gw)(RID), null, 'group-writable key file refused');
+  // non-ed25519 (alg-pinning survives the process boundary)
+  const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
+  const rsaPath = path.join(w.STATE, 'rsa.key'); fs.writeFileSync(rsaPath, rsa.privateKey);
+  assert.equal(brokerFor(rsaPath)(RID), null, 'non-ed25519 key refused');
+  // the legit 0644 key still passes (the vet is not over-broad)
+  assert.ok(brokerFor(a.keyFile)(RID), 'a normal regular 0644 key file is accepted');
+  w.cleanup();
+});
+
+// ====================== MED-2: key never leaks (dedicated stderr-capturing spawn) ======================
+
+test('the broker emits ONLY the sig — no key/PEM/DER fragment on stdout OR stderr', () => {
+  const w = freshWorld();
+  const a = w.personas['did:key:zME'];
+  const keyBody = a.kp.privateKeyPem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '').slice(0, 40);
+  // happy path: stdout is just the 88-char b64 sig; stderr empty; no key body anywhere
+  const ok = spawnSync(process.execPath, [BROKER, RID], { env: { PACT_BROKER_KEY_FILE: a.keyFile }, encoding: 'utf8' });
+  assert.equal(ok.status, 0);
+  assert.equal(ok.stdout.trim().length, 88, 'stdout is exactly the base64 sig');
+  assert.equal(ok.stderr, '', 'happy path: empty stderr');
+  assert.ok(!ok.stdout.includes(keyBody) && !ok.stderr.includes(keyBody), 'no key body in output');
+  // malformed-key error path: non-zero, empty stdout, NO PEM/DER/key fragment on stderr (no err.stack)
+  const bad = path.join(w.STATE, 'bad.key'); fs.writeFileSync(bad, 'definitely not a pem');
+  const er = spawnSync(process.execPath, [BROKER, RID], { env: { PACT_BROKER_KEY_FILE: bad }, encoding: 'utf8' });
+  assert.notEqual(er.status, 0);
+  assert.equal(er.stdout, '', 'no stdout on the error path');
+  assert.ok(!/PRIVATE KEY|BEGIN |MC4C|MII/.test(er.stderr), 'no PEM/DER fragment on stderr');
+  w.cleanup();
+});
+
+// ====================== client DoS bounds ======================
+
+test('client bounds: over-maxBytes output and a hanging broker both fail closed (null)', () => {
+  const w = freshWorld();
+  const a = w.personas['did:key:zME'];
+  // an 88-char sig overflows a 4-byte maxBuffer -> execFileSync throws -> null
+  assert.equal(brokerFor(a.keyFile, { maxBytes: 4 })(RID), null, 'over-maxBytes -> null');
+  // a hanging broker stub exceeds the timeout -> null
+  const hang = brokerSigner({ command: process.execPath, args: ['-e', 'setTimeout(function(){}, 100000)'], timeoutMs: 200 });
+  assert.equal(hang(RID), null, 'timeout -> null');
+  w.cleanup();
+});
+
+test('client config guards: timeoutMs/maxBytes <= 0 fall back to defaults; opts.env refuses reserved vars', () => {
+  const w = freshWorld();
+  const a = w.personas['did:key:zME'];
+  // timeoutMs:0 must NOT mean "no timeout" (the execFileSync footgun) — falls back to the default and signs
+  assert.ok(brokerFor(a.keyFile, { timeoutMs: 0 })(RID), 'timeoutMs:0 falls back to default (not no-timeout)');
+  assert.ok(brokerFor(a.keyFile, { maxBytes: 0 })(RID), 'maxBytes:0 falls back to default (not a 0-byte buffer)');
+  // opts.env may NOT re-open the code-loading hole or shadow the key-path channel
+  for (const bad of ['NODE_OPTIONS', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'PACT_BROKER_KEY_FILE']) {
+    assert.throws(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [bad]: 'x' } }), /may not set a code-loading\/key-path var/, bad + ' refused in opts.env');
+  }
+  assert.ok(brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { SOME_BENIGN: '1' } })(RID), 'a benign extra env var is allowed');
+  w.cleanup();
+});
+
+// ====================== architect #1: persona<->key binding (fail-closed + opt-in smoke check) ======================
+
+test('mis-wired broker FAILS CLOSED (Alice key minting as Bob is rejected, not forged)', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice'); w.add('did:key:zBob');
+  const alice = w.personas['did:key:zAlice']; const bob = w.personas['did:key:zBob'];
+  // a minter bound to Bob but wired to a broker holding ALICE's key
+  const miswired = createMinter({ signer: brokerFor(alice.keyFile), personaDid: 'did:key:zBob', humanUid: bob.human });
+  const r = miswired.mint({ type: 'CLAIM', seq: seq++, nonce: 'mw', payload: {} });
+  assert.ok(r.ok, 'the frame assembles (the broker signed it)');
+  assert.equal(receiveFrame(r.frame, { registry: w.registry }).ok, false, 'but receiveFrame REJECTS it — fail-closed, no silent cross-persona forgery');
+  w.cleanup();
+});
+
+test('assertBrokerPersona catches a mis-wire LOUDLY at wire-time (opt-in)', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice'); w.add('did:key:zBob');
+  const alice = w.personas['did:key:zAlice'];
+  const sign = brokerFor(alice.keyFile);
+  assert.ok(assertBrokerPersona(sign, { registry: w.registry, personaDid: 'did:key:zAlice' }), 'correctly-wired broker passes');
+  assert.throws(() => assertBrokerPersona(sign, { registry: w.registry, personaDid: 'did:key:zBob' }), /does NOT sign as/, 'mis-wire caught loudly');
+  assert.throws(() => assertBrokerPersona('not-a-fn', { registry: w.registry, personaDid: 'did:key:zAlice' }), /must be a function/);
+  w.cleanup();
+});
+
+test('assertBrokerPersona random probe defeats a probe-special-casing decoy signer', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  const alice = w.personas['did:key:zAlice'];
+  const aliceSign = brokerFor(alice.keyFile);
+  const wrong = newPersonaKeypair();
+  // a decoy that signs with Alice's key ONLY for the OLD fixed probe 'f'*64, and a WRONG key otherwise.
+  // A fixed probe would false-PASS; the random per-call probe cannot be special-cased -> caught.
+  const decoy = (rid) => (rid === 'f'.repeat(64)
+    ? aliceSign(rid)
+    : crypto.sign(null, Buffer.from(rid, 'utf8'), crypto.createPrivateKey(wrong.privateKeyPem)).toString('base64'));
+  assert.throws(() => assertBrokerPersona(decoy, { registry: w.registry, personaDid: 'did:key:zAlice' }), /does NOT sign as/, 'a fixed-probe decoy is caught by the random probe');
+  w.cleanup();
+});
+
+// ====================== HONEST RESIDUALS (non-vacuous: the attack SUCCEEDS) ======================
+
+test('PROVES R2 oracle-abuse is OPEN: anyone with broker access forges a record AS the persona', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  const alice = w.personas['did:key:zAlice'];
+  // an "attacker" who only has access to Alice's broker (NOT her minter) forges a CLAIM as Alice:
+  const forged = buildFrame(
+    { srcPersonaDid: 'did:key:zAlice', parentHumanUid: alice.human, seq: seq++, nonce: 'forge', payload: { claim: { content: 'attacker-authored, signed as Alice' } } },
+    { signer: brokerFor(alice.keyFile) },
+  );
+  assert.ok(forged.ok, forged.reason);
+  assert.ok(receiveFrame(forged.frame, { registry: w.registry }).ok, 'the forged frame is ACCEPTED as Alice — the broker is a sign-anything oracle (R2, needs caller-auth next wave)');
+  w.cleanup();
+});
+
+test('PROVES R1 (file leg): same-uid the host reads the broker key FILE directly', () => {
+  // NON-VACUOUS for the file-read leg: the host reads the very key the broker loads via PACT_BROKER_KEY_FILE.
+  // The header's ptrace / /proc/<pid>/mem leg is same-uid physics, NOT separately exercised — the test name
+  // is narrowed to exactly what the body proves (honesty VALIDATE F1).
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  const body = fs.readFileSync(w.personas['did:key:zAlice'].keyFile, 'utf8');
+  assert.match(body, /PRIVATE KEY/, 'same-uid the host reads the very key the broker "holds" (custody-real needs cross-uid)');
+  w.cleanup();
+});
+
+// ====================== grep-gate: the client holds no key material ======================
+
+test('broker-client.js references NO raw key material (the broker holds the key, not the client)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'identity', 'broker-client.js'), 'utf8');
+  assert.ok(!/privateKeyPem\s*:|\.privateKeyPem/.test(src), 'broker-client.js is key-free (broker-sign.js is the sole key-loader, allowlisted in minter.test.js)');
+});
+
+console.log(`\n[broker] ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
