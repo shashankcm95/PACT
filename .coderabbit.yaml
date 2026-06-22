@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit config for PACT. Primary purpose: encode the per-wave design-record lifecycle so CodeRabbit
+# does NOT raise the recurring false-positive of flagging an IN-PLACE edit to a plan file as "editing an
+# immutable/canonical path." PACT's plans/** are LIVING per-wave documents that accrete sections
+# (## §N VERIFY board, ## §N VALIDATE board, wave-close status) as each wave completes — updating them in
+# place IS the workflow. (Mirrors the toolkit's own .coderabbit.yaml, where this FP recurred 3x.)
+language: en-US
+reviews:
+  path_instructions:
+    - path: "plans/**"
+      instructions: >-
+        These are LIVING, per-wave planning documents — NOT immutable. Updating an existing plan after
+        creation is the established, correct PACT workflow: a plan accretes sections (e.g. "## §N VERIFY
+        board", "## §N VALIDATE board", wave-close status) as each wave of work completes. Do NOT flag an
+        in-place edit to a plan file as "editing an immutable/canonical path," and do NOT suggest moving
+        the update elsewhere — the plan is the canonical home for its own wave record. (Still review the
+        change on its own merits — accuracy, links, internal consistency — just not as an immutability violation.)
+    - path: "PACT-spec*.md"
+      instructions: >-
+        The versioned spec is canonical: a new revision SUPERSEDES the prior (v1.1 supersedes v1.0) via a
+        new file/rev, not a silent rewrite. PACT-spec.md is already SUPERSEDED (historical). It is
+        appropriate to flag a substantive rewrite of the CURRENT spec's decisions as an immutability
+        concern; typo / formatting / link fixes are fine.
