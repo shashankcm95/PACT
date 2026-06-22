@@ -272,6 +272,19 @@ test('CONVERT is ADVISORY: actionable=false, independence WEAK (everything SHADO
   w.cleanup();
 });
 
+// ---- P4 sequencing guard (plans/08): the machine-readable form of the convert.js:82-85 comment + the
+// weak-flag.js:47-52 P5 lift-point. `actionable` MUST NOT flip true, and high-stakes MUST stay refused,
+// until the per-path bar exists AND the U2 estimator replaces epistemicIndependence(). A future edit that
+// breaks ANY leg goes RED here against a NAMED guard. (Consolidates pre-existing assertions; not net-new.)
+test('P4 SEQUENCING GUARD: actionable=false + mayGate refuses high-stakes + epistemicIndependence is WEAK', () => {
+  const w = freshWorld();
+  w.add('did:key:zTarget');
+  assert.equal(convert(w.meCtx, w.ME, 'did:key:zTarget').actionable, false, 'actionable must NOT flip until the P4 bar + U2 (convert.js:82-85)');
+  assert.equal(mayGate(independenceLabel({ topological: 99 }), { highStakes: true }), false, 'high-stakes stays refused (symptom)');
+  assert.equal(epistemicIndependence(), 'WEAK', 'the SOLE P5 lift-point — the CAUSE; U2 replaces THIS fn (weak-flag.js:52)');
+  w.cleanup();
+});
+
 // ---- no rank throne: vouches are receiver-scoped ----
 test('no rank throne: the SAME vouch yields DIFFERENT wcons for two receivers (no global order)', () => {
   // ME earns Alice; a SECOND receiver earns Bob. Both have Alice+Bob vouch the target with different

@@ -182,6 +182,19 @@ test('broker refuses a symlinked / world-or-group-writable / absent / non-ed2551
   const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
   const rsaPath = path.join(w.STATE, 'rsa.key'); fs.writeFileSync(rsaPath, rsa.privateKey);
   assert.equal(brokerFor(rsaPath)(RID), null, 'non-ed25519 key refused');
+  // a directory (non-regular) -> refused at the isFile check BEFORE any read (a dir fd reads EISDIR; we
+  // reject first). Closes the previously-untested isFile guard + evidences check-before-read (VERIFY F5).
+  assert.equal(brokerFor(w.STATE)(RID), null, 'a directory key path is refused (non-regular, check-before-read)');
+  // a FIFO -> O_NONBLOCK opens it immediately (no hang waiting for a writer) -> isFile() rejects it. Invoke
+  // the broker DIRECTLY with a short timeout: a non-zero exit with NO kill-signal proves it rejected, didn't
+  // hang (without O_NONBLOCK the open would block until the client timeout killed it). (VALIDATE hacker LOW)
+  const fifo = path.join(w.STATE, 'key.fifo');
+  const mk = spawnSync('mkfifo', [fifo], { encoding: 'utf8' });
+  if (mk.status === 0) {
+    const r = spawnSync(process.execPath, [BROKER, RID], { env: { PACT_BROKER_KEY_FILE: fifo }, timeout: 4000, encoding: 'utf8' });
+    assert.notEqual(r.status, 0, 'a FIFO key path is refused (exit non-zero)');
+    assert.equal(r.signal, null, 'and it did NOT hang (no timeout kill-signal) — O_NONBLOCK + isFile reject');
+  }
   // the legit 0644 key still passes (the vet is not over-broad)
   assert.ok(brokerFor(a.keyFile)(RID), 'a normal regular 0644 key file is accepted');
   w.cleanup();

@@ -90,7 +90,7 @@ time only); nothing enters the repo. Runtime stays zero-dep.
 - [x] `package.json` (zero deps) gives working `npm test` + `npm run lint`.
 - [x] **clean-env dogfood (H.7.15):** the exact CI commands pass against a `/tmp` **rsync** export (NOT
       `git archive` — which would omit the still-uncommitted CI files; inventory asserted: 11 files / 148 tests).
-- [~] node-20 leg: asserted by grep (0 node-22-only APIs) — UNPROVEN until the first real Actions node-20 run.
+- [x] node-20 leg: PROVEN — the first real GitHub Actions run went green on node 20+22 (push-to-main + PR #1).
 - [x] nothing in PACT's runtime gains a committed dependency (no lock, no tracked node_modules, no `dependencies`).
 
 ## §6 VERIFY board (pre-build) — RECORDED 2026-06-22

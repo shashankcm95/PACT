@@ -4,7 +4,7 @@ A protocol blueprint for a network of authenticated AI agents rooted in scarce h
 designed to scale the Power Loom `kernel → runtime → evolution` substrate from a single node into
 a mutually-untrusting multi-agent network.
 
-## Status: **v0 + P2 + P3 + P-minter + P-broker BUILT + CI (2026-06-22)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody) + P-broker (out-of-band custody mechanism), all SHADOW; 148 tests green; a CI workflow (vacuous-pass-guarded test runner + eslint + a layering tripwire) is committed — it **will run** on push/PR (first GitHub Actions run pending)
+## Status: **v0 + P2 + P3 + P-minter + P-broker BUILT + CI (2026-06-22)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody) + P-broker (out-of-band custody mechanism), all SHADOW; 153 tests green; a CI workflow (vacuous-pass-guarded test runner + eslint + a layering tripwire) is committed — it runs on push/PR (first GitHub Actions run: GREEN on node 20+22)
 
 > **All weights are SHADOW (gate nothing) because residuals remain open.** **P-minter** removed the ambient env-PEM signing default and named a structurally key-free custody writer — but it **NARROWS, it does not CLOSE** integrity≠provenance: provenance is a key-custody property crypto cannot prove in-process (a same-uid attacker re-exports any in-process key), so it closes only when the signer routes to a real out-of-band boundary (separate OS uid / enclave / HSM — a *deployment* property). **Still open (loud):** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but N distinct *human* roots is the frontier); **own-key forgery** (a same-uid holder of a registered key mints authentic records — U1's issuance-cost problem); same-uid in-process custody (by physics). v0+P2+P3 passed a 3-lens coherence checkpoint ([plans/03](plans/03-coherence-checkpoint.md)); P-minter passed a 3-lens VERIFY that reframed it close→narrow ([plans/04](plans/04-authenticated-minter-plan.md)).
 
@@ -46,7 +46,7 @@ node test/run.js  # the runner directly (what CI runs)
 ```
 
 CI (`.github/workflows/ci.yml`) **will run** the suite on a **node 20 + 22** matrix plus eslint, on every push/PR
-to `main` (the workflow is committed; the first GitHub Actions run is pending). The runner FAILS loudly if zero
+to `main` (the first GitHub Actions run went GREEN on node 20+22). The runner FAILS loudly if zero
 test files are discovered, if any file executes zero tests, or if the grand total is zero — a green means tests
 actually **ran**, not merely "nothing failed". (It trusts each file's first-party `N passed, M failed` self-report;
 it does not independently count assertions.)

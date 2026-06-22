@@ -136,6 +136,13 @@ test('invalid receiver (empty/non-string) is rejected', () => {
   assert.equal(S.appendRecord(buildRecord({ nonce: 'inv-2' }), { receiverId: null, stateDir: STATE }).reason, 'invalid-receiver');
 });
 
+test('store boundary REJECTS a both-target_* record (the CONTEST discriminant fires at appendRecord)', () => {
+  const rec = buildRecord({ type: 'CONTEST', payload: { target_claim_id: 'a'.repeat(64), target_premise_id: 'b'.repeat(64) } });
+  const res = S.appendRecord(rec, { receiverId: RX, stateDir: STATE });
+  assert.equal(res.ok, false, 'a both-target_* record must be rejected at the store boundary');
+  assert.match(res.reason, /invalid-record/);
+});
+
 // cleanup
 try { fs.rmSync(STATE, { recursive: true, force: true }); } catch { /* best-effort */ }
 
