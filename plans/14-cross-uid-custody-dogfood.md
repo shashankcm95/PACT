@@ -172,22 +172,40 @@ NON-VACUOUS (hacker MED, probe-confirmed it can red for the wrong reason):
 `custody-real (R1)` claim, or is it narrowed (NECESSARY checks PASS but the process<->uid bind or the `--key`
 binding unproven)? NS-9 reflex — no "hardened" claim outruns the recorded evidence.
 
-## §8 Dogfood result — TO BE FILLED at the run (skeleton; §9-revised)
+## §8 Dogfood result — RECORDED 2026-06-23 (MacBookAir; existing Jun-22 deployment; PASS for R1)
+
+The deployment was already provisioned on a prior session (2026-06-22 11:45-11:57): `pact-broker` uid 600,
+key `/etc/pact/broker.key` `0600` owned `pact-broker:wheel`, root-owned wrapper + `0440` sudoers. The CURRENT
+(hardened) `custody-verify.js` was run against that REAL cross-uid broker (read-only).
 
 ```
-host / date:
-custody-verify output: C0 __ / C1 __ / C2 __ (denialLegTaken: __ ; detail: __) / C2.5 __ (statable: __) /
-  C3 __ (personaMatches: __ ; diagnostic: __)
-  hostObservableChecksPassed: __   requiresOutOfBandUidConfirmation: __
-negative control (real same-uid facts): C2 expected FAIL with same-uid reason -> observed check-id + reason: __
-SUFFICIENT facts (the tool cannot prove these):
-  signing PROCESS uid (ps -o ruid= -p <broker-pid> | wrapper id -u): __  (must == key-owner uid, != host uid)
-  --key path: __   PACT_BROKER_KEY_FILE (sudo grep <wrapper>): __   (must be the SAME path — 2a)
-  wrapper dir: __ (root-owned, non-writable?)   key dir: __ (root-owned, non-writable?)   (2d)
-  ptrace_scope: __   host in broker group?: __   CAP_SYS_PTRACE?: __   (2e)
-out-of-band attestation: id=__   ls -l <key> owner=__ (must != host uid)   cat <key> -> __ (must be Permission denied)
-npm test tail (pasted, not quoted): __ passed / __ failed
-verdict (honesty-audited): __ (custody-real R1 established | narrowed-because-__ | vacuous-because-__)
+host / date:                 MacBookAir / 2026-06-23   (host uid 501; broker uid 600)
+custody-verify (real run):   C0 PASS (uid 501) / C1 PASS (119 bytes) /
+  C2 PASS (denialLegTaken: true; "host read denied EACCES + key owned by 600 != 501") /
+  C2.5 PASS (wrapper statable, non-group/world-writable) /
+  C3 PASS (personaMatches: true; "a real, usable key exists behind the broker")
+  hostObservableChecksPassed: true   requiresOutOfBandUidConfirmation: true
+negative control (REAL same-uid facts, --key=/tmp/nc.key 0600 owned 501):
+  C2 FAIL "the host uid CAN read the key file" (the :75 readable-key path) -> NON-VACUOUS (guard goes RED)
+SUFFICIENT facts (the tool cannot prove these — attested out-of-band):
+  signing PROCESS uid: 600  (LOGICAL bind: `sudo -n -l` runas = (pact-broker)=600 NOT root, + the broker read
+    the 0600/600 key per C3 -> only uid 600 or root can read it -> 600. Direct `ps` inconclusive: sign faster
+    than the poll. RESIDUAL: assumes no stray host-readable COPY of the private key elsewhere.)
+  --key: /etc/pact/broker.key  ==  wrapper PACT_BROKER_KEY_FILE: /etc/pact/broker.key   (2a SAME path — not a decoy)
+  wrapper dir /usr/local/bin: root:wheel 0755 (non-host-writable)   key dir /etc/pact: pact-broker:wheel 0755 (non-host-writable)   (2d ok)
+  macOS memory guard (2e): SIP enabled (csrutil); host 501 cannot task_for_pid a uid-600 process without root.
+    (COARSER + less inspectable than Linux ptrace_scope=2 — the strongest 2e is a Linux box.)
+out-of-band attestation: id=501 (!= 600)   ls -l owner=pact-broker(600) != 501   cat /etc/pact/broker.key -> Permission denied
+npm test: NOT re-run (no code change this turn; last green this session: 230). The dogfood ran the CURRENT
+  repo verifier against the DEPLOYED broker; no source was modified.
+verdict (pending VALIDATE honesty pass, §7): custody-real (R1 / file-read NON-EXFILTRATION) ESTABLISHED for the
+  cross-uid KEY CUSTODY on this box. SCOPE (NS-9): R1 ONLY — R2 (oracle-abuse / authorization) and R3 (own-key
+  forgery) UNTOUCHED. CAVEATS: (1) the DEPLOYED broker is a STALE pre-R2-WHAT blind-oracle snapshot — the R1
+  custody claim is code-version-independent (filesystem + uid), but the deployed broker CODE was not itself
+  validated by this run and lacks this session's per-request/caller-auth hardening; (2) macOS SIP < Linux
+  ptrace_scope=2; (3) the process-uid bind is a logical proof modulo a stray key copy. This is PACT's FIRST
+  world-anchored signal that HARDENS (per OQ-NS-6/NS-7), not narrows — observed live, kernel EACCES under a real
+  separate uid.
 ```
 
 ## §9 VERIFY board result — RECORDED 2026-06-22 (architect + hacker + honesty; all SOUND-WITH-CHANGES)
