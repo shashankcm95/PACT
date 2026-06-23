@@ -14,9 +14,12 @@ primitives + a greenfield ATMS core.
 ## Run the tests
 
 ```sh
-cd v0
-for t in test/unit/*.test.js test/acceptance/*.test.js; do node "$t" || exit 1; done
+node test/run.js   # from the repo root (or: npm test)
 ```
+
+The runner discovers every `v0/test/**/*.test.js` (unit + the D1–D7 acceptance gate + the broker / caller-auth /
+request-auth / custody-verify / layering / runner-guard suites) and enforces the vacuous-pass guards — prefer it
+over a bare `for`-loop, which omits those guards and the newer suites.
 
 The acceptance test (`test/acceptance/v0-dod.test.js`) IS the definition-of-done: D1–D7 are concrete
 forcing assertions (distinct keys, separate-uid provenance out-of-band, FALSIFY-as-flag + authz,
