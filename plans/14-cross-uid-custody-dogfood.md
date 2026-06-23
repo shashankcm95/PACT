@@ -2,24 +2,30 @@
 lifecycle: persistent
 created: 2026-06-22
 wave: cross-uid custody DOGFOOD (the live run of the plans/09 spike — the first HARDENING move)
-status: PLAN (pre-VERIFY) — execution + pass-criteria spec; the CODE already shipped in plans/09
+status: PLAN — VERIFY board folded (§9); run-ready pending operator provisioning
 ---
 
-# Cross-uid custody dogfood — running the spike for real (HARDENS, not narrows)
+# Cross-uid custody dogfood — running the spike for real (hardens NON-EXFILTRATION / R1; R2 + R3 stay open)
 
-> The first move in the whole project that crosses NS-7's line from *narrow* to *harden*. `plans/09` built the
-> custody MECHANISM + the verifier + the runbook (all SHADOW, unit-tested via SYNTHETIC facts because a same-uid
-> box cannot produce real cross-uid facts). This wave RUNS it against a genuinely separate OS uid so the kernel's
-> `EACCES` under a foreign uid — a world-anchored OS fact, out-of-band of PACT's own code — becomes the signal.
-> No new production code: the deliverable is the LIVE RUN + the recorded out-of-band attestation.
+> The first move in the whole project that crosses NS-7's line from *narrow* to *harden* — but only for ONE
+> axis: **file-read non-exfiltration (R1)**. `plans/09` built the custody MECHANISM + the verifier + the runbook
+> (all SHADOW, unit-tested via SYNTHETIC facts because a same-uid box cannot produce real cross-uid facts). This
+> wave RUNS it against a genuinely separate OS uid so the kernel's `EACCES` under a foreign uid — a world-anchored
+> OS fact, out-of-band of PACT's own code — becomes the signal. No new production code: the deliverable is the
+> LIVE RUN + the recorded out-of-band attestation. **R2 (oracle-abuse / authorization) and R3 (own-key forgery)
+> are UNTOUCHED by custody — do not read a custody PASS as a trust-wide or authorization/provenance win.**
 
 ## §0 Frame — the OQ-NS-6 honesty banner (read first)
 
 Per NS-7, every in-process SHADOW signal PACT has shipped only NARROWS trust. The custody-real hardening is a
 **deployment property** (separate uid / enclave / HSM), and the only thing that establishes it is an OS-level
 fact the operator attests out-of-band. **This wave does not write code that hardens — it RUNS the deployment and
-RECORDS the world-anchored signal.** Until the attestation is real, everything stays SHADOW (NS-8); nothing gates
-an action. Per NS-9: a vacuous or same-uid run is NOT a hardening — it is reported as exactly what it is.
+RECORDS the world-anchored signal.** Scope of the claim (honesty MED — the qualifier rides WITH the claim, not 80
+lines later): a clean run hardens **file-read non-exfiltration of the key (R1)** and NOTHING else — `ptrace` /
+`/proc/<pid>/mem` heap-read is a SEPARATE exfil channel this run closes ONLY if `ptrace_scope` is also attested
+(§2e); authorization (R2) and forgery (R3) stay fully open. Until the attestation is real, everything stays
+SHADOW (NS-8); nothing gates an action. Per NS-9: a vacuous, same-uid, or necessary-but-insufficient run is NOT a
+hardening — it is reported as exactly what it is.
 
 ## §1 What is already built (plans/09) vs what this wave adds
 
@@ -27,98 +33,192 @@ an action. Per NS-9: a vacuous or same-uid run is NOT a hardening — it is repo
   I/O; C0/C1/C2/C2.5/C3), `broker-launch.js` (`crossUidBrokerSigner` — the validated `sudo -n -u` argv builder),
   and the operator runbook (`docs/deployment/cross-uid-broker.md`, reconciled to the post-R2-WHAT code at `df1344e`).
 - **This wave adds (no new production code):** (1) a NEGATIVE-control run that proves the verifier goes RED on a
-  same-uid deployment; (2) the REAL cross-uid run; (3) the out-of-band attestation, recorded in §8; (4) a north-star
-  §2.6 update IF — and only if — the attestation genuinely lands (NS-9). Any helper for the negative control is a
-  throwaway `/tmp` script, not shipped code.
+  same-uid deployment; (2) the REAL cross-uid run; (3) the out-of-band attestation including the SUFFICIENT facts
+  the verifier structurally cannot prove (§3); (4) a north-star §2.6 update IF — and only if — the attestation
+  genuinely lands (NS-9, §6).
+- **The verifier has known gaps the OPERATOR closes by hand here** (surfaced by the §9 VERIFY board): the verifier
+  checks the operator-supplied `--key` path, which is DECOUPLED from the key the broker actually signs with; it
+  proves a FILE is cross-uid-owned, never that the signing PROCESS is that uid; it does not model `ptrace` or
+  the wrapper/key DIRECTORY. Each is closed by an explicit §2 checkpoint + a recorded §8 fact. Hardening the
+  verifier IN CODE to enforce these is an optional follow-on (§10), NOT required for an honest operator dogfood.
 
-## §2 Execution order (the operator path — runbook §1–§7 condensed)
+## §2 Execution order + provisioning checkpoints (runbook §1-§7 + the §9-board gates)
 
-1. Provision: create `pact-broker` uid (no login/shell); place the persona private key `0600`, owned by
-   `pact-broker`, in a `0755` dir (so the host can `lstat` the OWNER — runbook §2's load-bearing detail).
-2. Install the root-owned, non-host-writable wrapper (sets the key path broker-side; `PACT_BROKER_PERSONA_DID=did:key:zBroker`);
+1. Provision: create `pact-broker` uid (no login/shell); key `0600` owned by `pact-broker` in a `0755` dir.
+2. Install the root-owned wrapper (sets `PACT_BROKER_KEY_FILE` + `PACT_BROKER_PERSONA_DID=did:key:zBroker` broker-side);
    add the sudoers entry pinning `env_reset, !setenv`; register the broker PUBLIC key.
 3. Run `custody-verify.js --key … --persona did:key:zBroker --broker-user pact-broker --wrapper … --registry …`
-   AS THE HOST UID; then the out-of-band `id` / `ls -l <key>` / `cat <key>` attestation; then `--attested-cross-uid`.
+   AS THE HOST UID; then the out-of-band attestation (§8); then `--attested-cross-uid`.
 
-The system-config steps (uid, key custody, sudoers) are the OPERATOR's — out of scope for the build. The verdict
-interpretation + result recording is in-scope here.
+**Checkpoints that MUST hold before the run is meaningful (each closes a §9 false-pass / mislead vector):**
 
-## §3 PASS vs VACUOUS-PASS — the non-vacuity hinge (load-bearing)
+- **2a — `--key` MUST equal the wrapper's `PACT_BROKER_KEY_FILE`** (the same-PATH binding, not just same-owner).
+  The verifier opens `--key` (`custody-verify.js:135,143`); the broker signs with `PACT_BROKER_KEY_FILE`
+  (`broker-sign.js:121`); `crossUidBrokerSigner` passes NO keyFile through (`broker-launch.js:64,74`) — they are
+  DECOUPLED. A `--key` pointed at a broker-owned DECOY while the real key is host-readable yields a byte-identical
+  C2/C3 PASS and a green `id`/`ls -l`/`cat` attestation (hacker HIGH-1, probe-confirmed). Confirm `--key` IS the
+  signing key: `sudo grep PACT_BROKER_KEY_FILE <wrapper>` and diff the path.
+- **2b — `PACT_BROKER_ALLOWED_UIDS` must be UNSET, or contain the HOST uid that invokes sudo.** The real run is
+  `sudo -n -u pact-broker <wrapper>`, so `broker-sign.js:87-88` runs `authorizeCaller({sudoUid: SUDO_UID, …})`
+  BEFORE the key open (`broker-sign.js:97`). A denied caller exits before signing → C3 FAILS with a no-signature
+  message IDENTICAL to a wiring/sudoers break (arch HIGH-1). If unset, the broker prints `caller-auth DISABLED`
+  and proceeds — capture stderr to disambiguate.
+- **2c — triple-equality:** the registry entry's `personaDid`, the wrapper's `PACT_BROKER_PERSONA_DID`, and the
+  `--persona` CLI arg must be the SAME string (`did:key:zBroker`), and the registry `publicKeyPem` must be the
+  broker key's public half. A mismatch → C3 `personaMatches:false` → `broker signed but as a DIFFERENT persona`
+  (`custody-verify.js:98`), a config error not a custody fault (arch MED).
+- **2d — the wrapper DIR and the key DIR must be root-owned + non-group/world-writable, and host-traversable.**
+  C2.5 checks only the wrapper FILE mode, not its DIRECTORY (`custody-verify.js:103-108`): a host-writable wrapper
+  dir lets the host replace the wrapper → code-exec as the broker uid → key exfil, with C2.5 reporting PASS
+  (hacker MED). Host-traversable (`0755`) so C2.5/C2-owner don't silently degrade to a non-failing NOTE.
+- **2e — `ptrace` is denied to the host:** confirm `sysctl kernel.yama.ptrace_scope` ≥ 1, the host uid is NOT in
+  the broker's group, and lacks `CAP_SYS_PTRACE`; the verifier models none of this (hacker HIGH-3). Without it the
+  host can lift the key from the broker heap after `broker-sign.js` reads it, and a C2/`cat`-denied PASS still
+  over-claims non-exfiltration.
 
-A non-vacuous PASS (custody genuinely real) requires ALL of:
+The system-config steps (uid, key custody, sudoers, ptrace policy) are the OPERATOR's. The verdict interpretation
++ result recording is in-scope here.
 
-- **C2 took the DIFFERENT-OWNER denial leg** — `denialLegTaken === true`: host read DENIED (`EACCES`/`EPERM`)
-  **AND** the key file's `lstat` owner uid `!=` the running uid. (`custody-verify.js:80-86`.)
-- **C3 `personaMatches`** — the broker produced a signature that verifies as `did:key:zBroker` (a real, usable key
-  exists behind the broker, proven WITHOUT the host reading or stat-ing it).
-- **C0 not root**, **C1 key present + non-empty**, **C2.5 wrapper not group/world-writable**.
-- **`hostObservableChecksPassed: true` AND `requiresOutOfBandUidConfirmation: true`** — the tool refuses to
-  self-certify custody; the operator's `id`/`ls -l`/`cat → Permission denied` is what closes it.
+## §3 PASS vs VACUOUS-PASS — the non-vacuity hinge (load-bearing; §9-revised)
 
-A VACUOUS pass (NOT a hardening — must be caught + named, NS-9), each already guarded by the code:
+A non-vacuous PASS (custody genuinely real for R1) requires ALL of — NECESSARY (tool-observable) **and**
+SUFFICIENT (operator-attested):
 
-- **Same-uid run** (key owned by the host uid): C2 FAILS — `the host uid CAN read the key` or `owned by the
-  running uid — EACCES is from file MODE, not uid separation`. This is the most likely accidental vacuity.
-- **Owner-blinded** (`0700` key dir): C2 FAILS fail-closed — `the key OWNER is unreadable … cannot distinguish a
-  cross-uid key from its own locked-dir key` (the live-reproduced false-pass that plans/09 closed).
-- **Root**: C0 FAILS — root bypasses file perms; uid separation is unobservable.
+NECESSARY (the verifier reports; necessary, NOT sufficient — `custody-verify.js:113-120`):
+- **C2 DIFFERENT-OWNER denial leg** — `denialLegTaken === true` at `custody-verify.js:85`: host read DENIED
+  (`EACCES`/`EPERM`) AND the key `lstat` owner uid `!=` the running uid (the different-owner PASS branch is
+  `:84-87`; the same-owner FAIL is `:82-83`). **C2 proves a CHOSEN file is cross-uid-owned — never that it is the
+  signing key (see 2a).**
+- **C3 `personaMatches`** — a real, usable key behind the broker signs + verifies as `did:key:zBroker`. The THREE
+  C3 diagnostics to distinguish: PASS; `broker returned NO signature` (`:97` — sudo/wiring/key OR a caller-auth
+  DENY per 2b, **check the allowlist FIRST**); `broker signed but as a DIFFERENT persona` (`:98` — registry/persona
+  mismatch per 2c).
+- **C0 not root**, **C1 key present + non-empty**, **C2.5 wrapper** — PASS only when the wrapper is host-STATABLE
+  AND a regular, non-group/world-writable file; an UNSTATABLE wrapper degrades to a non-failing NOTE
+  (`custody-verify.js:103-111`) → wrapper integrity UNVERIFIED → record as a residual, do not read as PASS.
+- **`hostObservableChecksPassed: true` AND `requiresOutOfBandUidConfirmation: true`** — the tool REFUSES to
+  self-certify; these flags alone establish NOTHING about uid separation.
 
-## §4 The negative control — prove the guard can FAIL (security.md non-vacuity discipline)
+SUFFICIENT (operator-attested out-of-band — the part the tool structurally cannot do; §8 records each):
+- **The signing PROCESS runs as the key-owner uid** (the SOLE determiner — `custody-verify.js:86,119`): C2 proves a
+  FILE owner, C3 proves SOME signer works; NEITHER binds the running broker PROCESS to that uid. Prove it directly
+  (e.g. `ps -o ruid= -p <broker-pid>` of an in-flight sign, or the wrapper emits `id -u`), `== key-owner uid`,
+  `!= host uid`.
+- **`--key` == the wrapper's `PACT_BROKER_KEY_FILE`** (2a) — else the whole PASS is about a decoy.
+- **The ptrace + dir-ownership preconditions (2d/2e) hold.**
 
-Before trusting the real PASS, run the verifier against a SAME-UID deployment (the broker key owned by the host
-uid) and CONFIRM C2 goes RED (the `same-uid / over-permissive` or `owned by the running uid` fail). A guard that
-has never been seen to fail is theater; this proves the §3 PASS is meaningful, not a tool that always greens. This
-is cheap (a `/tmp` key owned by the running uid + a synthetic-facts assertion, or the real verifier pointed at a
-same-uid key) and it is a DoD item, not optional.
+VACUOUS pass (NOT a hardening — must be caught + named, NS-9):
+- **Same-uid run, readable key:** C2 FAILS at `:75` (`the host uid CAN read the key file`).
+- **Same-uid run, mode-000 key:** C2 FAILS at `:82-83` (`owned by the running uid — EACCES is from file MODE`).
+- **Owner-blinded** (`0700` key dir): C2 FAILS fail-closed (`cannot distinguish a cross-uid key from its own
+  locked-dir key`).
+- **Root**: C0 FAILS. **Necessary-only**: every NECESSARY check PASSES but a SUFFICIENT fact is unrecorded/unproven.
+
+## §4 The negative control — prove the guard can FAIL (security.md non-vacuity discipline; §9-revised)
+
+Before trusting the real PASS, prove the verifier goes RED on a same-uid deployment — but make the control
+NON-VACUOUS (hacker MED, probe-confirmed it can red for the wrong reason):
+
+1. Run the **real** `gatherCustodyFacts` against a real same-uid `/tmp` key owned by the running uid (NOT
+   hand-typed synthetic facts — a mistyped `ownerUid` passes vacuously).
+2. Assert C2 FAILS with a SAME-UID detail string specifically — `the host uid CAN read the key file` (readable
+   `0600` host-owned key, the likely setup → the `:75` path) OR `owned by the running uid` (a mode-000 key → the
+   `:82-83` path). ACCEPT EITHER; pin the assertion to the exact failing check id + reason.
+3. REJECT a RED that comes from C0 (root / getuid-undefined, `:54-55`) or owner-unknown — those red WITHOUT
+   exercising the same-owner leg the control is meant to prove (a vacuous RED).
 
 ## §5 Runtime Probes (firsthand — this session, against the repo NOW)
 
-- **P1** C2 denial leg requires a DIFFERENT owner; same-owner mode-000 + owner-unknown both FAIL-closed:
-  `custody-verify.js:75-89`. CONFIRMED (read).
-- **P2** `crossUidBrokerSigner` is exported + path/username-validated: `broker-launch.js:78`. CONFIRMED (grep).
-- **P3** the runbook is reconciled to the post-R2-WHAT code (persona `did:key:zBroker` consistent across §3/§5/§7):
-  commit `df1344e` on this branch. CONFIRMED (committed this session).
-- **P4** require-frame is default-on gated on `PACT_BROKER_PERSONA_DID` presence; a dropped `REQUIRE_FRAME` fails
-  CLOSED: `request-auth.js:50-53`. CONFIRMED (read). So a live run with the persona set exercises custody, not a
-  stale-frame error.
-- **P5** baseline suite is **230 green** (`npm test`); no code change is expected, so it must STAY 230.
-  CONFIRMED (ran this session).
-- **P6** C3 is the load-bearing NON-VACUITY + functional proof — a real sign+verify round-trip proving a usable
-  key exists WITHOUT the host needing to read or stat it: `custody-verify.js:94-99`. CONFIRMED (read).
+- **P1** C2 denial leg requires a DIFFERENT owner; same-owner readable (`:75`) and mode-000 (`:82-83`) and
+  owner-unknown all FAIL-closed; `denialLegTaken` at `:85`. CONFIRMED (read).
+- **P2** `crossUidBrokerSigner` is exported + path/username-validated and passes NO keyFile through:
+  `broker-launch.js:64,74-78`. CONFIRMED (grep, this turn).
+- **P3** the runbook is reconciled (persona `did:key:zBroker` consistent across §3/§5/§7): commit `df1344e`.
+  CONFIRMED (committed this session).
+- **P4** require-frame is default-on gated on `PACT_BROKER_PERSONA_DID`; a dropped `REQUIRE_FRAME` fails CLOSED:
+  `request-auth.js:50-53`. The C3 probe declares `src_persona_did=personaDid` so it survives persona-bind ONLY if
+  `--persona == PACT_BROKER_PERSONA_DID` (2c). CONFIRMED (read).
+- **P5** the C3 probe's `personaMatches` needs the registry entry's `personaDid==--persona` + the broker's real
+  pubkey (`custody-verify.js:160-169,246-248`). CONFIRMED (board-read).
+- **P6 (DECOY, hacker HIGH-1)** the verifier opens `--key` (`custody-verify.js:135,143`); the broker signs with its
+  own `PACT_BROKER_KEY_FILE` (`broker-sign.js:121`) — DECOUPLED. CONFIRMED (grep, this turn).
+- **P7 (caller-auth order, arch HIGH-1)** `authorizeCaller` runs BEFORE the key open (`broker-sign.js:87-88,97`).
+  CONFIRMED (grep, this turn).
+- **P8** baseline suite: record the actual `npm test` tail at run time in §8 — do NOT quote a remembered count
+  (plans/09 cites 179, north-star §2.4 cites 153, this session saw 230; the figure decays — paste the artifact).
 
-## §6 DoD
+## §6 DoD (§9-revised — NECESSARY items are non-terminal; the run is "done" only with the SUFFICIENT facts)
 
-- [ ] **Negative control GREEN-as-RED:** same-uid run → C2 FAILS (the guard is proven non-vacuous, §4).
-- [ ] **Real cross-uid run:** C0/C1/C2(different-owner)/C2.5/C3 PASS; `hostObservableChecksPassed: true`;
-      `requiresOutOfBandUidConfirmation: true`.
-- [ ] **Out-of-band attestation recorded** (the `id` / `ls -l <key>` / `cat <key> → Permission denied` outputs),
-      pasted into §8.
-- [ ] **§8 result recorded**; north-star §2.6 updated **only if** the attestation genuinely lands — and worded as
-      "custody-real established on <host> on <date>", never a blanket "custody hardened" (NS-9, the close→narrow reflex).
-- [ ] **Residuals re-stated unchanged:** R2-WHO / R2-WHAT / R3 are untouched by custody (custody hardens
-      NON-EXFILTRATION, not authorization); the process<->uid binding stays the out-of-band attestation, never tool-proven.
-- [ ] 230 suite still green (no production-code change).
+- [ ] **Negative control GREEN-as-RED (§4):** the REAL `gatherCustodyFacts` against a same-uid key FAILS C2 with a
+      pinned SAME-UID reason (not a C0/owner-unknown red).
+- [ ] **Host-observable checks passed (NECESSARY, NOT custody-real):** C0/C1/C2(different-owner)/C2.5/C3 PASS;
+      `hostObservableChecksPassed: true`; `requiresOutOfBandUidConfirmation: true`. **This item alone establishes
+      NOTHING about uid separation** (`custody-verify.js:113-120`).
+- [ ] **SUFFICIENT facts recorded (§8):** the signing PROCESS uid proven `== key-owner != host` (the SOLE
+      determiner); `--key == PACT_BROKER_KEY_FILE` (2a); the wrapper/key DIRS root-owned + non-writable (2d);
+      `ptrace_scope ≥ 1` + host not in broker group + no `CAP_SYS_PTRACE` (2e).
+- [ ] **Out-of-band attestation recorded** (the `id` / `ls -l <key>` / `cat <key> → Permission denied` outputs).
+- [ ] **north-star §2.6 updated ONLY IF** the NECESSARY checks PASS **AND** the process<->uid bind is proven
+      **AND** `--key` is bound (2a) — all three. Worded `custody-real (file-read non-exfiltration / R1) established
+      on <host> on <date>`, never a blanket "custody hardened" (NS-9).
+- [ ] **Residuals re-stated unchanged:** R2-WHO / R2-WHAT / R3 untouched; ptrace closed only by 2e; the process<->uid
+      bind stays the out-of-band attestation, never tool-proven; custody hardens NON-EXFILTRATION, not authorization.
+- [ ] Suite still green — paste the actual `npm test` tail into §8 (P8); no production-code change expected.
 
 ## §7 VERIFY / VALIDATE plan
 
-**VERIFY (pre-run, 2-lens) — on THIS plan's §3/§4 pass-criteria, BEFORE the operator provisions:** architect (is
-the execution order right; is the negative control the correct non-vacuity proof; does the PASS set miss a custody
-precondition?) + **hacker** (can the dogfood FALSE-PASS? a custody bypass the §3 criteria miss — a bind-mount, an
-ACL, a setgid dir, a `/proc` read, a same-uid race — and is the §4 negative control actually capable of going RED?).
-The hacker lens is REQUIRED here: custody is the integrity≠provenance close (the #273 family), security-sensitive.
-Fold corrections into §3/§4 before the run.
+**VERIFY (pre-run, 3-lens) — COMPLETE, folded in §9.** architect + hacker + honesty-auditor on §2/§3/§4.
+**VALIDATE (post-run, 1-lens) — honesty-auditor on the recorded §8 result:** does the attestation support a
+`custody-real (R1)` claim, or is it narrowed (NECESSARY checks PASS but the process<->uid bind or the `--key`
+binding unproven)? NS-9 reflex — no "hardened" claim outruns the recorded evidence.
 
-**VALIDATE (post-run, 1-lens) — honesty-auditor on the recorded §8 result:** does the attestation actually support
-a "custody-real" claim, or is it narrowed (e.g. C2 different-owner PASS but the process<->uid bind unattested)?
-NS-9 reflex — no "hardened" claim outruns the recorded evidence.
-
-## §8 Dogfood result — TO BE FILLED at the run (skeleton)
+## §8 Dogfood result — TO BE FILLED at the run (skeleton; §9-revised)
 
 ```
 host / date:
-custody-verify output: C0 __ / C1 __ / C2 __ (denialLegTaken: __) / C2.5 __ / C3 __ (personaMatches: __)
-  hostObservableChecksPassed: __  requiresOutOfBandUidConfirmation: __
-negative control (same-uid): C2 expected FAIL -> observed: __
-out-of-band attestation: id=__  ls -l <key> owner=__ (must != host uid)  cat <key> -> __ (must be Permission denied)
-verdict (honesty-audited): __ (custody-real established | narrowed-because-__ | vacuous-because-__)
+custody-verify output: C0 __ / C1 __ / C2 __ (denialLegTaken: __ ; detail: __) / C2.5 __ (statable: __) /
+  C3 __ (personaMatches: __ ; diagnostic: __)
+  hostObservableChecksPassed: __   requiresOutOfBandUidConfirmation: __
+negative control (real same-uid facts): C2 expected FAIL with same-uid reason -> observed check-id + reason: __
+SUFFICIENT facts (the tool cannot prove these):
+  signing PROCESS uid (ps -o ruid= -p <broker-pid> | wrapper id -u): __  (must == key-owner uid, != host uid)
+  --key path: __   PACT_BROKER_KEY_FILE (sudo grep <wrapper>): __   (must be the SAME path — 2a)
+  wrapper dir: __ (root-owned, non-writable?)   key dir: __ (root-owned, non-writable?)   (2d)
+  ptrace_scope: __   host in broker group?: __   CAP_SYS_PTRACE?: __   (2e)
+out-of-band attestation: id=__   ls -l <key> owner=__ (must != host uid)   cat <key> -> __ (must be Permission denied)
+npm test tail (pasted, not quoted): __ passed / __ failed
+verdict (honesty-audited): __ (custody-real R1 established | narrowed-because-__ | vacuous-because-__)
 ```
+
+## §9 VERIFY board result — RECORDED 2026-06-22 (architect + hacker + honesty; all SOUND-WITH-CHANGES)
+
+3-lens read-only board (workflow `wf_7ff116d7`). No NEEDS-REVISION, no fatal defect — but two structural
+false-pass vectors + several narrowing gaps, all FOLDED above. The two HIGH structural findings were
+PREMISE-PROBED firsthand before folding (P6/P7).
+
+- **hacker HIGH-1 (DECOY-KEY false-pass) — FOLDED 2a/§3/§8.** The verifier's `--key` is decoupled from the broker's
+  `PACT_BROKER_KEY_FILE`; a decoy yields a byte-identical PASS. Probe-confirmed. Closed by the same-PATH binding.
+- **hacker HIGH-2 + honesty HIGH-1/HIGH-2 (process<->uid bind gap) — FOLDED §3-SUFFICIENT/§6/§8.** C2+C3 prove
+  file-owner + a working signer, never the running PROCESS uid (`:86,119` the SOLE determiner). The §8 skeleton
+  now records it; DoD item 2 is non-terminal; the north-star edit is gated on the bind.
+- **hacker HIGH-3 (ptrace/proc-mem) — FOLDED 2e/§0.** Cross-uid file-ownership doesn't deny ptrace; scope the claim
+  to file-read non-exfiltration unless `ptrace_scope` is attested.
+- **arch HIGH-1 (caller-auth gate before C3) — FOLDED 2b/§3.** A denied `PACT_BROKER_ALLOWED_UIDS` caller fails C3
+  indistinguishably from a wiring break; probe-confirmed the ordering. Check the allowlist first.
+- **arch HIGH-2 (two same-uid FAIL messages) — FOLDED §3/§4.** §3 quoted the mode-locked `:83` message; the likely
+  control reds at the readable `:75` message. Both now enumerated; the control accepts either.
+- **arch MED (registry/persona triple-equality) — FOLDED 2c.** + **hacker MED (wrapper/key DIR privesc) — FOLDED
+  2d.** + **arch MED (C2.5 degrades to NOTE) — FOLDED §3.** + **hacker MED (vacuous negative control) — FOLDED §4.**
+- **honesty MED (unqualified HARDENS) — FOLDED title/§0.** Scope rides with the claim: R1 non-exfiltration only.
+- **honesty LOW / arch LOW (status-claim 230; line citation) — FOLDED P8/§3.**
+
+## §10 Verifier-hardening follow-on (OPTIONAL — code; deferred, not required for the dogfood)
+
+The §2 checkpoints close every §9 vector at the OPERATOR level (the operator is the trusted party establishing
+their own custody — these are footguns/scope-gaps, not an adversary). Hardening the verifier IN CODE would make
+the dogfood robust to operator error rather than relying on discipline: (a) have `custody-verify` read the
+wrapper's `PACT_BROKER_KEY_FILE` and FAIL unless `--key` matches; (b) extend C2.5 to `lstat` the wrapper + key
+PARENT dirs and FAIL on a group/world-writable or non-root-owned dir; (c) add a process-uid probe (capture the
+broker PID's `ruid` during the C3 sign and FAIL unless it `==` the key owner). Each is a `plans/09`-style TDD
+sub-wave with its own VALIDATE. DEFERRED — revisit if the dogfood is to be run by a less-careful operator or
+wired into CI. Tracked: `docs/FORKS.md` (a future entry when prioritized).
