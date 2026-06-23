@@ -29,7 +29,7 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    until U2 is estimated or flagged WEAK. The spec matured RESEARCH-GRADE → **BUILD-GRADE (v1.1)**.
 3. **v0 is a standalone repo** that borrows the kernel primitives via an auditable transfer manifest
    (`v0/TRANSFER-PROVENANCE.md`) — the *mechanisms* reused, the *novel boundary* built greenfield (NS-10).
-4. **BUILT so far, all SHADOW (153 tests — 148 at phase-close + 5 from the consolidation wave, `plans/08`):**
+4. **BUILT so far, all SHADOW (230 tests as of PR #9 / 2026-06-23 — the count decays across waves; run `node test/run.js`, never quote a remembered figure):**
    v0 (ATMS) → P2 (trust) → P3 (grounding + REACH) → P-minter (require-custody) → P-broker (out-of-band
    signing *mechanism*) → CI → consolidation (the CONTEST cross-layer seam **closed**, `plans/08`). The
    phase-close signed the integrated substrate **CLOSEABLE-WITH-NOTES**.
@@ -80,6 +80,14 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
 - **U2 — epistemic-independence (THE gate-enabler — nothing gates until it closes):** an estimator for "are
   two agents' evidence independent?" — **world-anchored only, never in-process-modeled.** Lives at the single
   `epistemicIndependence()` lift-point; the WEAK flag lifts there and only there.
+  - **▶ AMENDED 2026-06-23 (`research/24`, PR #8 — the world-anchored U2 feasibility verdict):** the POSITIVE
+    direction is now believed **near-unclosable** — positive epistemic independence is `[SOURCED]` NOT
+    identifiable from observables (arXiv:2604.07650), and `[PACT-INFERENCE]` no currently-conceivable
+    world-anchored signal is positively sufficient (substrate-distinctness is necessary-not-sufficient +
+    vendor-PKI-throne-bound). NOT proven impossible (the literature bounds only the observables half), but the
+    substrate should STOP reserving the lift-point for a POSITIVE STRONG estimator. The honest salvage is a
+    DEMOTE-only entanglement detector (`{WEAK, ENTANGLEMENT-DETECTED}`) — in-process, so it NARROWS, never
+    hardens. So gating will **never rest on positive U2**; `epistemicIndependence()` stays permanently WEAK.
 - **Provenance / custody:** integrity≠provenance closes only with a **real out-of-band custody boundary**
   (separate uid / enclave / HSM) — a **deployment** property. P-minter/P-broker built the *mechanism*; the
   *hardening* is the deployment (the inflection, §2.6).

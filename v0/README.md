@@ -36,7 +36,7 @@ scope, REPAIR anti-ping-pong, acyclicity) — a green run = v0 done.
 | `src/grounding/` | **P3 (SHADOW)** §6 the grounding engine — `cross-verify` (distinct earned-standing, rootOf-keyed, non-self, creator-bound-on-read confirmations), `premise-score` (SL opinion), `creator-standing` (reliability-as-a-source, human-keyed, asymmetric crater), `verification-strength` (weakest-link MIN, empty→0), `reach` (emergent-descriptive rootOf-union + the INV-9 threshold flag). All derived-on-read, all advisory. |
 | `src/identity/minter.js` | **P-minter** the authenticated-writer (custody) abstraction — structurally key-free (throws rather than touch raw key material), per-persona bound (no throne by config). The sole supported `src/` producer; signs ONLY via an injected custody `signer`. |
 | `src/identity/broker-{sign,client}.js` | **P-broker** out-of-band signing broker — the key lives in a SEPARATE process (`broker-sign.js`, the sole key-loader); `brokerSigner` plugs into the existing `opts.signer` seam (zero seam change). Custody MECHANISM (custody-real = a cross-uid deployment). |
-| `test/` | 153 tests: per-module unit suites + the D1–D7 acceptance gate + the broker / layering / runner-guard suites. |
+| `test/` | 230 tests (run `node test/run.js`): per-module unit suites + the D1–D7 acceptance gate + the broker / caller-auth / request-auth / custody-verify / layering / runner-guard suites. |
 
 ## What v0/P2/P3 is NOT (deferred, by design)
 
