@@ -55,6 +55,15 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    code-version-independent — the broker code itself was not validated by this run). Verified via a 3-lens VERIFY
    board + a VALIDATE honesty pass (graded B->A: the over-claim of a fully-discharged 2e was caught + corrected).
    Evidence: `plans/14` §8. It does NOT harden trust broadly — one axis, on one box.
+8. **▶ 2026-06-23 — the SECOND world-anchored signal: R2 caller-auth (WHO-at-the-boundary).** A live dogfood on a
+   FRESH separate-uid broker (uid 600, hex-only to isolate the WHO axis) proved the caller-auth allowlist DENIES a
+   real, distinct, non-allowlisted OS uid (602) at the cross-uid `sudo` boundary — on the SAME allowlist a
+   positive-control (uid 501) signed under, so the deny is provably MEMBERSHIP-caused; and a forged `SUDO_UID=501`
+   was DISCARDED (`env_reset,!setenv` re-derived the real ruid 602). It **HARDENS one axis** (OQ-NS-6/NS-7).
+   **Scope: R2-WHO, uid-level, ONE box, ONE run.** Graded **A / NO-OVERCLAIM** (3-lens VERIFY board closed 4
+   vacuity traps pre-deploy; honesty VALIDATE post-run). **Still OPEN (loud):** R2-WHAT (per-request entitlement —
+   deliberately off here), R3 (forgery), same-uid allowlisted compromise (still an oracle), the heap-read leg
+   (macOS 2e PARTIAL; Linux `ptrace_scope=2` strongest), and allowlist-VALUE provenance. Evidence: `plans/16` §9.
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
