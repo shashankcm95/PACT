@@ -178,7 +178,7 @@ The deployment was already provisioned on a prior session (2026-06-22 11:45-11:5
 key `/etc/pact/broker.key` `0600` owned `pact-broker:wheel`, root-owned wrapper + `0440` sudoers. The CURRENT
 (hardened) `custody-verify.js` was run against that REAL cross-uid broker (read-only).
 
-```
+```text
 host / date:                 MacBookAir / 2026-06-23   (host uid 501; broker uid 600)
 custody-verify (real run):   C0 PASS (uid 501) / C1 PASS (119 bytes) /
   C2 PASS (denialLegTaken: true; "host read denied EACCES + key owned by 600 != 501") /
