@@ -45,6 +45,16 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    (U1/U2)**. Seam-closing + U2-research-prep still have value (they keep the seams from leaking when a
    frontier arrives) — but they *narrow*, never *harden*. The drift to avoid: building SHADOW machinery
    **expecting it to harden trust.**
+7. **▶ 2026-06-23 — the inflection's FIRST world-anchored signal landed (R1 file-read ONLY).** The cross-uid
+   custody dogfood ran LIVE on a separate-uid deployment (MacBookAir, broker uid 600): host uid 501 is denied
+   (kernel `EACCES`) reading the `0600`/600 broker key — PACT's first signal that **HARDENS one axis**
+   (OQ-NS-6/NS-7), not narrows. **Scope: R1 FILE-READ non-exfiltration ONLY**; the heap-read leg is
+   **narrowed-not-closed** (macOS 2e PARTIAL — host shares the `staff` group with the broker + `task_for_pid`
+   coarseness; the strongest form is a Linux `ptrace_scope=2` box), and **R2 (authorization) + R3 (forgery) stay
+   UNTOUCHED**. The deployed broker is a **stale pre-R2-WHAT snapshot** (the R1 claim is filesystem/uid-based,
+   code-version-independent — the broker code itself was not validated by this run). Verified via a 3-lens VERIFY
+   board + a VALIDATE honesty pass (graded B->A: the over-claim of a fully-discharged 2e was caught + corrected).
+   Evidence: `plans/14` §8. It does NOT harden trust broadly — one axis, on one box.
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
