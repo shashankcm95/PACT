@@ -1,6 +1,6 @@
 // PACT P2 — independence/weak-flag.js  (spec §4.5 — the v1.1 rev's spine; first consumed here)
 //
-// Independence is THREE predicates, not one word. v0 shipped no consumer; P2 is the first. Only the
+// Independence is THREE predicates, not one word. v0 shipped no consumer; P2 was the first (plans/12/PR#7 added the DI seam + two label-consumers). Only the
 // TOPOLOGICAL axis is computable; EPISTEMIC (U2) and CONFIG-STABILITY are [OPEN] → permanently WEAK
 // until P5. The consumer obligation (INV-16): a WEAK record may INFORM but NEVER GATE a high-stakes
 // action — and NEVER read the AND of axes 1-3 as a substitute for axis 4 (epistemic). This module

@@ -22,14 +22,31 @@ count next to `n_confirmers` is the L4 "asserted-distinctness as real independen
 FIELD is contingent on a world-anchored source that does NOT yet exist (the open U2 frontier) — so building it
 now reserves an empty slot. The USER then chose the logically-PRIOR step:
 
-- **CHOSEN → world-anchored U2 signal feasibility RFC** (`research/24`, in progress). Design what a
-  world-anchored substrate-diversity signal (model-family / corpus / checkpoint independence) could even be —
-  the only thing that HARDENS U2 (OQ-NS-6) and the thing that would populate the CONFIRM carrier. Research/
-  design-stage; may honestly conclude "still mostly open." It is the real blocker the board surfaced.
-- **DEFERRED → CONFIRM evidence-provenance carrier** (`plans/13`, scoped to carrier-only; COUNT killed as
-  theater). **Revisit when:** the world-anchored signal RFC (`research/24`) identifies a real source that would
-  populate + consume the field. Until then it is an empty schema reservation — not worth a wave.
+- **CHOSEN → world-anchored U2 signal feasibility RFC** (`research/24`, **MERGED PR #8 2026-06-23**). Designed
+  what a world-anchored substrate-diversity signal (model-family / corpus / checkpoint independence) could even
+  be — the only thing that HARDENS U2 (OQ-NS-6) and the thing that would populate the CONFIRM carrier.
+  **OUTCOME (NEGATIVE):** the positive direction is near-unclosable — positive independence is NOT identifiable
+  from observables (`[SOURCED]` arXiv:2604.07650), and no currently-conceivable world-anchored signal is
+  positively sufficient; the honest salvage is a DEMOTE-only entanglement detector (in-process → narrows). See
+  the UPDATE below for what this does to the deferred carrier.
+- **DEFERRED (blocked-on-open-frontier, NOT rejected) → CONFIRM evidence-provenance carrier** (`plans/13`, scoped
+  to carrier-only; COUNT killed as theater). The carrier itself is SOUND — it is the provenance field that would
+  close integrity≠provenance for confirmations — but it is blocked on a world-anchored source that does not yet
+  exist. **Revisit when:** ANY future world-anchored substrate-diversity source is discovered that would populate
+  + consume the field (research/24 explored ONE such RFC and returned negative — see the UPDATE; the frontier is
+  near-unclosable but NOT proven-impossible, so this stays DEFERRED, not REJECTED). Until then, an empty schema
+  reservation — not worth a wave.
 - **DEFERRED → U1 stake** (unchanged from FORK-2; the hardening-leaning, U2-independent branch).
+
+> **▶ UPDATE 2026-06-23 (post-research/24 + the recon):** research/24 RETURNED with a NEGATIVE verdict — the ONE
+> world-anchored RFC it explored is not positively sufficient — so the CONFIRM-carrier revisit-trigger was
+> REWORDED above to decouple from research/24 (whose specific door is now closed) onto ANY future world-anchored
+> substrate-diversity source. The frontier is near-unclosable but **NOT proven-impossible**, so the carrier stays
+> **DEFERRED-blocked** (a sound idea with no buildable signal yet), **NOT REJECTED**. The actionable un-park from
+> research/24 is instead the **DEMOTE-only entanglement detector** (`research/24`
+> §4.1 / `research/25` §9) — buildable today, narrows-only, exempt from the stakes-throne gate. The U1 stake
+> remains the deferred hardening-leaning branch. **Recon 2026-06-23 chose the Merkle/CT-log anti-equivocation
+> layer (the spec §7 P0 gap) as the next BUILD** over these narrowing options — see `plans/15` (forthcoming).
 
 ## FORK-2 (2026-06-22) — the foundational entry: which trust-hardening sub-direction first?
 
