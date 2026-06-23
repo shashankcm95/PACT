@@ -183,3 +183,61 @@ flaw was in the dogfood DESIGN, all fixed by plan-level gates (no code change).
 - **architect LOW (allowlist-VALUE-provenance) — FOLDED to §0.** **architect LOW (P3 run-blocking) — FOLDED §1 leg-0b/§4.**
   **architect LOW (cross-substrate borrow-hardening-not-semantics) — FOLDED §2/§7.**
 - **hacker LOW (parser sound) — kept as the §4 P1 + VALIDATE re-confirmation (not where the risk lives).**
+
+## §9 Dogfood RESULT — RECORDED 2026-06-23 (LIVE on the user's MacBookAir; the SECOND world-anchored signal)
+
+**Deployment shape:** broker `pact-broker` (uid 600, key `/etc/pact/broker.key` owner pact-broker `0600`) ·
+`ALLOWED_UID=501` (the host user) · `EXCLUDED_UID=602` (`pact-caller-excluded`, a freshly-provisioned real uid) ·
+node `/usr/local/bin/node` (root:wheel, host-non-writable — the NVM/Homebrew nodes were owner-writable = swap-unsafe) ·
+code `/opt/pact/v0` (root:wheel, `go-w`) · sudoers `env_reset, !setenv` pinned on the wrapper. **HEX-ONLY**
+(no persona-did → require-frame OFF) — the architect's option (b), chosen to ISOLATE the R2-WHO axis under test
+(R2-WHAT is a separate, out-of-scope axis here; the broker's `per-request-auth DISABLED` notice is expected).
+
+**Custody re-confirmed (R1, live):** `cat /etc/pact/broker.key` → `Permission denied` (host uid 501 cannot read
+the key owned by uid 600). Not the claim of this wave, but a free re-anchor of R1 on the fresh deploy.
+
+**The three legs (actual output):**
+- **Leg-1 ALLOW (positive-control):** uid 501, allowlist `{501}` → base64 sig
+  `qSAEXIzynPRPiT92QtblHvla6FORcQAebFj2X1bUr0MlgB9rj3EVY3y0YL1PpEVx3chWl82Us85lfM1HvGPiCw==`, `exit=0`; stderr
+  `per-request-auth DISABLED` (expected) with **NO** `caller-auth DISABLED` → the allowlist IS configured (leg-0a)
+  AND `SUDO_UID` flowed AND `{501}` parsed. The deny below is therefore provably MEMBERSHIP-caused.
+- **Leg-2 DENY (the load-bearing non-vacuity leg):** uid 602 (a real, distinct, sudo-invocable uid), SAME
+  allowlist `{501}`, real `sudo -u pact-caller-excluded -- sudo -n -u pact-broker <wrapper>` path → empty stdout,
+  `exit=1`, stderr exactly `broker-sign: caller not authorized`. A real excluded OS uid was DENIED at the live
+  cross-uid boundary, on the identical allowlist that leg-1 just signed under. **Non-vacuous.**
+- **Leg-3 FORGE-RESIST:** uid 602 forging `SUDO_UID=501` (an allowlisted value) → STILL
+  `broker-sign: caller not authorized`, `exit=1`. The `env_reset,!setenv` policy discarded the forged env and sudo
+  re-derived the real ruid 602. **Discriminating power is CONTINGENT on the leg-1 positive control** (VALIDATE
+  honesty Finding 3): had the forged `SUDO_UID=501` taken effect, the result would have FLIPPED to a signature
+  (we KNOW 501 signs, from leg-1) — it did not flip, so the forge was discarded. **The direct `printenv SUDO_UID`
+  probe (leg-0b) is BLOCKED by the correctly-restrictive sudoers** (`pact-caller-excluded` may run ONLY the
+  wrapper as pact-broker, never `printenv`) — so leg-3's flip-counterfactual is the AVAILABLE forge-discard proof,
+  NOT a standalone `env_reset` isolation. Honest residual: leg-3 proves the forge is discarded but does not, by
+  itself, isolate `env_reset,!setenv` from some other env-handling quirk (a direct probe would require temporarily
+  broadening the sudoers — a deviation declined to keep the gate tight).
+- **key-never-opened:** source-ordering-precluded — gate-0 `fail()`/`exit(1)` at `broker-sign.js:88` runs BEFORE
+  `openSync(keyFile)` at `:126` (confirmed by read; NOT separately observed via `fs_usage` — stated honestly).
+
+**Benign note:** every leg emitted `shell-init: getcwd: ... Permission denied` — pact-broker/602 cannot stat the
+host's `700` cwd when sudo switches uid; it does not touch the broker logic (the correct sig/deny outputs prove it).
+
+**AUDITED SCOPE (calibrated — NS-9, "narrowed" never "closed"):** **R2 caller-auth HARDENED — WHO-at-the-boundary,
+deny-leg-OBSERVED against a real distinct excluded uid, uid-level, ONE box, ONE run.** Still OPEN (loud): R2-WHAT
+(per-request entitlement — deliberately off here), R3 (forgery), same-uid allowlisted compromise (still an oracle),
+the heap-read leg (macOS 2e PARTIAL; Linux `ptrace_scope=2` is the strongest form), and the allowlist-VALUE
+provenance (the dogfood enforces whatever literal is set; it does not verify `501` is the INTENDED policy). All
+SHADOW — nothing gates an action.
+
+**DoD (§1.5):** two distinct real uids ✅ · leg-1 positive-control on the identical allowlist ✅ · no `DISABLED`
+notice ✅ · forge-discard observed via leg-3 ✅ · per-leg stderr disambiguated (gate-0 `caller not authorized`, not
+gate-0.5 `request not authorized`) ✅ · key-never-opened = source-ordering-precluded ✅ · audited-scope written ✅.
+
+**VALIDATE (honesty lens) — GRADE A / NO-OVERCLAIM (`honesty-auditor`, agentId `a64ee184fe6ec4b9f`).** The
+AUDITED SCOPE is calibrated to exactly what the three legs prove (the R1 "2e fully-discharged" over-claim trap was
+AVOIDED — the heap-read leg is carried as PARTIAL, not discharged). The deny is provably membership-caused via the
+leg-1 positive-control on the identical allowlist (NOT by reading the wire — `broker-sign.js:88` collapses all deny
+reasons to one fixed message). All five residuals carried loud (NS-9 satisfied). key-never-opened honestly stated
+as source-read, NOT `fs_usage`-observed. 7.5/8 DoD gates fully met — the half is the leg-0b forge-discard being
+SUBSUMED into leg-3 (named, not silently claimed) because the direct probe is sudoers-blocked (folded above). No
+rater-drift pre→post run. Verdict: "the model of what NS-9 asks for — narrowed reported as narrowed, observed as
+observed, inferred as inferred."
