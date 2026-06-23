@@ -60,7 +60,7 @@ sudo tee /usr/local/bin/pact-broker-sign >/dev/null <<'EOF'
 #!/bin/sh
 export PACT_BROKER_KEY_FILE=/etc/pact/broker.key
 export PACT_BROKER_ALLOWED_UIDS=501          # R2-WHO caller-auth: host uid(s) allowed to request a signature (comma-separated)
-export PACT_BROKER_PERSONA_DID=did:key:zME   # R2-WHAT per-request auth: the persona this broker keys (enables require-frame by default)
+export PACT_BROKER_PERSONA_DID=did:key:zBroker  # R2-WHAT per-request auth: the persona this broker keys (enables require-frame by default)
 exec /usr/bin/node /opt/pact/v0/src/identity/broker-sign.js "$@"
 EOF
 sudo chown root:root /usr/local/bin/pact-broker-sign
@@ -80,6 +80,11 @@ presented frame body that declares this persona — not an arbitrary 64-hex. Bec
 persona is set**, a *dropped* `PACT_BROKER_REQUIRE_FRAME` env fails CLOSED (refuse), never silently reopening the
 blind oracle. Explicit `export PACT_BROKER_REQUIRE_FRAME=0` is the only escape hatch back to legacy hex-only (the
 broker then prints a loud `per-request-auth DISABLED` notice). OMIT the persona line to stay legacy entirely.
+
+Use the **SAME** DID for this `PACT_BROKER_PERSONA_DID`, the registry `personaDid` (§5), and the verifier's
+`--persona` (§7). A mismatch is not a custody fault but reads like one: the verifier's C3 liveness check fails
+with `broker signed but as a DIFFERENT persona — key <-> registry mismatch`. The placeholder `did:key:zBroker`
+above is carried consistently through §5 and §7 for exactly this reason.
 
 ## 4. Authorize the host uid to run ONLY that wrapper as `pact-broker` — and PIN the env policy
 
@@ -117,7 +122,8 @@ future `env_keep` mistake fails loudly rather than silently voiding the gate.
 
 ## 5. Register the broker's PUBLIC key with the host
 
-Write a registry JSON the host reads (the host never sees the private key):
+Write a registry JSON the host reads — e.g. `/etc/pact/registry.json`, the path you pass to `--registry` in
+§7 (the host never sees the private key):
 
 ```json
 [ { "personaDid": "did:key:zBroker", "humanUid": "human:you", "publicKeyPem": "-----BEGIN PUBLIC KEY-----\n…\n-----END PUBLIC KEY-----\n" } ]
