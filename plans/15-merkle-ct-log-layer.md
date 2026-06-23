@@ -202,3 +202,41 @@ PACT and the parent toolkit (Power Loom) are entangled co-evolving substrates; b
   borrow under the directive.
 - **Forward:** PACT's deferred signed-minter / egress (FORK-1, the apex) should BORROW the toolkit's already-built
   `egress/weight-minter.js` + `loom-broker-*` + `emit-pr.js`, not rebuild (reconcile when PACT reaches that wave).
+
+## §10 VALIDATE board result — RECORDED 2026-06-23 (built code; 3-lens, workflow `wf_71f1903e`)
+
+Post-build, the security-sensitive crypto diff drew the full 3-lens tier (Rule 2 / Rule 2a). **No BLOCK.** Build
+final: **293 tests green, eslint clean** (230 baseline byte-for-byte green + 63 new: merkle 35, audit-log 18,
+frame 9 [backfilled — frame had zero prior coverage], layering +1).
+
+- **hacker — CLEAN.** ~496 live `/tmp` probes against the BUILT modules (by absolute path); **0 bypasses** of any
+  load-bearing guarantee — inclusion forgery (order-swap / pad-truncate / second-preimage), consistency rewrite,
+  STH replay/relabel, the #273 phantom-leaf bind, per-receiver path scoping all HELD. Confirmed the env-verify-key
+  fallback (a prior-arc CRITICAL class) is closed (`loadPublicKey` takes `opts.publicKeyPem` only). Re-ran the
+  suite from repo root (291 pre-fold green).
+- **honesty-auditor — CLEAN.** Claim ledger calibrated; the RFC-6962 oracle is genuinely EXTERNAL (sha256(""),
+  sha256(0x00), the published CT roots), structural anchors honestly labelled; NS-9 narrows-not-hardens framing +
+  the single-node threat-model boundary + the deferred §2-MUST stated at every surface; non-vacuity guards real.
+- **code-reviewer — CHANGES (all non-blocking; RFC conformance confirmed firsthand).** FOLDED:
+  - MED `reconcile` silent re-read catch → REMOVED (the count `existing.length + added` is authoritative in the
+    single-node model; a silent degraded path violated "a fail path must be observable").
+  - LOW proof-length work-amplification (hacker LOW too) → an O(1) length cap (`maxAuditPathLen`) BEFORE the O(n)
+    hex scan in `verifyInclusion` + `verifyConsistency` (a 1e6-element proof now rejects on length; +1 non-vacuity test).
+  - LOW `detectFork` provenance → JSDoc CONSUMER CONTRACT: callers MUST `verifySTH` both inputs before actioning
+    a fork (it checks structure, not signatures); LOW TOCTOU window → documented (idempotency is the net).
+  - LOW consistency external-oracle gap → a `(2,8)` proof test pinned to the PUBLISHED roots `ROOT_N2 -> ROOT_N8`.
+
+**DEFERRED residuals (correctly-scoped network-phase boundaries — NOT folded; documented):**
+- **Single-node STH equivocation (hacker MED).** A malicious SENDER can sign a self-consistent STH+proof over a
+  SEPARATE log and `receiveFrame` returns `audited:true` — the verifier has no second STH to compare. This is the
+  threat-model boundary §0/§3 already state: **`audited:true` proves INTEGRITY, never PROVENANCE** (the recurring
+  integrity≠provenance / #273 line). The forward contract is in place (`audited:false` hook + the one-line
+  absent-branch flip). LOAD-BEARING for the network phase: the receiver MUST collect a sender's STHs from an
+  INDEPENDENT channel (gossip/witness) and run `detectFork` across them BEFORE any `audited:true` gates an action
+  — otherwise `audited:true` is integrity-theater. The moment it stops being SHADOW and gates, independent
+  cross-node STH collection becomes MANDATORY.
+- **Unsigned on-disk leaf file (hacker LOW).** An attacker with FS write to the store can truncate `leaves.json`
+  to a shorter valid prefix (a non-JSON/non-hex corruption fail-CLOSES; a valid-prefix truncation does not). The
+  file carries no MAC of its own. Acceptable single-node (such an attacker already owns the node); when hardening,
+  the producer retains its last-signed STH and refuses to emit a regressed `tree_size` (caught producer-side, not
+  only by a remote `detectFork`).
