@@ -183,30 +183,51 @@ host / date:                 MacBookAir / 2026-06-23   (host uid 501; broker uid
 custody-verify (real run):   C0 PASS (uid 501) / C1 PASS (119 bytes) /
   C2 PASS (denialLegTaken: true; "host read denied EACCES + key owned by 600 != 501") /
   C2.5 PASS (wrapper statable, non-group/world-writable) /
-  C3 PASS (personaMatches: true; "a real, usable key exists behind the broker")
+  C3 PASS (personaMatches: true) — NB the signer exercised is the STALE Jun-22 deployed broker in LEGACY mode:
+    proves a usable key exists behind a working signer (R1, version-independent), NOT that the hardened path signs
   hostObservableChecksPassed: true   requiresOutOfBandUidConfirmation: true
 negative control (REAL same-uid facts, --key=/tmp/nc.key 0600 owned 501):
   C2 FAIL "the host uid CAN read the key file" (the :75 readable-key path) -> NON-VACUOUS (guard goes RED)
 SUFFICIENT facts (the tool cannot prove these — attested out-of-band):
-  signing PROCESS uid: 600  (LOGICAL bind: `sudo -n -l` runas = (pact-broker)=600 NOT root, + the broker read
-    the 0600/600 key per C3 -> only uid 600 or root can read it -> 600. Direct `ps` inconclusive: sign faster
-    than the poll. RESIDUAL: assumes no stray host-readable COPY of the private key elsewhere.)
+  signing PROCESS uid: 600 (LOGICAL bind, root excluded BY EVIDENCE: the verifier invoked `sudo -n -u pact-broker
+    <wrapper>`; `sudo -n -l` shows the ONLY NOPASSWD rule runs as (pact-broker)=600, never root; C3's verifying
+    signature proves that invocation signed -> the signing process ran as uid 600. Direct `ps` inconclusive (sign
+    faster than the poll) — the bind rests on the sudoers runas, not the ps.)
+  stray-copy sweep (MED-1): bounded sweep of /opt/pact, /tmp, the repo, /usr/local for host-readable private-key
+    PEMs -> NO copy of the real broker key (the only readable broker.key-named files were PRIOR-session SYNTHETIC
+    test keys whose derived pubkey != the registry pubkey; removed). FULL-FS sweep NOT performed (named residual).
   --key: /etc/pact/broker.key  ==  wrapper PACT_BROKER_KEY_FILE: /etc/pact/broker.key   (2a SAME path — not a decoy)
   wrapper dir /usr/local/bin: root:wheel 0755 (non-host-writable)   key dir /etc/pact: pact-broker:wheel 0755 (non-host-writable)   (2d ok)
-  macOS memory guard (2e): SIP enabled (csrutil); host 501 cannot task_for_pid a uid-600 process without root.
-    (COARSER + less inspectable than Linux ptrace_scope=2 — the strongest 2e is a Linux box.)
+  macOS memory guard (2e) — PARTIAL, NOT discharged: SIP enabled (the ptrace_scope analogue), BUT host 501 SHARES
+    the `staff` group (gid 20) with pact-broker, so the plan's "host NOT in the broker's group" leg is NOT met. On
+    macOS task_for_pid is uid/root-gated (not group-gated), so the shared group does NOT grant heap-read, and the
+    key is 0600 so it does NOT affect R1 FILE-read either. But this is COARSER + less inspectable than a Linux
+    ptrace_scope=2 box with confirmed group exclusion -> the HEAP-read leg is NARROWED, NOT closed. R1 FILE-read
+    non-exfil is unaffected (0600 + EACCES).
 out-of-band attestation: id=501 (!= 600)   ls -l owner=pact-broker(600) != 501   cat /etc/pact/broker.key -> Permission denied
-npm test: NOT re-run (no code change this turn; last green this session: 230). The dogfood ran the CURRENT
-  repo verifier against the DEPLOYED broker; no source was modified.
-verdict (pending VALIDATE honesty pass, §7): custody-real (R1 / file-read NON-EXFILTRATION) ESTABLISHED for the
-  cross-uid KEY CUSTODY on this box. SCOPE (NS-9): R1 ONLY — R2 (oracle-abuse / authorization) and R3 (own-key
-  forgery) UNTOUCHED. CAVEATS: (1) the DEPLOYED broker is a STALE pre-R2-WHAT blind-oracle snapshot — the R1
-  custody claim is code-version-independent (filesystem + uid), but the deployed broker CODE was not itself
-  validated by this run and lacks this session's per-request/caller-auth hardening; (2) macOS SIP < Linux
-  ptrace_scope=2; (3) the process-uid bind is a logical proof modulo a stray key copy. This is PACT's FIRST
-  world-anchored signal that HARDENS (per OQ-NS-6/NS-7), not narrows — observed live, kernel EACCES under a real
-  separate uid.
+npm test: NO suite run this turn — read-only run against a pre-existing deployment, no source modified; suite
+  health is not load-bearing for an R1 filesystem/uid attestation. (P8: don't quote a decaying remembered count.)
+verdict (VALIDATE honesty pass FOLDED, §7): custody-real (R1 / FILE-READ NON-EXFILTRATION ONLY) ESTABLISHED for
+  the cross-uid KEY CUSTODY on this box — the 0600/600 key is denied to host 501 (kernel EACCES, world-anchored).
+  SCOPE (NS-9): R1 FILE-READ ONLY — R2 (oracle-abuse / authorization) and R3 (own-key forgery) UNTOUCHED, and the
+  HEAP-read leg is NARROWED-not-closed (2e PARTIAL: shared staff group; macOS task_for_pid coarseness). CAVEATS:
+  (1) the DEPLOYED broker is a STALE pre-R2-WHAT blind-oracle snapshot — the R1 file-read claim is
+  code-version-independent (filesystem + uid), but the deployed broker CODE was not itself validated here and
+  lacks this session's per-request/caller-auth hardening; (2) the process-uid bind is a logical proof (sudoers
+  runas + C3), not a direct ps observation, modulo the BOUNDED (not full-FS) stray-copy sweep. This is PACT's
+  FIRST world-anchored signal that HARDENS ONE AXIS — R1 file-read non-exfiltration — not narrows; observed live,
+  kernel EACCES under a real separate uid. It does NOT harden trust broadly.
 ```
+
+**VALIDATE honesty pass (§7) — RECORDED 2026-06-23 (honesty-auditor, agentId abcf46d8c0eba4cea).** Grade B /
+MINOR-OVERCLAIMS on the first §8 draft -> all 5 findings FOLDED above (-> A / no-overclaim): HIGH-1 the bind now
+leads with the sudoers-runas evidence (root excluded BY EVIDENCE, not the weaker mode-inference); HIGH-2 the C3
+line carries the stale-broker qualifier inline; HIGH-3 2e downgraded to PARTIAL (the shared `staff` group probed
+live — the heap-read leg is NARROWED, not closed); MED-1 the stray-copy sweep was RUN (bounded; no real-key copy;
+synthetic prior-session leftovers removed); MED-2 the decaying "230" dropped; LOW-1 the "first that HARDENS"
+superlative bound to its R1 axis. Non-vacuity confirmed: the negative control reds for the same-uid reason
+(`:75`), not a C0/owner-unknown vacuous red. The auditor had no shell — its findings rest on the recorded live
+evidence reconciled against the code paths (`broker-sign.js:121` PACT_BROKER_KEY_FILE read confirmed).
 
 ## §9 VERIFY board result — RECORDED 2026-06-22 (architect + hacker + honesty; all SOUND-WITH-CHANGES)
 
