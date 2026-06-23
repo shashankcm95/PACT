@@ -9,6 +9,7 @@
 
 const { computeRecordId, deriveIdempotencyKey, validateRecord } = require('../lib/record');
 const { signRecordId, verifyRecordSig } = require('../lib/edge-attestation');
+const { leafHash, verifyInclusion, verifySTH } = require('../lib/merkle'); // §7 audit: imports ONLY the floor
 const { isKnownRoot, lookupPublicKey } = require('../identity/registry');
 
 // Return a NEW object with undefined-valued keys removed (immutable; never mutates the input). A no-op when
@@ -23,11 +24,17 @@ function stripUndefinedKeys(obj) {
  * Assemble + sign a frame. record_id is the content-address (excludes record_id + sig); sig is
  * ed25519 over record_id via the signer seam (signerOpts: {privateKeyPem} or {signer} — Option B).
  *
+ * Optionally attach the §7 audit transport (additive): `audit = {inclusion_proof, leaf_index, sth}` — the
+ * sender's per-receiver Merkle proof for THIS frame. These live OUTSIDE the content-address (like `sig`): the
+ * inclusion proof commits to `record_id`, so it cannot be inside `record_id`. A caller produces them via
+ * audit/audit-log (NOT imported here — the frame layer stays on the floor); buildFrame only attaches them.
+ *
  * @param {{ver?:string, type?:string, srcPersonaDid:string, parentHumanUid:string, seq:number, nonce:string, payload:any}} spec
  * @param {{privateKeyPem?:string, signer?:Function}} signerOpts
+ * @param {{inclusion_proof?:string[], leaf_index?:number, sth?:object}} [audit]
  * @returns {{ok:false,reason:string}|{ok:true,frame:object}}
  */
-function buildFrame(spec, signerOpts = {}) {
+function buildFrame(spec, signerOpts = {}, audit) {
   const { ver = 'pact/0', type = 'CLAIM', srcPersonaDid, parentHumanUid, seq, nonce, payload, configHash, t } = spec || {};
   const body = {
     ver, type,
@@ -52,7 +59,14 @@ function buildFrame(spec, signerOpts = {}) {
   // ignores it, a custody-boundary broker presents it for per-request recompute-binding.
   const sig = signRecordId(record_id, signerOpts, withKey);
   if (!sig) return { ok: false, reason: 'sign-failed (no signer / non-ed25519 key / bad output)' };
-  return { ok: true, frame: { ...withKey, record_id, sig } };
+  const out = { ...withKey, record_id, sig };
+  // additive: attach the audit transport OUTSIDE the signed basis (only when supplied; a no-op otherwise).
+  if (audit && (audit.inclusion_proof !== undefined || audit.sth !== undefined || audit.leaf_index !== undefined)) {
+    if (audit.inclusion_proof !== undefined) out.inclusion_proof = audit.inclusion_proof;
+    if (audit.leaf_index !== undefined) out.leaf_index = audit.leaf_index;
+    if (audit.sth !== undefined) out.sth = audit.sth;
+  }
+  return { ok: true, frame: out };
 }
 
 /**
@@ -66,22 +80,42 @@ function buildFrame(spec, signerOpts = {}) {
  */
 function receiveFrame(frame, { registry } = {}) {
   if (!frame || typeof frame !== 'object') return { ok: false, reason: 'frame-not-an-object' };
+  // Separate the additive, NON-authenticated §7 audit transport from the signed frame. These fields live
+  // OUTSIDE the content-address (like sig), so the integrity + auth checks below run over `authFrame` only.
+  const { inclusion_proof, leaf_index, sth, ...authFrame } = frame;
   // (1) structural validity
-  const v = validateRecord(frame);
+  const v = validateRecord(authFrame);
   if (!v.valid) return { ok: false, reason: 'invalid-frame: ' + (v.errors || []).join('; ') };
   // (2) content-address integrity (the sig is OVER record_id, so a mismatch is tamper/forgery)
   let computed;
-  try { computed = computeRecordId(frame); } catch { return { ok: false, reason: 'uncomputable' }; }
-  if (computed !== frame.record_id) return { ok: false, reason: 'record-id-mismatch' };
+  try { computed = computeRecordId(authFrame); } catch { return { ok: false, reason: 'uncomputable' }; }
+  if (computed !== authFrame.record_id) return { ok: false, reason: 'record-id-mismatch' };
   // (3) root_valid (INV-18: a known root; the registry RECORDS, it does not mint trust)
-  if (!isKnownRoot(registry, frame.parent_human_uid)) return { ok: false, reason: 'unknown-root' };
+  if (!isKnownRoot(registry, authFrame.parent_human_uid)) return { ok: false, reason: 'unknown-root' };
   // (4) P1 auth: verify under the SENDER's registered key (per-sender; fail-closed if unknown)
-  const pub = lookupPublicKey(registry, frame.src_persona_did);
+  const pub = lookupPublicKey(registry, authFrame.src_persona_did);
   if (!pub) return { ok: false, reason: 'unknown-sender' };
-  if (!verifyRecordSig(frame.record_id, frame.sig, { publicKeyPem: pub })) {
+  if (!verifyRecordSig(authFrame.record_id, authFrame.sig, { publicKeyPem: pub })) {
     return { ok: false, reason: 'bad-signature' };
   }
-  return { ok: true, frame };
+  // (5) §7 audit attachment (additive). ABSENT -> accept with `audited:false` (the OBSERVABLE downgrade — the
+  // hook the network phase escalates on). PRESENT -> it MUST verify (the spec §2 rule applied when present): the
+  // sender's STH signature (under its registered key) + the inclusion proof connecting leafHash(record_id) to the
+  // STH root at leaf_index. A present-but-INVALID proof => DROP. (Forward contract: the network phase flips the
+  // ABSENT branch from accept(audited:false) to drop — same code path, only the absent branch changes.)
+  const attached = inclusion_proof !== undefined || sth !== undefined || leaf_index !== undefined;
+  if (!attached) return { ok: true, frame: authFrame, audited: false };
+  if (!sth || !Array.isArray(inclusion_proof) || !Number.isSafeInteger(leaf_index)) {
+    return { ok: false, reason: 'malformed-audit-attachment' };
+  }
+  if (!verifySTH(sth, pub)) return { ok: false, reason: 'bad-sth' };
+  let leaf;
+  try { leaf = leafHash(Buffer.from(authFrame.record_id, 'hex')); }
+  catch { return { ok: false, reason: 'bad-record-id' }; }
+  if (!verifyInclusion(leaf, leaf_index, sth.tree_size, inclusion_proof, sth.root)) {
+    return { ok: false, reason: 'bad-inclusion-proof' };
+  }
+  return { ok: true, frame: authFrame, audited: true };
 }
 
 module.exports = { buildFrame, receiveFrame };

@@ -48,16 +48,21 @@ function offenders(layer, bannedDirs) {
 // deepEqual(offenders, []). If a layer dir is renamed/emptied, filesIn() returns [] and offenders() returns
 // [] and the assertion passes VACUOUSLY — the tripwire silently disarms exactly when the dir it guards
 // moves (the same "absence reads as success" class the runner guards). So first prove every layer is real.
-const DAG_LAYERS = ['lib', 'atms', 'trust', 'grounding', 'identity', 'frame', 'scope', 'independence'];
+const DAG_LAYERS = ['lib', 'atms', 'trust', 'grounding', 'identity', 'frame', 'scope', 'independence', 'audit'];
 test('precondition: every layer dir exists + is non-empty (else the directional tripwire disarms silently)', () => {
   for (const L of DAG_LAYERS) {
     assert.ok(filesIn(L).length > 0, 'layer dir missing/empty: ' + L + ' — rename regression; the directional tests would pass vacuously');
   }
 });
 
-test('lib/ is the floor — imports no upper PACT layer', () => {
-  const bad = offenders('lib', ['atms', 'trust', 'grounding', 'identity', 'frame', 'scope', 'independence']);
+test('lib/ is the floor — imports no upper PACT layer (incl. audit — the §7 reverse-edge ban, HIGH-2)', () => {
+  const bad = offenders('lib', ['atms', 'trust', 'grounding', 'identity', 'frame', 'scope', 'independence', 'audit']);
   assert.deepEqual(bad, [], 'lib/ reverse edge(s): ' + bad.join(', '));
+});
+
+test('audit/ is a producer leaf — imports ONLY the floor (lib), no sibling upper layer', () => {
+  const bad = offenders('audit', ['atms', 'trust', 'grounding', 'identity', 'frame', 'scope', 'independence']);
+  assert.deepEqual(bad, [], 'audit/ cross-layer edge(s): ' + bad.join(', '));
 });
 
 test('atms/ never imports trust or grounding', () => {
@@ -72,7 +77,7 @@ test('trust/ never imports grounding', () => {
 
 test('grounding/ is a sink — no lower layer imports it', () => {
   const bad = [];
-  for (const layer of ['lib', 'atms', 'trust', 'identity', 'frame', 'scope', 'independence']) {
+  for (const layer of ['lib', 'atms', 'trust', 'identity', 'frame', 'scope', 'independence', 'audit']) {
     bad.push(...offenders(layer, ['grounding']));
   }
   assert.deepEqual(bad, [], 'grounding imported by a lower layer: ' + bad.join(', '));
