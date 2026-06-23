@@ -39,10 +39,16 @@ Generate a persona keypair (`v0/src/identity/keypair.js` → `newPersonaKeypair(
 key where only `pact-broker` can read it, and register the **public** key with the host (step 5).
 
 ```sh
-sudo install -d -o pact-broker -g pact-broker -m 0755 /etc/pact            # traversable key DIR (key stays 0600) so the verifier can read the key's OWNER
-sudo install -o pact-broker -g pact-broker -m 0600 broker.key /etc/pact/broker.key
+sudo install -d -o pact-broker -g "$(id -gn pact-broker)" -m 0755 /etc/pact   # traversable key DIR (key stays 0600) so the verifier can read the key's OWNER
+sudo install -o pact-broker -g "$(id -gn pact-broker)" -m 0600 broker.key /etc/pact/broker.key
 sudo rm -f broker.key                                                      # remove the host-side copy
 ```
+
+**Group portability (macOS — confirmed live 2026-06-23, R2 dogfood):** `-g "$(id -gn pact-broker)"` uses the
+broker's ACTUAL primary group — `pact-broker` on Linux (`useradd` makes a matching user-private group), but
+`staff` on macOS (`sysadminctl -addUser` assigns GID 20 and creates NO matching group, so a literal
+`-g pact-broker` fails with `install: unknown group pact-broker`). The key is `0600` (owner-only read), so the
+group is irrelevant to protection — this just keeps the `install` portable.
 
 The key DIR is **0755** (the key itself is **0600**) on purpose: the host uid can then `lstat` the key and
 CONFIRM it is owned by a *different* uid — the verifier's necessary condition. A **0700** dir would BLIND the
@@ -185,6 +191,14 @@ sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX" | head -c 20; echo
 #   sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"   # -> "broker-sign: caller not authorized", empty stdout, exit 1
 #   sudo sed -i '' 's/ALLOWED_UIDS=999/ALLOWED_UIDS=501/' /usr/local/bin/pact-broker-sign   # RESTORE
 ```
+
+> **The single-uid flip-test above is the LESS-RIGOROUS form.** It mutates the allowlist on ONE uid; the flip IS
+> non-vacuous IF the invoking ruid is genuinely absent from the live allowlist and run through the real `sudo`
+> path — BUT it cannot pair an ALLOW and a DENY on the SAME allowlist, so it cannot rule out a *malformed*-allowlist
+> deny (`broker-sign` collapses every deny cause to one fixed `caller not authorized` message). The MORE RIGOROUS
+> form — a leg-1 ALLOW positive-control plus a leg-2 DENY from a SECOND, distinct, real OS uid, both on the
+> IDENTICAL allowlist (so the deny is provably membership-caused) plus a leg-3 forged-`SUDO_UID` deny — is in PACT
+> `plans/16` (the R2 caller-auth custody dogfood). Prefer it when world-anchoring the gate.
 
 The deployment is only caller-auth-enabled once the allowlist is set to your uid(s) AND the flip test refuses a
 non-member. Omit the allowlist → caller-auth OFF (the broker signs for any sudoers-permitted caller + prints a
