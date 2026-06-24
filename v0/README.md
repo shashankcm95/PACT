@@ -17,13 +17,16 @@ primitives + a greenfield ATMS core.
 node test/run.js   # from the repo root (or: npm test)
 ```
 
-The runner discovers every `v0/test/**/*.test.js` (unit + the D1–D7 acceptance gate + the broker / caller-auth /
-request-auth / custody-verify / layering / runner-guard suites) and enforces the vacuous-pass guards — prefer it
-over a bare `for`-loop, which omits those guards and the newer suites.
+The runner discovers every `v0/test/**/*.test.js` across three tiers — `test/unit/` (pure single-module logic),
+`test/integration/` (real record-store + multi-module signed-record flows + the broker / caller-auth /
+custody-verify / runner-guard suites), and `test/acceptance/` (the end-to-end DoD gates) — and enforces the
+vacuous-pass guards; prefer it over a bare `for`-loop, which omits those guards and the newer suites.
 
-The acceptance test (`test/acceptance/v0-dod.test.js`) IS the definition-of-done: D1–D7 are concrete
-forcing assertions (distinct keys, separate-uid provenance out-of-band, FALSIFY-as-flag + authz,
-scope, REPAIR anti-ping-pong, acyclicity) — a green run = v0 done.
+The acceptance tests in `test/acceptance/` ARE the definitions-of-done: `v0-dod.test.js` (D1–D7 — distinct keys,
+separate-uid provenance out-of-band, FALSIFY-as-flag + authz, scope, REPAIR anti-ping-pong, acyclicity) for the
+v0 core, and `u1-stake-dod.test.js` (DS1–DS6 — the integrated U1 issuance-stake lifecycle: custody-mint ->
+stakeOf -> issuance-policy + convert -> crater-quorum SLASH -> 'slashed' composes back, all SHADOW) for the
+stake arc. A green run of each = that scope done.
 
 ## Layout
 
@@ -40,7 +43,7 @@ scope, REPAIR anti-ping-pong, acyclicity) — a green run = v0 done.
 | `src/lib/merkle.js` + `src/audit/` | **§7 anti-equivocation (SHADOW)** — RFC-6962/9162 primitives (`lib/merkle.js`, PURE/portable: leaf/node hash, inclusion+consistency proofs+verify, freshness-bound STH) + the per-receiver ordered Merkle log (`audit/audit-log.js`: `appendLeaf` #273-bind, `currentSTH`, prove inclusion/consistency, `detectFork`, store-then-leaf `appendAudited`, `reconcile`). The frame attaches `inclusion_proof`+`sth`; `receiveFrame` verifies-when-present else accepts with `audited:false`. NARROWS the equivocation surface — does NOT harden (cross-node STH gossip + the §2-MUST = network-phase). |
 | `src/identity/minter.js` | **P-minter** the authenticated-writer (custody) abstraction — structurally key-free (throws rather than touch raw key material), per-persona bound (no throne by config). The sole supported `src/` producer; signs ONLY via an injected custody `signer`. |
 | `src/identity/broker-{sign,client}.js` | **P-broker** out-of-band signing broker — the key lives in a SEPARATE process (`broker-sign.js`, the sole key-loader); `brokerSigner` plugs into the existing `opts.signer` seam (zero seam change). Custody MECHANISM (custody-real = a cross-uid deployment). |
-| `test/` | 293 tests (run `node test/run.js`): per-module unit suites + the D1–D7 acceptance gate + the broker / caller-auth / request-auth / custody-verify / merkle / audit-log / frame / layering / runner-guard suites. |
+| `test/` | three tiers (run `node test/run.js` for the live count — never a remembered one): `test/unit/` pure single-module logic (record / merkle / atms / edge-attestation / request-auth / layering), `test/integration/` real-store + multi-module signed-record flows (frame / minter / trust / grounding / stake / slash / issuance-policy / convert-stake / record-store / audit-log / broker / caller-auth / custody-verify / runner-guard), and `test/acceptance/` the v0-dod (D1–D7) + u1-stake-dod (DS1–DS6) gates. |
 
 ## What v0/P2/P3 is NOT (deferred, by design)
 

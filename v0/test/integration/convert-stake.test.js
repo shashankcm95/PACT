@@ -150,6 +150,30 @@ test('hostile-anchor quarantine: a LYING anchor corrupts only the advisory field
   w.cleanup();
 });
 
+// ===================== S5 x S4 composition: 'slashed' flows through the open-enum axis (phase-close gate) =====================
+
+test('S4 composition: slashing the agent root flips funded_root locked -> slashed; actionable STAYS false', () => {
+  // The cross-PR seam the per-wave VALIDATEs could not assert (S5 #17 built before S4 #18): a slashed root must
+  // surface through the S5 open-enum passthrough unchanged, and STILL never gate. Non-vacuous: proven LIVE pre-slash.
+  const w = freshWorld();
+  w.add('did:key:zTarget');
+  const X = w.emit('did:key:zTarget', 'STAKE', { lock_expiry: 9e12 }).record_id; // the agent's REAL locked stake
+  // (1) PRECONDITION proven LIVE: before any slash the funded axis reads 'locked' (so the flip below is non-vacuous).
+  const before = convert(w.ctx({ anchor: w.anchor, nowMs: 0 }), w.ME, 'did:key:zTarget');
+  assert.equal(before.funded_root.status, 'locked', 'precondition: the agent root is funded (locked) pre-slash');
+  // (2) 2 distinct EARNED-STANDING human roots crater X (each: a CLAIM for standing + a SLASH naming the real stake id).
+  w.add('did:key:zS1'); w.emit('did:key:zS1', 'CLAIM', { claim: { content: 'interacted' } });
+  w.add('did:key:zS2'); w.emit('did:key:zS2', 'CLAIM', { claim: { content: 'interacted' } });
+  w.emit('did:key:zS1', 'SLASH', { target_stake_id: X, reason: 'defected on the commitment' });
+  w.emit('did:key:zS2', 'SLASH', { target_stake_id: X, reason: 'corroborated defection' });
+  // (3) the open-enum axis passes the new S4 'slashed' status through unchanged (NEVER a closed-set switch)...
+  const after = convert(w.ctx({ anchor: w.anchor, nowMs: 0 }), w.ME, 'did:key:zTarget');
+  assert.equal(after.funded_root.status, 'slashed', 'S4 slashed flows through the S5 passthrough (cross-PR seam)');
+  // ...and YET nothing gates — a slashed root never flips actionable (INV-16; the axis informs, never gates).
+  assert.equal(after.actionable, false, 'a slashed root NEVER flips the gate');
+  w.cleanup();
+});
+
 // ===================== provenance reuse (inherits the S1-S2 gate) =====================
 
 test('provenance: a forged UNSIGNED stake for the agent root does NOT surface as funded', () => {

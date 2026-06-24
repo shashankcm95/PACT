@@ -2,7 +2,7 @@
 lifecycle: persistent
 created: 2026-06-24
 phase: U1 issuance-stake BLUEPRINT (design-only — NOT a build) — the Sybil-price / containment thread of the U1 frontier
-status: BLUEPRINT — architect design pass folded (workflow `wf_a5ccc483`); design-only, no code; awaiting USER direction to build any step
+status: S1-S5 BUILT + PHASE-CLOSED 2026-06-24 (#15-#18; see `## Phase-close sign-off` below — all NARROWING, SHADOW). S6 (on-chain) stays DESIGN-ONLY/external. Architect design pass folded (workflow `wf_a5ccc483`).
 ---
 
 # U1 issuance-stake blueprint — a slashable economic cost behind the registry seam (DESIGN ONLY)
@@ -159,3 +159,85 @@ first slice is **S1-S2** (the `StakeAnchor` seam + the custody-minted `STAKE` re
 in-process, reusing the dogfooded custody path, and it discharges the `convert.js:82-85` forward-contract. S3-S5
 follow; S6 stays design-only until a real chain deployment is a funded decision. **Nothing here should be built
 without an explicit USER go** (NS-8: it stays SHADOW regardless).
+
+## Phase-close sign-off (2026-06-24 — the integrated S1-S5 BUILD arc)
+
+> The build of S1-S5 is COMPLETE and merged: #15 (S1-S2 `StakeAnchor` + custody `STAKE`), #16 (S3 issuance-policy),
+> #17 (S5 `convert.funded_root` axis), #18 (S4 `SLASH`). Main @ `facf65d`; integrated suite re-run firsthand 360/0
+> (was 358 + the two close-now tests this gate added). S6 (on-chain) is DESIGN-ONLY/external and correctly NOT built.
+> This is the coarse cross-PR gate the per-wave VALIDATEs cannot see — a 3-lens review of the INTEGRATED arc vs the
+> §2-§6 exit criteria. **The whole arc NARROWS, it does not harden (OQ-NS-6); nothing here is a U1 closure (NS-9).**
+
+### Verdicts (all three lenses: CLOSEABLE-WITH-NOTES; 0 CRITICAL, 0 HIGH)
+
+| Lens | Persona | Verdict | Headline |
+|---|---|---|---|
+| PM / claim-honesty | `honesty-auditor` | CLOSEABLE-WITH-NOTES | "one of the most claim-honest arcs"; NS-9 honored in every artifact; SHADOW held behaviorally; exit criteria S1-S5 all delivered, no hollow step |
+| Principal-SDE (phase altitude) | `code-reviewer` | CLOSEABLE-WITH-NOTES | no contract drift across the 4 PRs; the `'slashed'` addition is isolated from S3's strict `=== 'locked'` + S5's open-enum passthrough; forward-contract verified firsthand by running it |
+| Architect | `architect` | CLOSEABLE-WITH-NOTES | the DI consumer seam is genuinely swappable for S6; all design constraints held (soulbound / registry-not-oracle / no-global-rank / derived-on-read); two named forward-contract gaps S6 + network inherit |
+
+### Exit-criteria delivery (§2 build DAG)
+
+| Step | §2 promise | Delivered | Evidence |
+|---|---|---|---|
+| S1 | `StakeAnchor` seam, derived-on-read, registry-not-oracle | YES | `stake-anchor.js:35-98` (`createStakeAnchor` returns `{stakeOf}`; no store/edge/rank) |
+| S2 | `STAKE` minted ONLY through custody, non-transferable | YES | `stake.js:14-32` (payload `{lock_expiry}` only; minter-bound root; the forgeable `amount` field deliberately dropped, D5) |
+| S3 | stake-aware issuance policy, never gates registration | YES | `issuance-policy.js:40-105` (`meetsPolicy` strict `=== 'locked'`; `gates:false`) |
+| S4 | `SLASH` crater-disciplined, append-only, authorized slasher | YES | `slash.js` + `stake-anchor.js:52-65` (quorum `>= 2` distinct earned roots; F3-analog `target_stake_id`; L8 reason gate) |
+| S5 | `funded_root` advisory axis, receiver-relative, never a gate | YES | `convert.js:96-110,133` (`funded_root` field; `actionable:false`; null tri-state fail-closed) |
+
+### What this gate CLOSED (4 convergent findings folded into this sign-off PR)
+
+- **MED (honesty F1 + code-reviewer) — the `'slashed'` -> `convert.funded_root` composition was asserted by NO test on
+  merged main.** Honestly disclosed as a forward-contract in plans/23 §5 (S5 #17 was built before S4 #18), but the
+  integrated seam was never exercised. CLOSED: `convert-stake.test.js` now has a NON-VACUOUS composition test (proves
+  the locked -> slashed flip against a real signed `STAKE` + 2 earned-standing `SLASH`es, and `actionable` stays false).
+- **LOW (all 3 lenses) — `issuance-policy.js` `reasonFor` rendered "(bootstrap or unstaked)" for a slashed root.**
+  CLOSED: a dedicated `'slashed'` arm ("STAKE slashed (forfeited by the crater quorum)"). Documentary field only.
+- **LOW (code-reviewer) — stale `"S4 will add 'slashed'"` comment** (S4 merged). CLOSED: -> "S4 added".
+- **LOW (honesty F2 + code-reviewer) — `stake.test.js` SHADOW import-wall excluded the impl by basename, not relative
+  path, and lacked the non-vacuousness precondition** the hardened S3 wall has. CLOSED: relative-path exclusion +
+  a `stake-anchor.js`-exists-and-non-empty precondition test (mirrors `issuance-policy.test.js:298-318`).
+
+### Carried forward as NAMED residuals (acceptable to close the phase with; NOT defects)
+
+- **S6 seam-tidy (architect A, MED) — `stakeOf(storeOpts, humanUid, nowMs)` leaks the in-memory backend's per-receiver
+  filesystem `storeOpts` across the shared interface (Leaky Abstraction).** The CONSUMER seam is swappable (both
+  consumers take the anchor via DI, neither statically imports the impl), so S6 drops in WITHOUT a consumer rewrite —
+  but the S6 author should close `storeOpts` over at construction so the shared contract is `stakeOf(humanUid, nowMs)`.
+  Defer-with-eyes-open; record as the S6 seam-tidy.
+- **Cross-network slash freshness (architect B, MED; blueprint §7 Q6) — inherited RAW by the network phase (plans/19).**
+  `stakeOf` is receiver-relative + read-local; a slashed root reads `'slashed'` only in a view that has received the
+  `SLASH`. No TTL / propagation guarantee, and no transport layer exists in v0. Correct substrate to build the relay
+  invariant (TTL >= dissemination-latency) on top of; the network phase owns it.
+- **Slash/stake decay asymmetry (architect C, LOW; §7 Q3) — a `SLASH` is permanent-on-read; DIRECT defection evidence
+  decays.** Defensible for a settlement event while SHADOW, but the governance question (can a wrongly-slashed root
+  recover?) needs a decision BEFORE S6 makes the forfeiture real-money. Carried to S6.
+
+### The one thing the next phase (S6 / network) must NOT mis-read
+
+`funded_root.status === 'locked'` / `meets_policy:true` prove the PRESENCE of a self-minted, zero-cost, unbounded-
+`lock_expiry` commitment marker — NOT a borne cost. Every "funded" reading is in-process NARROWING. A real cost
+appears only when S6 routes the stake to a really-deployed slashable deposit AND the broker routes to a real
+out-of-band boundary. Any future GATING consumer MUST treat `funded_root:null` as FAIL-CLOSED (the contract is
+documented at `convert.js:84-93` but enforced by nothing yet).
+
+### Honesty process-note
+
+The `honesty-auditor` lens has no Bash, so its "358/0" figure was orchestrator-attested; the `code-reviewer` lens
+RE-RAN the suite firsthand (and ran the forward-contract probe live) — so the integrated 360/0 here is firsthand, not
+self-attested. Per OQ-NS-6 this remains SHADOW-level in-process self-consistency evidence, NOT a world-anchored
+hardening signal. **VERDICT: the U1-stake BUILD arc (S1-S5) is PHASE-CLOSED — CLOSEABLE, all NARROWING, S6 + the
+network phase carry the three named residuals.**
+
+### Post-sign-off (same PR) — acceptance leg + test-tier reorg
+
+- **Acceptance leg added** — `v0/test/acceptance/u1-stake-dod.test.js` (DS1-DS6): a single end-to-end SHADOW
+  lifecycle walk (custody-mint `STAKE` -> `stakeOf` -> issuance-policy + convert read it -> crater-quorum `SLASH`
+  -> `'slashed'` composes back into BOTH consumers, no gate ever flips), mirroring the `v0-dod` DoD idiom. This
+  discharges the gate's MED finding at ACCEPTANCE altitude (the per-wave tests verify the parts; this asserts the
+  whole walk). Non-vacuous: DS1 forged-stake + DS4 sub-quorum are inline negative controls.
+- **Test tiers split** — `v0/test/unit/` (6 pure single-module suites) vs `v0/test/integration/` (14 real-store /
+  multi-module signed-record-flow / real-spawn suites) vs `v0/test/acceptance/` (2 DoD gates). The runner
+  (`test/run.js`) discovers all three recursively (no CI change); the "unit" folder previously held mostly
+  component-integration tests, so the names now match the levels. Suite: 22 files / 366 green, eslint clean.
