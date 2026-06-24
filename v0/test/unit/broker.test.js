@@ -164,7 +164,7 @@ test('PROVES the env-allowlist defeats NODE_OPTIONS injection into the broker ch
 
 // ====================== HIGH-2: key-file vet (symlink / world-writable / absent / non-ed25519) ======================
 
-test('broker refuses a symlinked / world-or-group-writable / absent / non-ed25519 key file', () => {
+test('broker refuses a symlinked / world-or-group-readable / world-or-group-writable / absent / non-ed25519 key file', () => {
   const w = freshWorld();
   const a = w.personas['did:key:zME'];
   // absent
@@ -178,6 +178,12 @@ test('broker refuses a symlinked / world-or-group-writable / absent / non-ed2551
   // group-writable
   const gw = path.join(w.STATE, 'gw.key'); fs.writeFileSync(gw, fs.readFileSync(a.keyFile)); fs.chmodSync(gw, 0o620);
   assert.equal(brokerFor(gw)(RID), null, 'group-writable key file refused');
+  // group/world-READABLE refused (OWNER-ONLY vet, `& 0o077`): a private signing key readable by ANY other uid is a
+  // custody-bypass — that uid reads the key bytes + signs directly, no broker/sudo (Loom->PACT, CodeRabbit Major).
+  const wr = path.join(w.STATE, 'wr.key'); fs.writeFileSync(wr, fs.readFileSync(a.keyFile)); fs.chmodSync(wr, 0o644);
+  assert.equal(brokerFor(wr)(RID), null, 'world-readable (0644) key file refused');
+  const gr = path.join(w.STATE, 'gr.key'); fs.writeFileSync(gr, fs.readFileSync(a.keyFile)); fs.chmodSync(gr, 0o640);
+  assert.equal(brokerFor(gr)(RID), null, 'group-readable (0640) key file refused');
   // non-ed25519 (alg-pinning survives the process boundary)
   const rsa = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } });
   const rsaPath = path.join(w.STATE, 'rsa.key'); fs.writeFileSync(rsaPath, rsa.privateKey);
@@ -195,8 +201,9 @@ test('broker refuses a symlinked / world-or-group-writable / absent / non-ed2551
     assert.notEqual(r.status, 0, 'a FIFO key path is refused (exit non-zero)');
     assert.equal(r.signal, null, 'and it did NOT hang (no timeout kill-signal) — O_NONBLOCK + isFile reject');
   }
-  // the legit 0644 key still passes (the vet is not over-broad)
-  assert.ok(brokerFor(a.keyFile)(RID), 'a normal regular 0644 key file is accepted');
+  // the legit OWNER-ONLY 0600 key still passes (the vet is non-vacuous — a legit key works). NOTE: a.keyFile is
+  // created at 0600 (freshWorld add(): chmodSync 0o600) — the prior "0644" label was stale/wrong.
+  assert.ok(brokerFor(a.keyFile)(RID), 'a normal owner-only 0600 key file is accepted');
   w.cleanup();
 });
 

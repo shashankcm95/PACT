@@ -116,8 +116,12 @@ async function main() {
   // (2) vet the key path SWAP-RESISTANTLY (VALIDATE: a lstat->read pair lost a live TOCTOU race — a
   // same-uid attacker swapped the path to a symlink between the check and the read). Open with O_NOFOLLOW
   // (refuses a symlink AT open, atomically) then fstat the RESOLVED fd (the inode, immune to a path swap)
-  // and read THAT fd — no second path resolution. A private key must be tightly-permissioned: a regular
-  // file, not group/world-writable. (Dir-level write is a deeper residual — out of scope; see plans/05 §8.)
+  // and read THAT fd — no second path resolution. A private key must be tightly-permissioned: a regular file,
+  // OWNER-ONLY (no group/world access; e.g. 0600/0400 — NOT exact-0600: any owner-only mode passes) — a
+  // group/world-READABLE key is a custody-bypass (any uid that can READ it signs directly, no broker/sudo), so
+  // the vet rejects ANY group/world bit (`& 0o077`), not just writable. The runbook
+  // installs the key at 0600 (docs/deployment/cross-uid-broker.md). (Dir-level write is a deeper residual — out of
+  // scope; see plans/05 §8.) [Loom->PACT cross-improvement: a CodeRabbit Major caught the read-vs-write mask gap.]
   const keyFile = process.env.PACT_BROKER_KEY_FILE;
   if (typeof keyFile !== 'string' || keyFile.length === 0) fail('PACT_BROKER_KEY_FILE is required');
   let fd;
@@ -132,7 +136,7 @@ async function main() {
   try {
     const st = fs.fstatSync(fd);                                  // the OPEN fd's inode — swap-immune
     if (!st.isFile()) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be a regular file'); }
-    if (st.mode & 0o022) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must not be group- or world-writable'); }
+    if (st.mode & 0o077) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be owner-only -- not group/world accessible (e.g. 0600)'); }
   } catch { try { fs.closeSync(fd); } catch { /* */ } return fail('key file unstattable'); }
   try { pem = fs.readFileSync(fd, 'utf8'); } finally { try { fs.closeSync(fd); } catch { /* */ } }
 
