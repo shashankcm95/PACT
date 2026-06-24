@@ -19,6 +19,14 @@
 // NS-5); slashing is done by minting a SLASH (identity/slash.js + the minter), not a method — so the old
 // recordSlash placeholder is removed. The S6 on-chain backend swaps the stakeOf SOURCE behind this same
 // interface; pluggability lives in the interface, never in the signed record body (no anchor_ref).
+//
+// `storeOpts` (the stakeOf param) is the RECEIVER-VIEW selector (NS-3 receiver-relativity) — WHICH receiver's
+// verified log the stake-state is read FROM, NOT an in-memory-backend detail to close over at construction. The
+// anchor is STATELESS and reused across receivers (one anchor, many views — the receiver-relative test in
+// convert-stake), so the store is supplied PER CALL. An S6 backend reads the same `receiverId` to scope its
+// view (or ignores it if the chain is global). (Settles the #20 phase-close "Leaky Abstraction" finding: FALSE
+// tidy — `storeOpts` is load-bearing; documented, NOT refactored. Closing it over would force per-receiver
+// anchors and break receiver-relativity for zero behavior gain. plans/24.)
 
 'use strict';
 
@@ -48,6 +56,17 @@ function createStakeAnchor(opts) {
    * / premise-score all gate `earned.has(src_persona_did)` then count by `rootOf`), so slander is as costly as
    * support: the ACCUSER must have its OWN skin (a CLAIM), not merely belong to a root that earned it elsewhere.
    * Exact `>= 2` over a deduped Set.
+   *
+   * DECAY (decided, #20 phase-close residual, plans/24): a SLASH is PERMANENT-on-read — `isSlashed` takes no
+   * clock and never decays, UNLIKE DIRECT defection evidence (direct.js decayWeight). The asymmetry is
+   * INTENTIONAL: a SLASH models the forfeiture of a SPECIFIC content-addressed commitment (a discrete event),
+   * not fading behavioral reputation — decaying it would silently un-forfeit a stake nobody reinstated
+   * (laundering). Permanence is a CONSEQUENCE of NS-5 (append-only, derived-on-read), not a mutable policy, and
+   * it gates nothing (convert.actionable stays false). The S6 RECOVERY seam attaches HERE (the quorum count): a
+   * future append-only `REINSTATE` counter-record (F3-bound to a real `target_slash_id`, L8 reason, custody-
+   * minted) would NET against `slasherRoots` so an authorized reinstatement drops the count below 2 — recovery
+   * DERIVED, never a SLASH mutation (NS-5) nor a decay-by-clock (laundering). The reinstatement AUTHORITY model
+   * is the deferred S6 governance work (meaningless until forfeiture is real, OQ-NS-6).
    */
   function isSlashed(recs, stakeIds) {
     const earned = earnedStandingPersonas(recs);
@@ -67,7 +86,11 @@ function createStakeAnchor(opts) {
   /**
    * The stake-state of a human root, derived ON READ from the SIG-VERIFIED store. Pure over
    * (verified records, humanUid, nowMs) — deterministic; the returned object is fresh each call.
-   * @param {{receiverId:string, stateDir?:string}} storeOpts  the receiver's per-receiver store.
+   * @param {{receiverId:string, stateDir?:string}} storeOpts  the RECEIVER-VIEW selector — which receiver's
+   *   verified log to read the stake-state FROM (NS-3: receiver-relative, no global rank). NOT a backend impl
+   *   detail; the anchor is stateless + reused across receivers, so this is supplied PER CALL, never closed over
+   *   at construction. An S6 backend reads `receiverId` as the receiver/shard context (or ignores it for a
+   *   global chain); `stateDir` is the in-memory backend's knob, hidden behind verifiedRecords.
    * @param {string} humanUid  the root whose stake-state to read.
    * @param {number} nowMs  the caller's clock (epoch ms) for the locked/unlocked status.
    * @returns {{status:('none'|'locked'|'unlocked'|'slashed'), lockedUntil:(number|null)}}

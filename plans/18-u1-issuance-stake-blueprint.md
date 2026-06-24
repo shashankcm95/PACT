@@ -214,6 +214,14 @@ without an explicit USER go** (NS-8: it stays SHADOW regardless).
   decays.** Defensible for a settlement event while SHADOW, but the governance question (can a wrongly-slashed root
   recover?) needs a decision BEFORE S6 makes the forfeiture real-money. Carried to S6.
 
+> **UPDATE 2026-06-24 (`plans/24`) — residuals A + C RESOLVED (doc-only); only B (network phase) remains.** A
+> VERIFY board (architect + code-reviewer) **OVERTURNED Finding A**: `storeOpts` is the receiver-VIEW selector
+> (NS-3 receiver-relativity, one stateless anchor across many receiver stores), NOT a backend leak — closing it
+> over would break receiver-relativity for zero gain (40+ test churn). Resolved by DOCUMENTATION, not a refactor.
+> Finding C: permanent-on-read is CORRECT while SHADOW (a SLASH is an append-only forfeiture, NS-5; decay would
+> launder it); the S6 recovery seam is NAMED (an append-only `REINSTATE` counter-record netting the quorum, not a
+> decayed weight) but NOT built (authority model = deferred S6 governance). See `plans/24` §4.
+
 ### The one thing the next phase (S6 / network) must NOT mis-read
 
 `funded_root.status === 'locked'` / `meets_policy:true` prove the PRESENCE of a self-minted, zero-cost, unbounded-
