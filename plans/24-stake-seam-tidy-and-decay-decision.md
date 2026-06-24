@@ -67,8 +67,8 @@ shape the NS-3 receiver-relative test exercises. So the candidate resolutions ar
 
 ## §4 VERIFY board verdict + resolution (RESOLVED 2026-06-24)
 
-Both lenses (architect + code-reviewer) returned the SAME verdict, decisively — the board OVERTURNED the prior
-#20 phase-close architect Finding A on firsthand evidence.
+Both lenses (architect + code-reviewer) returned the SAME verdict, decisively — the board OVERTURNED the prior #20
+phase-close architect Finding A on firsthand evidence.
 
 ### A — B1: FALSE tidy. `storeOpts` is the receiver-view selector, NOT a leak. DOCUMENTED, not refactored.
 
