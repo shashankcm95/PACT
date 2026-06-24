@@ -117,8 +117,9 @@ async function main() {
   // same-uid attacker swapped the path to a symlink between the check and the read). Open with O_NOFOLLOW
   // (refuses a symlink AT open, atomically) then fstat the RESOLVED fd (the inode, immune to a path swap)
   // and read THAT fd — no second path resolution. A private key must be tightly-permissioned: a regular file,
-  // OWNER-ONLY (mode 0600) — group/world-READABLE is a custody-bypass (any uid that can READ the key signs
-  // directly, no broker/sudo), so the vet rejects ANY group/world bit (`& 0o077`), not just writable. The runbook
+  // OWNER-ONLY (no group/world access; e.g. 0600/0400 — NOT exact-0600: any owner-only mode passes) — a
+  // group/world-READABLE key is a custody-bypass (any uid that can READ it signs directly, no broker/sudo), so
+  // the vet rejects ANY group/world bit (`& 0o077`), not just writable. The runbook
   // installs the key at 0600 (docs/deployment/cross-uid-broker.md). (Dir-level write is a deeper residual — out of
   // scope; see plans/05 §8.) [Loom->PACT cross-improvement: a CodeRabbit Major caught the read-vs-write mask gap.]
   const keyFile = process.env.PACT_BROKER_KEY_FILE;
@@ -135,7 +136,7 @@ async function main() {
   try {
     const st = fs.fstatSync(fd);                                  // the OPEN fd's inode — swap-immune
     if (!st.isFile()) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be a regular file'); }
-    if (st.mode & 0o077) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be owner-only (mode 0600) -- not group/world accessible'); }
+    if (st.mode & 0o077) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be owner-only -- not group/world accessible (e.g. 0600)'); }
   } catch { try { fs.closeSync(fd); } catch { /* */ } return fail('key file unstattable'); }
   try { pem = fs.readFileSync(fd, 'utf8'); } finally { try { fs.closeSync(fd); } catch { /* */ } }
 

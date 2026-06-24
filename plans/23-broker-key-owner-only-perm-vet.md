@@ -2,7 +2,7 @@
 lifecycle: persistent
 created: 2026-06-24
 phase: broker-sign key-perm hardening — owner-only (reject group/world-READABLE), Loom -> PACT cross-improvement
-status: PLANNED — pre-build. Security/custody fix (one mask constant + test).
+status: DONE -- built + 3-lens VALIDATE folded (§7: hacker/honesty APPROVE, code-reviewer 2-LOW-folded); broker 25/0, eslint clean; PR #19. SHADOW custody hardening.
 ---
 
 # broker-sign owner-only key vet — reject a group/world-READABLE private signing key (Loom -> PACT)
