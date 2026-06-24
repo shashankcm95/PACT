@@ -319,11 +319,13 @@ test('SHADOW precondition: issuance-policy.js exists + is non-empty (else the wa
 
 test('SHADOW belt+suspenders: the gating + bootstrap-brick surfaces import NEITHER stake-state module', () => {
   const SRC = path.join(__dirname, '..', '..', 'src');
-  const banned = ['stake-anchor', 'issuance-policy'];
+  // precompile once per banned token (the pattern depends only on the token, not the scanned file). No `g` flag,
+  // so .test() is stateless and safe to reuse across files (CodeRabbit nit — hoist out of the inner loop).
+  const banned = [['stake-anchor', /require\([^)]*stake-anchor[^)]*\)/], ['issuance-policy', /require\([^)]*issuance-policy[^)]*\)/]];
   for (const rel of ['trust/convert.js', 'independence/weak-flag.js', 'identity/registry.js']) {
     const src = fs.readFileSync(path.join(SRC, rel), 'utf8');
-    for (const b of banned) {
-      assert.ok(!new RegExp('require\\([^)]*' + b + '[^)]*\\)').test(src), rel + ' imports ' + b + ' (gating/brick surface must not read stake-state)');
+    for (const [b, re] of banned) {
+      assert.ok(!re.test(src), rel + ' imports ' + b + ' (gating/brick surface must not read stake-state)');
     }
   }
 });
