@@ -114,7 +114,7 @@ design-freeze (preconditions unbuilt).
 `_collectPremises` + `validate()` folding `CONTESTED` derived-on-read; `falsify.js`/repair — `CONTESTED` is a
 reversible FLAG, authorized + anti-ping-pong). The CONFIRM dual FRAME is BUILT + consumed: `grounding/cross-verify.js`
 (distinct EARNED-STANDING `rootOf`-keyed non-self confirmations, decay-weighted, creator-bound-on-read with the
-#273 first-match-poison defense) -> `grounding/premise-score.js` (an SL opinion, derived-on-read, advisory/SHADOW).
+`#273` first-match-poison defense) -> `grounding/premise-score.js` (an SL opinion, derived-on-read, advisory/SHADOW).
 The CONTEST/CONFIRM vehicle + discriminant (`record.js`), the U2 lift-point seam (`weak-flag.js`), and ed25519
 provenance all exist. **Newly proposed:** (a) the `evidence_provenance` CARRIER (S1) — `plans/13` authored it
 carrier-only then DEFERRED (FORK-3); a build-on, not greenfield. (b) **NO transport/dissemination/relay/gossip layer
