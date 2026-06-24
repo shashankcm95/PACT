@@ -13,6 +13,7 @@
 const { verifiedRecords } = require('./read-gate');
 const { DISJOINT_PATHS_K } = require('./params');
 const { independenceLabel } = require('../independence/weak-flag');
+const { rootOf } = require('../identity/registry');
 
 /** Build the directed vouch graph from sig-verified VOUCH records: edge src -> target. */
 function buildVouchGraph(recs) {
@@ -76,13 +77,51 @@ function disjointPaths(meCtx, meDid, agentDid) {
 }
 
 /**
+ * The funded-root ADVISORY axis (plans/22 S5): the AGENT's root stake-state, read via a DI-injected anchor
+ * (`meCtx.anchor`). It is a scarcity/cost-AXIS signal (axis-1 family) reflecting stake PRESENCE (a real forfeitable
+ * cost only once S6 deploys — until then it NARROWS, it does not bear cost) — it INFORMS, it NEVER gates and is
+ * NEVER read as epistemic independence (axis 4). Returns `null` when the axis is UNAVAILABLE: no anchor wired, a
+ * broken anchor (no `stakeOf` fn), a THROWING anchor, or a malformed (non-`{status}`) return — the whole `convert`
+ * readout (incl. the gate-relevant fields) must NEVER be denied by a bad advisory anchor (VALIDATE — contained).
+ *
+ * `null` is NOT `{status:'none'}`: `{status:'none'}` means the axis RAN and the agent's root is unfunded (a real,
+ * receiver-relative negative); `null` means the axis could not run. A future GATING consumer MUST treat `null` as
+ * FAIL-CLOSED (never "funded", never "no requirement"). The `status` enum is OPEN — S4 will add `'slashed'`, which
+ * flows through this passthrough unchanged (NEVER switch on a closed status set). The status is `nowMs`-RELATIVE:
+ * `stakeOf` reports `'locked'` for a non-finite/omitted clock (conservative), so a gating consumer MUST pass a
+ * finite numeric `nowMs`. Reuses the ONE provenance gate via `stakeOf` (keyed by `rootOf(signer)`; a forged/
+ * unsigned stake contributes 0) — no new key path.
+ * @returns {{status:string, lockedUntil:(number|null)}|null}
+ */
+function agentStakeAxis(meCtx, agentDid) {
+  const anchor = meCtx && meCtx.anchor;
+  if (!anchor || typeof anchor.stakeOf !== 'function') return null; // axis UNAVAILABLE — fail-closed for a future gater
+  let axis;
+  try {
+    // UNCONDITIONAL (KISS/DRY, matches issuance-policy.js): rootOf -> null for an unregistered agent, and
+    // stakeOf(.., null, ..) already yields {status:'none', lockedUntil:null} — no hand-rolled short-circuit.
+    axis = anchor.stakeOf(meCtx.storeOpts, rootOf(meCtx.registry, agentDid), meCtx.nowMs);
+  } catch (_) {
+    return null; // a THROWING anchor (e.g. a future S6 network backend) -> axis UNAVAILABLE, NOT a convert-wide DoS
+  }
+  // contain a malformed return to the advisory field — only a plain object with a string `status` IS the axis
+  // (a non-object like 'allow'/true never lands in funded_root where a consumer could misread it).
+  return (axis && typeof axis === 'object' && typeof axis.status === 'string') ? axis : null;
+}
+
+/**
  * CONVERT in P2: ADVISORY only. Returns the structural disjoint-path count + the (WEAK) independence
- * label. `actionable` is ALWAYS false in P2 (INV-16: a WEAK record never gates a high-stakes action).
+ * label + the (advisory) funded-root axis. `actionable` is ALWAYS false in P2 (INV-16: a WEAK record never
+ * gates a high-stakes action).
  */
 // P3 PRECONDITION (load-bearing — do not forget when the WEAK flag lifts): `meets_topological` is
-// NECESSARY-NOT-SUFFICIENT. The per-path UNFORGEABLE bar (probation + voucher stake + behavioral demo,
-// §5.1) is entirely unimplemented in P2; `actionable` MUST NOT flip true until that bar exists AND the
-// U2 estimator replaces the permanent WEAK flag. A bare max-flow count is topology, never trust.
+// NECESSARY-NOT-SUFFICIENT. The per-path UNFORGEABLE bar (probation + voucher stake + behavioral demo, §5.1).
+// S5 UPDATE (plans/22): the "voucher stake" piece is now SURFACED as a COARSE funded-ROOT advisory axis
+// (`funded_root`, via `meCtx.anchor`) — NOT the per-path/per-voucher stake the bar names; and decay (OQ#3) +
+// probation + behavioral demo + the U2 estimator remain unimplemented. `actionable` MUST NOT flip true until that
+// full bar exists AND the U2 estimator replaces the permanent WEAK flag. `funded_root` informs, never gates (it is
+// axis-1, never read as epistemic axis-4); `funded_root:null` is fail-CLOSED-not-allow for any future gater.
+// A bare max-flow count is topology, never trust.
 function convert(meCtx, meDid, agentDid) {
   const dp = disjointPaths(meCtx, meDid, agentDid);
   const independence = independenceLabel({ topological: dp });
@@ -91,6 +130,7 @@ function convert(meCtx, meDid, agentDid) {
     disjoint_paths: dp,                 // a max-flow VALUE, not a vouch tally (INV-13)
     meets_topological: dp >= DISJOINT_PATHS_K,
     independence,                       // overall WEAK
+    funded_root: agentStakeAxis(meCtx, agentDid), // advisory axis-1 (scarcity/cost) — informs, NEVER gates (S5)
     actionable: false,                  // INV-16 — informs, never gates (U2 open)
     reason: 'topological-WEAK: informs, does not gate (U2 open)',
   };
