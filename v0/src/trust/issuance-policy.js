@@ -83,7 +83,9 @@ function createIssuancePolicy(opts) {
   /**
    * The issuance standing of a human root, derived ON READ. Pure over (verified records, humanUid, nowMs, mode);
    * the return is a FRESH object each call (mutating it is harmless — two reads equal). NEVER mutates, NEVER gates.
-   * @param {{receiverId:string, stateDir?:string}} storeOpts  the receiver's per-receiver store.
+   * @param {{receiverId:string, stateDir?:string}} storeOpts  the RECEIVER-VIEW selector threaded through to
+   *   stakeOf (which receiver's verified log to read; NS-3 receiver-relative) — NOT a policy-config param. See
+   *   the stake-anchor.js header: it is supplied PER CALL by design (the anchor is stateless, reused per receiver).
    * @param {string} humanUid  the root whose issuance standing to read.
    * @param {number} nowMs  the caller's clock (for the locked/unlocked status, via stakeOf).
    * @returns {{advisory:boolean, policy:string, known:boolean, stake:object, meets_policy:boolean, gates:boolean, reason:string}}
