@@ -75,6 +75,14 @@ test('trust/ never imports grounding', () => {
   assert.deepEqual(bad, [], 'trust/ reverse edge(s): ' + bad.join(', '));
 });
 
+test('identity/ never imports trust or grounding (it sits BELOW trust — trust/read-gate imports identity/registry)', () => {
+  // closes the uncaught reverse-edge gap surfaced by the U1 stake-anchor build (plans/20): a trust-layer
+  // read-fold belongs in trust/, not identity/. identity is foundational/below trust, so identity->trust
+  // is a cycle (trust->identity already exists).
+  const bad = offenders('identity', ['trust', 'grounding']);
+  assert.deepEqual(bad, [], 'identity/ reverse edge(s): ' + bad.join(', '));
+});
+
 test('grounding/ is a sink — no lower layer imports it', () => {
   const bad = [];
   for (const layer of ['lib', 'atms', 'trust', 'identity', 'frame', 'scope', 'independence', 'audit']) {
