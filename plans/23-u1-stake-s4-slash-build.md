@@ -290,3 +290,11 @@ via `node test/run.js`).
   `issuance-policy.js:55`->`:57` cite; the test name `immutable`->`fresh-return` (it proves fresh-not-frozen); a §0
   back-reference that the F3-analog was ADDED after the VERIFY HIGH (legibility). (Honesty lens disclosed it could not
   run the suite — the orchestrator did: 346/0.)
+- **CodeRabbit (PR #18) — 1 Major, premise-probed -> FALSE POSITIVE (no behavior change).** It read the doc's
+  "earned-standing human roots" as root-level standing and claimed `isSlashed` should count standing at the root, not
+  the signing persona. Firsthand evidence: ALL 5 sibling consumers (`direct.js:83`, `cross-verify.js:93`,
+  `creator-standing.js:37/51`, `premise-score.js:40`) gate `earned.has(src_persona_did)` (PERSONA-scoped) then count
+  by `rootOf` — `isSlashed` matches verbatim; the proposed root-level loosening would make the slash the ONLY divergent
+  consumer AND weaker (an accuser without its own CLAIM could corroborate, breaking slander-as-costly-as-support). Code
+  unchanged; the `isSlashed` doc tightened to name the persona-scoped-standing / root-counted pattern + cite the 5
+  consumers, so the ambiguity does not recur.

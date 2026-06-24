@@ -39,11 +39,15 @@ function createStakeAnchor(opts) {
   }
 
   /**
-   * Is one of the root's REAL stakes (`stakeIds`) slashed by the crater quorum? TRUE iff >=2 DISTINCT
-   * earned-standing human roots minted a SLASH that (a) resolves to a real STAKE of this root (the F3-analog
-   * — closes pre-positioning), (b) carries a non-empty string `reason` (L8 — the read-side gate; the store
-   * is not a sandbox, never trust the producer), (c) has earned standing (authored >=1 CLAIM). Keyed by HUMAN
-   * `rootOf` (a Sybil's N personas = ONE root); exact `>= 2` over a deduped Set.
+   * Is one of the root's REAL stakes (`stakeIds`) slashed by the crater quorum? TRUE iff >=2 DISTINCT human
+   * roots each minted a SLASH that (a) resolves to a real STAKE of this root (the F3-analog — closes
+   * pre-positioning), (b) carries a non-empty string `reason` (L8 — the read-side gate; the store is not a
+   * sandbox, never trust the producer), (c) was SIGNED BY A PERSONA WITH EARNED STANDING (that persona itself
+   * authored >=1 CLAIM). Earned standing is PERSONA-scoped; the COUNT is re-keyed to HUMAN `rootOf` (a Sybil's
+   * N personas = ONE root) — the canonical Sybil-gate pattern (direct.js:83 + cross-verify / creator-standing
+   * / premise-score all gate `earned.has(src_persona_did)` then count by `rootOf`), so slander is as costly as
+   * support: the ACCUSER must have its OWN skin (a CLAIM), not merely belong to a root that earned it elsewhere.
+   * Exact `>= 2` over a deduped Set.
    */
   function isSlashed(recs, stakeIds) {
     const earned = earnedStandingPersonas(recs);
