@@ -81,8 +81,11 @@ a time-INDEPENDENT credential check). ALL legs target ONE pinned broker pid.
   1. `ptrace(PTRACE_ATTACH/PTRACE_SEIZE)` -> `EPERM`.
   2. `open(/proc/<pid>/mem)` + `pread` -> `EACCES`/`EPERM`.
   3. `process_vm_readv` -> `EPERM`.
-  4. `/proc/<pid>/maps` -> DENIED cross-uid (assert the OPEN is denied — NOT "contains no key bytes", which is
-     vacuous; maps never holds key bytes, the risk is it leaking the heap layout — hacker H1.6).
+  4. `/proc/<pid>/maps` (+ `/proc/<pid>/environ`) -> DENIED cross-uid. NB (CodeRabbit): these are
+     `PTRACE_MODE_READ`/dumpable-gated — a DIFFERENT, WEAKER mechanism than the `PTRACE_MODE_ATTACH` vectors #1-3,
+     so a scope=2 attach-denial does NOT by itself imply a maps-denial; verify this leg INDEPENDENTLY (do not fold
+     it into the attach battery). Assert the OPEN is denied — NOT "contains no key bytes" (vacuous; maps holds no
+     key bytes — the risk is leaking the heap LAYOUT for a later read — hacker H1.6).
   5. induced **core dump**: attempt to crash the broker (attacker-influenced argv/stdin, broker-sign.js:78,113)
      and assert NO host-readable core lands (`core_pattern` sink + `coredumpctl`/`apport` not host-readable) —
      hacker H1.1.
@@ -91,9 +94,11 @@ a time-INDEPENDENT credential check). ALL legs target ONE pinned broker pid.
      lock; record it) — hacker H1.4.
 - **L3 — privileged positive control (HARD GATE — non-vacuity #2; VALIDATE hacker H2 + honesty L3-gate).** At the
   SAME blocked instant, on the SAME pinned pid, a root/`CAP_SYS_PTRACE` reader reads the heap and FINDS the key.
-  EITHER form suffices — the `-----BEGIN` PEM string OR the 32-byte ed25519 seed — because the paused harness
-  PINS the PEM string as a LIVE module const (NOT a freed-page residue, unlike production load-sign-exit), so a
-  PEM find IS proof of live residency; the seed scan is optional belt-and-suspenders. **L2's denial is CREDITED
+  EITHER form suffices — the `-----BEGIN` PEM string OR the test key's EXACT 32-byte ed25519 seed bytes (a
+  BYTE-EXACT match of the KNOWN test key, NOT a generic "looks-like-a-seed" pattern, which would match an
+  incidental 32-byte heap window — CodeRabbit) — because the paused harness PINS the PEM string as a LIVE module
+  const (NOT a freed-page residue, unlike production load-sign-exit), so a PEM find IS proof of live residency;
+  the seed scan is optional belt-and-suspenders. **L2's denial is CREDITED
   ONLY IF L3 succeeds** — else L2 is vacuous (the guard may have "denied" because there was nothing to read).
   This is what makes a self-controlled box honest (§6): a rigged "always-deny" kernel would deny L3 too, which
   MUST succeed.
