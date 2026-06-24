@@ -89,6 +89,19 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    (OQ-NS-6) is the parked heap-read leg; everything buildable now *narrows*. Chosen direction (2026-06-24):
    consolidate + **blueprint** U1 + the network phase (design only, not the build), heap-read deferred to the EC2
    box. Blueprints: `plans/18` (U1 stake) + `plans/19` (network phase). NS-9: a blueprint is not a hardening.
+11. **▶ 2026-06-24 — STATUS REFRESH (supersedes point 10's "heap-read parked/EC2" status): the heap-read leg's
+    SPEC + HARNESS are now BUILT + MERGED (#23, `plans/26`), but the leg STILL has NOT hardened — it is SHADOW and
+    only NARROWS until the LIVE RUN.** Shipped this session (post-consolidation): the U1 stake arc BUILT (S1-S5,
+    #15-#18) + phase-closed (#20) + seam-tidied (#21); then `plans/26` the R-heap probe — the PURE `assessHeapRead`
+    verdict (`v0/src/identity/heap-read-probe.js`: the L3 hard gate, per-vector L2/L4, fail-closed legs, NS-9
+    disposition), the paused-broker harness, and the operator runbook (`docs/deployment/r-heap-runbook.md`). 3-lens
+    VERIFY + VALIDATE folded; CodeRabbit converged 0-actionable. **The "EC2 box" framing (point 10) is SUPERSEDED:
+    the world-anchoring board RULED a FREE local `multipass` VM SUFFICES for the kernel-credential axis — the same
+    anchor R1/R2 hardened on the user's OWN MacBook (real kernel enforcement of a privilege boundary), CONDITIONAL
+    on the L3 positive control firing + the operator-runtime surfaces locked; EC2 is OPTIONAL polish, NOT required.**
+    The only move that HARDENS remains the LIVE RUN: provision the VM -> walk the runbook L0-L4 -> `legs.json`
+    verdict -> the honesty VALIDATE on the evidence (one axis, one box, one run; the hypervisor / same-uid-oracle /
+    R3 residuals stay OPEN). Until that run, NOTHING in the heap-read leg has hardened (NS-9).
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
