@@ -12,7 +12,7 @@
       "description": "content-address = sha256(canonical(record minus {record_id, sig}))"
     },
     "ver": { "type": "string", "description": "PACT protocol version, e.g. 'pact/0'" },
-    "type": { "type": "string", "enum": ["CLAIM", "CONTEST", "VOUCH", "PREMISE", "CONFIRM", "ACCEPT", "STAKE"], "description": "frame type; v0=CLAIM, P2 adds CONTEST (caught defection) + VOUCH; P3 (spec §6) adds PREMISE (a human-owned assumption, creator-bound-on-read), CONFIRM (a cross-verify confirmation of a premise) + ACCEPT (a receiver-local REACH accept of a claim); U1 (plans/20) adds STAKE (a custody-signed root-bound presence/commitment, lock_expiry only — NO amount per creator-standing.js D5; magnitude is born at S6). NOTE: this enum is DOCUMENTARY — the lenient runtime validator (record.js validateRecord) enforces required[] only, never the enum." },
+    "type": { "type": "string", "enum": ["CLAIM", "CONTEST", "VOUCH", "PREMISE", "CONFIRM", "ACCEPT", "STAKE", "SLASH"], "description": "frame type; v0=CLAIM, P2 adds CONTEST (caught defection) + VOUCH; P3 (spec §6) adds PREMISE (a human-owned assumption, creator-bound-on-read), CONFIRM (a cross-verify confirmation of a premise) + ACCEPT (a receiver-local REACH accept of a claim); U1 (plans/20) adds STAKE (a custody-signed root-bound presence/commitment, lock_expiry only — NO amount per creator-standing.js D5; magnitude is born at S6); U1 S4 (plans/23) adds SLASH (a crater-disciplined forfeiture: target_stake_id resolving to a real STAKE + a counterexample reason; the stake reads 'slashed' on >=2 distinct earned-standing slasher roots). NOTE: this enum is DOCUMENTARY — the lenient runtime validator (record.js validateRecord) enforces required[] only, never the enum." },
     "src_persona_did": { "type": "string", "description": "the signing persona (spec §1)" },
     "parent_human_uid": { "type": "string", "description": "the scarce-human root anchor (spec §1)" },
     "seq": { "type": "integer", "minimum": 0, "description": "per-session sequence number" },
@@ -26,7 +26,9 @@
         "statement": { "type": "string", "description": "P3 PREMISE: the assumption text" },
         "scope": { "type": "object", "description": "P3 PREMISE: the domain-of-validity scope (spec §3.4)" },
         "creator": { "type": "string", "description": "P3 PREMISE: the SELF-ASSERTED human_uid creator; counts only when rootOf(src_persona_did)===creator (creator-bound-on-read)" },
-        "lock_expiry": { "type": "integer", "minimum": 0, "description": "U1 STAKE (plans/20): the commitment-window end (epoch ms). NO amount field — D5 (a self-asserted economic-cost is forgeable); the in-memory stake is a presence/lock marker, the magnitude is born at S6. SELF-ASSERTED with no clock validation in S1-S2 (a residual)." }
+        "lock_expiry": { "type": "integer", "minimum": 0, "description": "U1 STAKE (plans/20): the commitment-window end (epoch ms). NO amount field — D5 (a self-asserted economic-cost is forgeable); the in-memory stake is a presence/lock marker, the magnitude is born at S6. SELF-ASSERTED with no clock validation in S1-S2 (a residual)." },
+        "target_stake_id": { "type": "string", "description": "U1 SLASH (plans/23): the content-addressed record_id of the STAKE being slashed. Counted ONLY when it resolves to a REAL verified STAKE of the slashed root (the F3-analog — a slash of a non-existent stake is IGNORED on read, closing pre-positioning)." },
+        "reason": { "type": "string", "description": "U1 SLASH (plans/23): the in-scope counterexample (L8 — a slash REQUIRES a reason, not a bare vote). Read-side gated as a non-empty (non-blank) string; the store is not a sandbox." }
       }
     },
     "config_hash": { "type": "string", "description": "P2 (§1.4): self-asserted config-stability signal (WEAK axis-3); DIRECT keys on (persona, config_hash)" },

@@ -216,11 +216,8 @@ test('buildStakeSpec fail-closes on a bad lockExpiry', () => {
   assert.throws(() => buildStakeSpec({ lockExpiry: Infinity, seq: 0, nonce: 'a' }), /non-negative safe integer/);
 });
 
-test('recordSlash THROWS (reserved for S4 — non-vacuous, not a silent no-op)', () => {
-  const w = freshWorld();
-  assert.throws(() => w.anchor.recordSlash(), /reserved for S4/);
-  w.cleanup();
-});
+// (the S1-S2 recordSlash-throws placeholder test was removed in S4 — plans/23: slashing is a minted SLASH
+//  record the SLASH-aware stakeOf reads, NS-5; there is no imperative recordSlash method.)
 
 test('createStakeAnchor requires a registry', () => {
   assert.throws(() => createStakeAnchor({}), /registry is required/);
