@@ -89,12 +89,14 @@ a time-INDEPENDENT credential check). ALL legs target ONE pinned broker pid.
   6. `/dev/mem`, `/dev/kmem`, `/proc/kcore` -> `EACCES`/`ENOENT` (hacker H1.3).
   7. swap/hibernation: assert the key page never hit a host-readable swap device (covered by the L0 mlock/encswap
      lock; record it) — hacker H1.4.
-- **L3 — privileged positive control (HARD GATE — non-vacuity #2; hacker H2 + honesty L3-gate).** At the SAME
-  blocked instant, on the SAME pinned pid, a root/`CAP_SYS_PTRACE` reader reads the heap and FINDS the key in
-  BOTH forms (the `-----BEGIN` PEM string AND the 32-byte ed25519 seed pattern, since `createPrivateKey` may free
-  the PEM string). **L2's denial is CREDITED ONLY IF L3 succeeds** — else L2 is vacuous (the guard may have
-  "denied" because there was nothing to read, or L3 searched the wrong form). This is what makes a self-controlled
-  box honest (§6): a rigged "always-deny" kernel would deny L3 too, which MUST succeed.
+- **L3 — privileged positive control (HARD GATE — non-vacuity #2; VALIDATE hacker H2 + honesty L3-gate).** At the
+  SAME blocked instant, on the SAME pinned pid, a root/`CAP_SYS_PTRACE` reader reads the heap and FINDS the key.
+  EITHER form suffices — the `-----BEGIN` PEM string OR the 32-byte ed25519 seed — because the paused harness
+  PINS the PEM string as a LIVE module const (NOT a freed-page residue, unlike production load-sign-exit), so a
+  PEM find IS proof of live residency; the seed scan is optional belt-and-suspenders. **L2's denial is CREDITED
+  ONLY IF L3 succeeds** — else L2 is vacuous (the guard may have "denied" because there was nothing to read).
+  This is what makes a self-controlled box honest (§6): a rigged "always-deny" kernel would deny L3 too, which
+  MUST succeed.
 - **L4 — same-uid HEAP-READ denial (the residual-closer) — PER VECTOR + the carve-out (hacker C1).** As a SECOND
   process running as the BROKER uid (not root, no `CAP_SYS_PTRACE`), run EACH of L2.1-L2.3 independently -> each
   must be denied under scope=2 (all route through `ptrace_may_access`/Yama). AND assert the broker never calls
@@ -178,6 +180,27 @@ polish, NOT required.** The three lenses:
   — all folded.
 - honesty: grade B->A after folds; HIGH-1 (§1 inline qualifier), HIGH-2 (oracle-vs-heap de-conflation),
   HIGH-3 (RP-4 relabel), VT-7, L3-as-hard-gate, the §9 disposition — all folded.
+
+### §8.1 VALIDATE board record (2026-06-24, post-build — the harness `heap-read-probe.js` + tests + runbook)
+
+3-lens board (code-reviewer + hacker LIVE-probe + honesty) on the BUILT verdict harness. **Verdict: PASS after
+folds; the board caught a LIVE-PROVEN false-hardening bypass the green unit suite missed (Rule 2a).**
+- **hacker CRITICAL (C1, live-proven):** `L4-ptracer-carveout` was the ONE inverted-polarity leg
+  (`=== true -> fail, else pass`), so the string `'true'` (what the runbook grep emits) fell to the SAFE PASS ->
+  a false `held:true` for an OPEN same-uid `PR_SET_PTRACER` channel. FIXED: inverted to `=== false -> pass, else
+  fail` (every malformed value now fails closed) + a coercion regression test.
+- **code-reviewer HIGH (live-confirmed):** the CLI crashed on JSON `null` (`assessHeapRead(null)` — a default
+  param only fires for `undefined`). FIXED: a null/array/scalar guard in both `assessHeapRead` + `main` + a test.
+  (The same latent bug exists in `custody-verify.js` `assessCustody` — flagged as a separate chip.)
+- **hacker HIGH (H2):** spec said L3 needs BOTH key forms; code/runbook do PEM-only. RESOLVED honestly: the
+  harness PINS the PEM string as a live const (not a freed-page residue), so a PEM find IS real residency — `||`
+  is correct; the spec §3 L3 + the code comment now say so; the seed scan is optional.
+- **honesty MINOR (A-):** the field `hostObservableHardeningHeld` leaked the PROPERTY into the name. RENAMED to
+  `hostObservableDenialChecksHeld` (names the OBSERVATION, sibling `custody-verify` parity).
+- **runbook (hacker M1/M2 + code-reviewer):** L3 dump switched to `gcore` (the `0x0..` range aborts on the null
+  page); the core-leak check now inspects `/proc/sys/kernel/core_pattern` + `coredumpctl` (not a CWD glob); the
+  L4 carve-out adds a runtime `/proc/$PID/status TracerPid` check.
+- Suite 381/0; eslint clean.
 
 ## §9 Residuals + the honest disposition (NS-9 — honesty's recommended wording)
 
