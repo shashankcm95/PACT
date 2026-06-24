@@ -215,14 +215,24 @@ through the broker just works. To confirm the gate actually refuses a request it
 # A. a well-formed P-frame the broker can recompute -> SIGNS (the happy path; node prints a base64 sig).
 #    (the host's buildFrame/brokerSigner do this for you; this is the manual equivalent.)
 #
-# B. the gate refuses what it cannot account for. Ask the broker to sign a BARE 64-hex (no presented frame):
+# B. no preimage: ask the broker to sign a BARE 64-hex with NO presented frame -> refuse (no-frame-presented):
 HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
 printf '' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"
-#   -> "broker-sign: request not authorized", empty stdout, exit 1  (no preimage -> refuse)
-#
-# C. a frame for a DIFFERENT persona is refused (persona-bind):
-printf '{"src_persona_did":"did:key:zAttacker","nonce":"x"}' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"
 #   -> "broker-sign: request not authorized", empty stdout, exit 1
+#
+# C. persona-bind: a frame for a DIFFERENT persona is refused. CRITICAL: the frame must carry its OWN correctly-
+#    recomputed id, NOT a random $HEX. recomputeBinds runs BEFORE personaBinds (request-auth.js:121 then :123) and
+#    the broker collapses every deny to one fixed message, so a random hex denies as record-id-mismatch FIRST and
+#    you would be testing the WRONG gate (this exact mislabel was caught in PACT plans/17 §7). Compute the id from
+#    the EXACT body via the DEPLOYED module so recompute PASSES and persona-bind is provably the denier:
+HEX_C=$(node -e 'process.stdout.write(require("/opt/pact/v0/src/lib/record").computeRecordId({src_persona_did:"did:key:zAttacker",nonce:"x"}))')
+printf '{"src_persona_did":"did:key:zAttacker","nonce":"x"}' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX_C"
+#   -> "broker-sign: request not authorized", empty stdout, exit 1  (recompute passes; persona-mismatch denies)
+#
+# D. recompute-bind: present the LEGIT zBroker body but claim a WRONG id (example B's random $HEX). persona would
+#    match; the ONLY failure is the id re-derivation -> the broker signs what it RECOMPUTES, not an arbitrary hex:
+printf '{"src_persona_did":"did:key:zBroker","nonce":"x"}' | sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"
+#   -> "broker-sign: request not authorized", empty stdout, exit 1  (record-id-mismatch)
 ```
 
 OMIT `PACT_BROKER_PERSONA_DID` → R2-WHAT OFF (legacy hex-only; the broker prints a loud `per-request-auth

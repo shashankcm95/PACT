@@ -64,6 +64,19 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    vacuity traps pre-deploy; honesty VALIDATE post-run). **Still OPEN (loud):** R2-WHAT (per-request entitlement —
    deliberately off here), R3 (forgery), same-uid allowlisted compromise (still an oracle), the heap-read leg
    (macOS 2e PARTIAL; Linux `ptrace_scope=2` strongest), and allowlist-VALUE provenance. Evidence: `plans/16` §9.
+9. **▶ 2026-06-24 — the THIRD world-anchored signal: R2-WHAT per-request-auth (WHAT-at-the-boundary).** A live
+   dogfood on a FRESH separate-uid broker in **require-frame mode** (`PACT_BROKER_PERSONA_DID` set; R2-WHO also
+   passing, R2-WHAT the axis under test) proved the broker SIGNS a recomputable P-frame (leg-1, the positive
+   control) but DENIES (a) a wrong-persona frame carrying its OWN correct id so recompute-bind passes and the deny
+   is provably `persona-mismatch` (leg-2), (b) the legit body with a wrong claimed id -> `record-id-mismatch`, i.e.
+   it signs what it RECOMPUTES not an arbitrary hex (leg-3), and (c) a persona-less non-object (leg-4, redundantly
+   gated). The leg-2 recompute-equivalence contingency was CLOSED by a deployed-module sha-match to the VERIFY'd
+   repo + a one-field diff (not assumed). It **HARDENS one axis** (OQ-NS-6/NS-7). **Scope: R2-WHAT, ONE box, ONE
+   run.** Graded **A / NO-OVERCLAIM** (2-lens VERIFY board caught the gate-order confound recurring inside leg-2 +
+   a leg-4 over-claim, pre-deploy; honesty VALIDATE post-run). **Still OPEN (loud):** R2-WHAT NARROWS not closes R2
+   (the entitled operator can still assert ANY payload — payload-semantics ceiling); `PACT_BROKER_PERSONA_DID` is
+   policy, NOT crypto-bound to the key broker-side (integrity != provenance, NS-2); R3 (forgery); same-uid oracle;
+   the heap-read leg. Evidence: `plans/17` §9-§10.
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
