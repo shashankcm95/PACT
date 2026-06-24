@@ -86,7 +86,7 @@ function disjointPaths(meCtx, meDid, agentDid) {
  *
  * `null` is NOT `{status:'none'}`: `{status:'none'}` means the axis RAN and the agent's root is unfunded (a real,
  * receiver-relative negative); `null` means the axis could not run. A future GATING consumer MUST treat `null` as
- * FAIL-CLOSED (never "funded", never "no requirement"). The `status` enum is OPEN — S4 will add `'slashed'`, which
+ * FAIL-CLOSED (never "funded", never "no requirement"). The `status` enum is OPEN — S4 added `'slashed'`, which
  * flows through this passthrough unchanged (NEVER switch on a closed status set). The status is `nowMs`-RELATIVE:
  * `stakeOf` reports `'locked'` for a non-finite/omitted clock (conservative), so a gating consumer MUST pass a
  * finite numeric `nowMs`. Reuses the ONE provenance gate via `stakeOf` (keyed by `rootOf(signer)`; a forged/

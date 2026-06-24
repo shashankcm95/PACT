@@ -54,7 +54,9 @@ function reasonFor(mode, known, stake, meets) {
   if (mode === POLICY_MODES.NO_STAKE) return known ? 'no-stake: registration alone (v0 bar)' : 'no-stake: unknown root';
   if (!known) return 'stake-required: unknown root';
   if (meets) return 'stake-required: a verified locked STAKE is present (PRESENCE, not forfeitable cost -- SHADOW)';
-  return 'stake-required: no locked STAKE (bootstrap or unstaked) -- ' + (stake && stake.status);
+  const status = stake && stake.status;
+  if (status === 'slashed') return 'stake-required: STAKE slashed (forfeited by the crater quorum)';
+  return 'stake-required: no locked STAKE (bootstrap or unstaked) -- ' + status;
 }
 
 /**

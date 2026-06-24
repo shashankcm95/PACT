@@ -245,16 +245,27 @@ test('registry-not-oracle: stakeOf returns ONLY {status, lockedUntil} — no ran
 
 test('SHADOW: no src/ file outside the impl imports the stake-anchor fold (machine-checkable, mirrors layering.test.js)', () => {
   const SRC = path.join(__dirname, '..', '..', 'src');
+  // Exclude the impl by its RELATIVE path (not basename) so a future same-basename file in another dir cannot
+  // silently slip past the walk (mirrors the hardened issuance-policy.test.js wall — phase-close consistency tidy).
+  const SELF = path.join('trust', 'stake-anchor.js');
   const offenders = [];
   (function walk(dir) {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const fp = path.join(dir, e.name);
       if (e.isDirectory()) { walk(fp); continue; }
-      if (!e.name.endsWith('.js') || e.name === 'stake-anchor.js') continue;
+      if (!e.name.endsWith('.js') || path.relative(SRC, fp) === SELF) continue;
       if (/require\([^)]*stake-anchor[^)]*\)/.test(fs.readFileSync(fp, 'utf8'))) offenders.push(path.relative(SRC, fp));
     }
   })(SRC);
-  assert.deepEqual(offenders, [], 'stake-state has a consumer (SHADOW broken — convert/mayGate must not read it this wave): ' + offenders.join(', '));
+  // NB: S5 convert + S3 issuance-policy consume stakeOf via a DI-injected anchor, NOT a static require — so this
+  // import wall stays green legitimately; the BEHAVIORAL SHADOW guard (actionable stays false) lives in convert-stake.
+  assert.deepEqual(offenders, [], 'stake-state has a STATIC importer (a non-DI leak into a gating surface): ' + offenders.join(', '));
+});
+
+test('SHADOW precondition: stake-anchor.js exists + is non-empty (else the walk above disarms vacuously)', () => {
+  const f = path.join(__dirname, '..', '..', 'src', 'trust', 'stake-anchor.js');
+  assert.ok(fs.existsSync(f), 'stake-anchor.js missing — the SHADOW walk would pass vacuously');
+  assert.ok(fs.statSync(f).size > 0, 'stake-anchor.js empty');
 });
 
 console.log('[stake] ' + pass + ' passed, ' + fail + ' failed');
