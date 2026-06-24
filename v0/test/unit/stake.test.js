@@ -99,7 +99,8 @@ test('provenance: a STAKE signed by an UNREGISTERED sender contributes 0', () =>
   const spec = { srcPersonaDid: 'did:key:zGhost', parentHumanUid: 'human:ghost', type: STAKE_TYPE, seq: SEQ++, nonce: 'g' + SEQ, payload: { lock_expiry: 1000 } };
   const built = buildFrame(spec, { privateKeyPem: ghostKp.privateKeyPem });
   assert.ok(built.ok);
-  appendRecord(built.frame, w.storeOpts);
+  const ap = appendRecord(built.frame, w.storeOpts);
+  assert.ok(ap.ok, 'append must succeed so the deny is provably the unregistered-sender gate, not a failed write: ' + ap.reason);
   assert.equal(w.anchor.stakeOf(w.storeOpts, 'human:ghost', 0).status, 'none'); // no registered key -> dropped
   w.cleanup();
 });

@@ -138,7 +138,7 @@ A derived-on-read VIEW (like `direct.js` / `consensus.js` / `creator-standing.js
 Non-transferable (two-layered: minter-bound production + rootOf-keyed read) · registry-not-oracle (a diagnostic
 readout — no edge/rank/gate) · no global ranking · derived-on-read, NO mutable score store (NS-5) · **reads through
 `verifiedRecords` — provenance via the authenticated minter + registered-key sig, NEVER store-presence (NS-2,
-#273)** · provenance reuse via the existing custody path only (NS-10 — no new key path, no parallel store) · SHADOW
+`#273`)** · provenance reuse via the existing custody path only (NS-10 — no new key path, no parallel store) · SHADOW
 until residuals close (NS-8 — `convert.actionable` stays false) · per-root unit via `rootOf` (NS-4).
 
 ## §5 Residuals (carry loud — NS-9; OPEN after S1-S2)
