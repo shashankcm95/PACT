@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// PACT R-heap — heap-read-probe.test.js  (plans/25 §3 — the executable contract for the PURE verdict).
+// PACT R-heap — heap-read-probe.test.js  (plans/26 §3 — the executable contract for the PURE verdict).
 // TDD: written FIRST as the spec. assessHeapRead(facts) is the pure verdict over the observed legs (L-pre, L0,
 // L1, L2, L3, L4). It is fully testable here — including the cross-uid TRUE branch a macOS box can NEVER
 // produce live (synthetic facts), exactly like custody-verify's assessCustody. The LIVE kernel denial is the

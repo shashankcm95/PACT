@@ -1,9 +1,9 @@
 # R-heap runbook — the heap-read non-exfiltration dogfood
 
-> Spec: `plans/25`. Verdict logic: `v0/src/identity/heap-read-probe.js` (`assessHeapRead`, unit-tested). This
+> Spec: `plans/26`. Verdict logic: `v0/src/identity/heap-read-probe.js` (`assessHeapRead`, unit-tested). This
 > runbook is the OPERATOR's out-of-band procedure: run the legs on a Linux `ptrace_scope=2` box, assemble a
 > `legs.json`, then `heap-read-probe --facts legs.json` enforces the verdict (the L3 gate, the per-vector L4,
-> the NS-9 disposition). A free local `multipass` VM is SUFFICIENT (plans/25 §6); EC2 is optional polish.
+> the NS-9 disposition). A free local `multipass` VM is SUFFICIENT (plans/26 §6); EC2 is optional polish.
 >
 > NS-9: a green run is NOT "the memory boundary is hardened-real". The tool reports `hostObservableDenialChecksHeld`
 > + `requiresOutOfBandUidConfirmation`. ONLY your out-of-band uid attestation (step 5) decides custody-real.
@@ -127,7 +127,7 @@ sudo -u attacker cat /etc/pact/broker.key   # -> Permission denied
 ```
 
 Capture all of the above (the kernel version/hash from step 1, every leg's output, the verdict, the attestation)
-as the evidence bundle. Per plans/25 §9: with L2+L4 denied, L1+L3 satisfied, and the out-of-band attestation, the
+as the evidence bundle. Per plans/26 §9: with L2+L4 denied, L1+L3 satisfied, and the out-of-band attestation, the
 run HARDENS one axis (key non-exfil at the cross-uid + same-uid memory boundary) — one box, one run. Absent L3 or
 the attestation it NARROWS only. It does NOT close the same-uid ORACLE residual (R2), the hypervisor/host-admin
 boundary, R3, or the apex.

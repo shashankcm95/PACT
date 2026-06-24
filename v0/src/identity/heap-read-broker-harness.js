@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
-// PACT R-heap — the paused-broker harness (plans/25 L1). Loads the signing key via broker-sign's EXACT path
+// PACT R-heap — the paused-broker harness (plans/26 L1). Loads the signing key via broker-sign's EXACT path
 // (readFileSync -> createPrivateKey, so the heap holds the PRODUCTION representation: the PEM string AND the
 // OpenSSL EVP_PKEY), prints {ready,pid}, then BLOCKS holding the key — a window LARGER than the production
 // load-sign-exit broker (attacker-favorable; a denial here is a fortiori a denial of production's ms window).

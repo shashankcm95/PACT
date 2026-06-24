@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PACT R-heap — identity/heap-read-probe.js  (plans/25)
+// PACT R-heap — identity/heap-read-probe.js  (plans/26)
 //
 // The heap-read non-exfiltration verdict. `assessHeapRead(facts)` is a PURE verdict over the observed legs
 // (L-pre wrapper, L0 ptrace-policy preconditions, L1 present-target, L2 cross-uid denial battery, L3 the
@@ -77,7 +77,7 @@ function assessHeapRead(facts = {}) {
   // L3 — the HARD GATE (vacuity #2): L2 is credited ONLY if a privileged reader found the key at the SAME pid.
   // EITHER form suffices (PEM string OR the ed25519 seed; VALIDATE hacker H2): the paused harness PINS the PEM
   // string as a LIVE module const — NOT a freed-page residue (unlike production load-sign-exit) — so a PEM find
-  // IS proof of live residency. The seed scan is optional belt-and-suspenders (plans/25 §3 L3).
+  // IS proof of live residency. The seed scan is optional belt-and-suspenders (plans/26 §3 L3).
   const pc = facts.positiveControl || {};
   const l3found = pc.keyFoundPem === true || pc.keyFoundSeed === true;
   if (l3found && pc.samePid === true) pass('L3-positive', 'privileged reader found the key (' + [pc.keyFoundPem && 'PEM', pc.keyFoundSeed && 'seed'].filter(Boolean).join('+') + ') at the same pid — the guard is real + the target present');
