@@ -98,7 +98,10 @@ test('L0: each precondition fails closed (scope!=2, yama inactive, attacker root
     ['yamaActive', f => { f.yamaActive = false; }, 'L0-yama'],
     ['attacker-root', f => { f.attacker = { uid: 0, hasCapSysPtrace: false }; }, 'L0-attacker-uid'],
     ['attacker-cap', f => { f.attacker = { uid: 1001, hasCapSysPtrace: true }; }, 'L0-attacker-cap'],
+    ['attacker-cap-malformed', f => { f.attacker = { uid: 1001, hasCapSysPtrace: 'false' }; }, 'L0-attacker-cap'], // CodeRabbit: a non-boolean cap fact fails closed
+    ['attacker-uid-malformed', f => { f.attacker = { uid: '1001', hasCapSysPtrace: false }; }, 'L0-attacker-uid'], // a non-integer uid fails closed
     ['borrowed-cap', f => { f.borrowedCaps = { capSysPtraceBinaries: ['/usr/bin/gdb'], setuidReviewed: true }; }, 'L0-borrowed-cap'],
+    ['setuid-unreviewed', f => { f.borrowedCaps = { capSysPtraceBinaries: [], setuidReviewed: false }; }, 'L0-setuid'], // CodeRabbit: gate the verdict on the setuid review
     ['core-unlocked', f => { f.coreLocked = false; }, 'L0-core'],
     ['swap-unlocked', f => { f.swapLocked = false; }, 'L0-swap'],
     ['sysctl-TOCTOU', f => { f.scopeRecheck = 0; }, 'L0-scope-recheck'],
@@ -118,6 +121,15 @@ test('L1: a key NOT resident via the production load path is VACUOUS (the harnes
   const r = assessHeapRead(f);
   assert.equal(r.vacuous, true);
   assert.ok(idsOf(r, 'FAIL').includes('L1-present'));
+});
+
+test('L1: an invalid pid (0 / negative / string / null / non-integer) is VACUOUS (CodeRabbit — require a valid positive pid)', () => {
+  for (const badPid of [0, -1, '4242', null, 1.5]) {
+    const f = cleanFacts(); f.target = { keyResidentViaProductionLoad: true, pid: badPid };
+    const r = assessHeapRead(f);
+    assert.equal(r.vacuous, true, 'pid=' + JSON.stringify(badPid) + ' must be vacuous');
+    assert.ok(idsOf(r, 'FAIL').includes('L1-present'), 'pid=' + JSON.stringify(badPid) + ' -> L1-present FAIL');
+  }
 });
 
 // ===================== L2 the denial battery (each vector) =====================

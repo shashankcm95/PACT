@@ -35,7 +35,6 @@ function assessHeapRead(facts = {}) {
   const residuals = [];
   const fail = (id, detail) => checks.push({ id, status: 'FAIL', detail });
   const pass = (id, detail) => checks.push({ id, status: 'PASS', detail });
-  const note = (id, detail) => checks.push({ id, status: 'NOTE', detail });
   let vacuous = false;
 
   // L-pre — wrapper integrity (custody-verify C2.5). The heap claim is NULL without custody-clean (hacker M1).
@@ -52,16 +51,17 @@ function assessHeapRead(facts = {}) {
   else fail('L0-yama', 'Yama is not the active LSM — ptrace_scope is not enforced');
   const at = facts.attacker || {};
   if (at.uid === 0) fail('L0-attacker-uid', 'the attacker process is root (uid 0) — bypasses ptrace_may_access');
-  else if (typeof at.uid !== 'number') fail('L0-attacker-uid', 'attacker uid unknown');
+  else if (!Number.isInteger(at.uid) || at.uid < 0) fail('L0-attacker-uid', 'attacker uid is not a valid non-root uid (reported ' + JSON.stringify(at.uid) + ')');
   else pass('L0-attacker-uid', 'attacker is a non-root uid (' + at.uid + ')');
-  if (at.hasCapSysPtrace) fail('L0-attacker-cap', 'the attacker holds CAP_SYS_PTRACE — it can ptrace regardless of scope');
-  else pass('L0-attacker-cap', 'attacker holds no CAP_SYS_PTRACE');
+  // fail-closed (CodeRabbit): a PASS requires a LITERAL boolean false — a missing/truthy-non-bool cap fact FAILS.
+  if (at.hasCapSysPtrace === false) pass('L0-attacker-cap', 'attacker holds no CAP_SYS_PTRACE');
+  else fail('L0-attacker-cap', 'attacker CAP_SYS_PTRACE not attested absent (reported ' + JSON.stringify(at.hasCapSysPtrace) + ' — must be a literal boolean false)');
   const bc = facts.borrowedCaps || {};
   if (!Array.isArray(bc.capSysPtraceBinaries)) fail('L0-borrowed-cap', 'borrowed-cap scan not run (getcap -r /)');
   else if (bc.capSysPtraceBinaries.length > 0) fail('L0-borrowed-cap', 'installed binaries carry cap_sys_ptrace (' + bc.capSysPtraceBinaries.join(', ') + ') — a borrowed-cap read path');
   else pass('L0-borrowed-cap', 'no installed binary carries cap_sys_ptrace');
-  if (bc.setuidReviewed === true) pass('L0-setuid', 'setuid surface (find / -perm -4000) reviewed');
-  else note('L0-setuid', 'setuid surface not attested reviewed');
+  if (bc.setuidReviewed === true) pass('L0-setuid', 'setuid surface (find / -perm -4000) reviewed — no coercible setuid/cap helper');
+  else fail('L0-setuid', 'setuid surface (find / -perm -4000) NOT attested reviewed — a coercible setuid/cap helper is a borrowed-cap read path (CodeRabbit: gate the verdict, not advisory)');
   if (facts.coreLocked === true) pass('L0-core', 'core dumps locked (RLIMIT_CORE=0 / non-host-readable core_pattern + PR_SET_DUMPABLE 0)');
   else fail('L0-core', 'core dumps NOT locked — an induced crash could leak the key post-mortem');
   if (facts.swapLocked === true) pass('L0-swap', 'key pages kept out of host-readable swap (mlock / encrypted swap)');
@@ -71,7 +71,7 @@ function assessHeapRead(facts = {}) {
 
   // L1 — present-target (vacuity #1): a proven-resident key via the PRODUCTION load path.
   const t = facts.target || {};
-  if (t.keyResidentViaProductionLoad === true && t.pid != null) pass('L1-present', 'key resident in pid ' + t.pid + ' via the production load path');
+  if (t.keyResidentViaProductionLoad === true && Number.isInteger(t.pid) && t.pid > 0) pass('L1-present', 'key resident in pid ' + t.pid + ' via the production load path');
   else { fail('L1-present', 'no proven-resident key via the production load path — harness unrepresentative / target absent'); vacuous = true; }
 
   // L3 — the HARD GATE (vacuity #2): L2 is credited ONLY if a privileged reader found the key at the SAME pid.

@@ -58,14 +58,14 @@ PID=<the printed pid>
 ### L2 — the cross-uid denial battery (AS the attacker uid; each must be DENIED)
 
 ```sh
+cat /proc/sys/kernel/yama/ptrace_scope                    # PRE-L2 RE-CHECK: MUST still be 2 (closes the L0->L2 TOCTOU — D)
 sudo -u attacker gdb -p $PID -batch -ex 'quit'             # ptrace -> "Operation not permitted" = denied
 sudo -u attacker dd if=/proc/$PID/mem bs=1 count=1 2>&1    # /proc/pid/mem -> "Permission denied" = denied
-sudo -u attacker cat /proc/$PID/maps 2>&1                  # /proc/pid/maps -> denied cross-uid
+sudo -u attacker cat /proc/$PID/maps 2>&1                  # /proc/pid/maps -> denied (a DISTINCT, weaker mechanism — verify on its own)
 sudo -u attacker ./pvreadv $PID 2>&1                       # process_vm_readv helper (below) -> EPERM = denied
 sudo -u attacker dd if=/dev/mem bs=1 count=1 2>&1          # /dev/mem -> denied
 sudo -u attacker dd if=/proc/kcore bs=1 count=1 2>&1       # kcore -> denied
-cat /proc/sys/kernel/core_pattern                # MUST be /dev/null (inspect the ACTUAL sink, NOT a CWD glob — M2)
-kill -SEGV $PID ; coredumpctl list 2>/dev/null | tail -3 ; PID=  # assert NO host-readable core landed (apport/systemd-coredump too)
+# NB: the induced-core-dump leg CRASHES the broker, so it runs on a SEPARATE instance (its own step below) — never $PID.
 ```
 
 `pvreadv.c` (compile `cc -o pvreadv pvreadv.c`):
@@ -90,7 +90,7 @@ int main(int argc, char **argv) {
 ### L4 — same-uid (AS the broker uid; each must be DENIED under scope=2) + the carve-out
 
 ```sh
-# relaunch the paused broker (new PID), then as a SECOND broker-uid process:
+# a SECOND broker-uid process attacks the SAME pinned $PID (NO relaunch — L2/L4/L3 share ONE pid; the L3-gate requires it):
 sudo -u pactbroker gdb -p $PID -batch -ex 'quit'          # same-uid ptrace -> denied (scope=2)
 sudo -u pactbroker dd if=/proc/$PID/mem bs=1 count=1 2>&1 # same-uid /proc/pid/mem -> denied
 sudo -u pactbroker ./pvreadv $PID 2>&1                    # same-uid process_vm_readv -> denied
@@ -104,12 +104,22 @@ grep -RnE 'PR_SET_PTRACER|prctl' v0/src/identity/broker-sign.js v0/src/identity/
 ### L3 — the privileged positive control (AS root; MUST find the key — the hard gate)
 
 ```sh
-# relaunch the paused broker, capture its pid as $PID, then:
+# the SAME pinned $PID as L2/L4 (NO relaunch — L3 must prove the key is resident in the VERY pid L2 was denied on):
 df -h /tmp                                   # ensure space (a core can be 200-500 MB)
 sudo gcore -o /tmp/rheap $PID 2>/dev/null    # gcore dumps only MAPPED pages (gdb 'dump memory 0x0 ..' aborts on the null page — M1)
 sudo grep -a -- '-----BEGIN' /tmp/rheap.$PID && echo "PEM found"   # keyFoundPem — the harness PINS the PEM live, so this is real residency
 # (the seed scan is optional belt-and-suspenders; a PEM find alone credits L3 because the harness pins it, not a freed-page residue)
 sudo rm -f /tmp/rheap.$PID
+```
+
+### L2-core — induced core dump (a SEPARATE throwaway instance; it CRASHES the broker, so NEVER the pinned $PID)
+
+```sh
+cat /proc/sys/kernel/core_pattern            # MUST be /dev/null (inspect the ACTUAL sink, NOT a CWD glob — M2)
+# In a SECOND shell launch a throwaway broker (it gets crashed); note its printed pid as $PID2:
+#   sudo -u pactbroker bash -c 'ulimit -c 0; PACT_BROKER_KEY_FILE=/etc/pact/broker.key node v0/src/identity/heap-read-broker-harness.js'
+sudo -u pactbroker kill -SEGV "$PID2"        # crash the throwaway broker holding the key
+coredumpctl list 2>/dev/null | tail -3       # assert NO host-readable core landed (apport/systemd-coredump too)
 ```
 
 ## 5. Assemble `legs.json` + the verdict + the out-of-band attestation
