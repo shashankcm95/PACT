@@ -77,6 +77,18 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
    (the entitled operator can still assert ANY payload — payload-semantics ceiling); `PACT_BROKER_PERSONA_DID` is
    policy, NOT crypto-bound to the key broker-side (integrity != provenance, NS-2); R3 (forgery); same-uid oracle;
    the heap-read leg. Evidence: `plans/17` §9-§10.
+10. **▶ 2026-06-24 — CONSOLIDATION: the single-box custody-hardening arc is COMPLETE (3 signals); the cheap
+   live-dogfood vein is mined out.** R1 (file-read non-exfiltration) → R2-WHO (caller-auth, WHO) → R2-WHAT
+   (per-request, WHAT) were the three "world-anchor an already-built guard via a live cross-uid run" dogfoods
+   the substrate had on one macOS box. There is no fourth of that shape. **The remaining frontiers are
+   qualitatively different — this is a fork, not a clear next step:** (a) the **heap-read leg** is the same
+   family + the strongest custody form, but needs a Linux `ptrace_scope=2` box — **PARKED with-a-home (an EC2
+   instance, later)**, not abandoned; (b) **U1 stake / network phase** are BUILDS (+ research), and per OQ-NS-6
+   they **NARROW until actually deployed** — they do not harden on day one; (c) **U2** is research-closed
+   (near-unclosable positively, point in §4). **The honest consequence:** the only remaining move that *hardens*
+   (OQ-NS-6) is the parked heap-read leg; everything buildable now *narrows*. Chosen direction (2026-06-24):
+   consolidate + **blueprint** U1 + the network phase (design only, not the build), heap-read deferred to the EC2
+   box. Blueprints: `plans/18` (U1 stake) + `plans/19` (network phase). NS-9: a blueprint is not a hardening.
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
