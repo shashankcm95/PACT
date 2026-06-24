@@ -172,6 +172,13 @@ test('assessCustody — a null runningUid (no getuid) -> FALSE (the disambiguato
   assert.ok(r.checks.some((c) => c.id === 'C0-root' && c.status === 'FAIL' && /uid model unavailable/i.test(c.detail)));
 });
 
+test('assessCustody — a null facts arg fails CLOSED, never crashes (default param fires only for undefined; ported from assessHeapRead)', () => {
+  let r;
+  assert.doesNotThrow(() => { r = V.assessCustody(null); }, 'null must not crash on the first property access');
+  assert.equal(r.hostObservableChecksPassed, false, 'null facts -> every leg fails closed');
+  assert.equal(r.requiresOutOfBandUidConfirmation, false, 'no denial leg can be taken from empty facts');
+});
+
 test('assessCustody — the report NEVER asserts custodyReal OR custodyMechanismVerified (NS-9 honesty)', () => {
   const r = V.assessCustody({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: 501, sign: SIGN_OK, wrapper: WRAP_OK });
   assert.ok(!('custodyReal' in r), 'no custodyReal field');

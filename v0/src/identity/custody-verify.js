@@ -40,6 +40,7 @@ const DENIAL_ERRNOS = new Set(['EACCES', 'EPERM']);
  *   uid separation, so it never claims custody (or "the mechanism") VERIFIED, only that its checks passed.
  */
 function assessCustody(facts = {}) {
+  if (facts === null || typeof facts !== 'object' || Array.isArray(facts)) facts = {}; // null/array/scalar -> every leg fails closed (the default param fires only for undefined; ported from assessHeapRead)
   const checks = [];
   const residuals = [];
   let verified = true;
