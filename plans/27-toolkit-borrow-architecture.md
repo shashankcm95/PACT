@@ -147,7 +147,11 @@ vacuity-gated pure-verdict shape.
     a doc that makes the implicit convention EXPLICIT + discoverable (the honest-labeling discipline + the
     deployed-module-sha probe-class + the advisory-not-CI-gate rationale), NOT a new enforcer. Kept ADVISORY
     deliberately: the real enforcement stays the per-wave VALIDATE + the pre-PR CodeRabbit gate.
-- **Phase 4 — the bidirectional borrow-BACKs (PACT -> toolkit).** (4a) no-env-fallback crypto — scope
+- **Phase 4 — the bidirectional borrow-BACKs (PACT -> toolkit).** **SHIPPED as a verified RECONCILIATION (no
+  code change) -> see the result section below:** the toolkit already solved each at the right seam — 4a
+  (no-env-fallback) + vacuity-verdict are ALREADY-SATISFIED; 4b (throw-on-raw-key) + `receiverSegment` are N/A. The
+  only deeper-parity options are BOARD-GATED with migration paths: 4a's `loadPublicKey` default-FLIP (regresses live
+  callers) and 4b's future `createMinter` new-LAYER (a design item, NOT a leaf flip). (4a) no-env-fallback crypto — scope
   PRECISELY (critique): name `loadPublicKey` (default `allowEnvFallback:true`, flipping it REGRESSES
   edge/lesson callers) vs `loadSigningKey` (no such param); the safe borrow-back is opt-in-strict for the
   security-sensitive gates, migrate consumers first, leave the final call to the toolkit board. (4b)
@@ -283,3 +287,52 @@ oversize/symlink/non-regular/readAllBounded/observability/short-read). Suite: 25
 
 **Net:** SHIP. The size-cap-before-read class is CLOSED for both attacker-plantable stores; SHADOW; no gate armed;
 a legit log's behavior is unchanged.
+
+## Phase 4 — reconciliation result (2026-07-01, branch `docs/phase4-borrowback-reconciliation`)
+
+RECON verdict (4 parallel architect lenses, each tracing the item against BOTH repos' actual code + callers):
+**there is NO safe unilateral toolkit change to make.** The toolkit — PACT's PARENT substrate — already solved each of
+the 4 §3 borrow-backs at the right seam; the two crypto flips regress live callers and are BOARD-GATED with a
+documented migration path. This closes the Phase 4 row HONESTLY (mirrors Phase 3: the "PACT leads" primitives were
+mostly already-absorbed by the toolkit; a false "safe-gap" would have regressed live SHADOW callers for zero gain —
+exactly what the recon was run to prevent).
+
+- **4a — no-env-fallback crypto -> ALREADY-SATISFIED (security half).** Every toolkit gate rooting trust in custody
+  already passes `allowEnvFallback:false` — `approval.js:150`, `approval-store.js:139`, `loom-custody-verify.js:177`,
+  `loom-edge-custody-verify.js:203`, + the 3 world-anchor PR-B gates (`world-anchor-edge-store.js:436`,
+  `admit-world-anchor-node.js:168`, `world-anchor-mint.js:408`); `approval.js` also fail-closes on an absent custody
+  pin BEFORE `loadPublicKey` is reachable. Solved at the RIGHT seam (per-gate anchor pinning, not a shared default).
+  - **BOARD-GATED (not a safe flip):** matching PACT's no-fallback DEFAULT (`kernel/_lib/edge-attestation.js:74`
+    `loadPublicKey` defaults `allowEnvFallback:true`) regresses `lesson-confirm.js:112/122` (SHADOW causal-edge lane) +
+    any env-configured `weight-minter.js:268` `verifyMintedWeight` consumer. Migration path: (1) make `lesson-confirm`
+    pass `allowEnvFallback` explicitly; (2) audit every `verifyMintedWeight` caller to confirm each supplies
+    `publicKeyPem` (fallback becomes dead code); (3) THEN flip the default + drop the redundant per-gate args. Until the
+    callers move, the default stays true. Toolkit board's call.
+
+- **4b — throw-on-raw-key -> N/A (brief mis-mapped the borrow).** PACT's throw is NOT at the crypto leaf — it lives in
+  `createMinter` (a NEW throne-free authenticated-writer rejecting any option outside `{signer, personaDid,
+  humanUid}`). PACT's OWN leaf (`edge-attestation.js:43-49`) still accepts a raw `privateKeyPem` fail-soft, and PACT's
+  `broker-sign.js:144` still hands it a raw PEM — byte-identical to the toolkit's posture. Pushing a throw DOWN into the
+  toolkit's shared leaf regresses 4 live raw-key signers (incl. the hardened egress custody CLIs `loom-edge-sign` /
+  `loom-broker-sign` — the exact analog of PACT's own raw-PEM broker). No caller relies on the env-signing-key fallback
+  (only tests set it). A future `createMinter`-equivalent is a BOARD-GATED DESIGN item (a new higher layer), not a
+  leaf-level change.
+
+- **receiverSegment neutralize -> N/A (key-space dictates it, not "ahead"-ness).** PACT HASHES because its dir key is an
+  arbitrary, `/`-bearing, attacker-influenceable `receiverId` (a legit `did:web` carries `/`), so it CANNOT reject
+  without breaking legit receivers. The toolkit's dir key is a controlled 16-hex `runId` (`resolveRunId` =
+  `sha256(session_id).slice(0,16)`), re-validated by `isSafePathSegment` reject-before-join — so #215 is ALREADY closed
+  by REJECTION, losing nothing (the key is never `/`-bearing). Adopting the hash would REGRESS 7 live callers
+  (relocate/orphan every record path) for zero benefit. N/A unless a future toolkit consumer keys on a `/`-bearing id.
+
+- **vacuity-gated verdict -> ALREADY-SATISFIED (implemented, not just prose).** Fully implemented in all 4 toolkit
+  verdict functions mirroring the PACT shape — the 3 custody verifiers (`assessCustody` / `assessActorCustody` /
+  `assessEdgeCustody`, each carrying the C1 empty-key + C3 liveness non-vacuity legs, returning
+  `hostObservableChecksPassed`, never a bare `hardened`) + `lesson-merge-lift.js evaluateHardenGate` — and the toolkit
+  copies even carry hardenings PACT's do NOT (NaN guards, C2.5-fail-not-note). PACT's `assessHeapRead` has no toolkit
+  analog, so nothing to port.
+
+**Net:** Phase 4 = a verified reconciliation, NO code change. Two deeper-parity options remain BOARD-GATED (with
+migration paths recorded above): 4a's `loadPublicKey` default-FLIP (regresses live callers) and 4b's future
+`createMinter` new-LAYER (a design item — 4b is N/A as a leaf change). **Phases 1-4 (the low-risk borrow arc) are now
+COMPLETE; Phases 5-6 stay DARK (own scoping + explicit USER go-ahead).**
