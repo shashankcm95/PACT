@@ -30,10 +30,20 @@ const { signRecordId } = require('../lib/edge-attestation');
 const { writeAtomicString } = require('../lib/atomic-write');
 const { checkWithinRoot } = require('../lib/path-canonicalize');
 const { receiverSegment, appendRecord, listByReceiver } = require('../lib/record-store');
+const { refuseAlert } = require('../lib/refuse-alert');
 
 const DEFAULT_STATE_DIR = path.join(os.homedir(), '.claude', 'pact-v0-store');
 const DIR_MODE = 0o700;
 const LOG_VERSION = 1;
+
+// A DoS-prevention read cap for the append-only leaf log (fail-CLOSED, growth-aware). "The store is not a sandbox":
+// a same-uid write foothold can plant a multi-GB leaves.json, and readLeaves is called on every currentSTH /
+// proveInclusion / proveConsistency / reconcile / appendLeaf. Unlike a record (bounded to one frame), the leaf log
+// grows LEGITIMATELY with every append (~72 pretty-printed bytes per 64-hex leaf), so the cap is GENEROUS: 64 MB
+// (~900k leaves) — far beyond any realistic v0 single-node log, yet it bounds the OOM. An oversize log fails CLOSED
+// (throws -> caller {ok:false}), NEVER a silent reset to [] (which would forge a fresh root + erase history). A
+// production-scale log needs a STREAMING Merkle store (v-next); this fixed cap is the deliberate v0 bound.
+const MAX_AUDIT_LOG_BYTES = 64 * 1024 * 1024;
 
 /** The on-disk ordered leaf log for a receiver: `<base>/<seg>/audit/leaves.json`. null if receiverId invalid. */
 function auditLogPath({ receiverId, stateDir } = {}) {
@@ -44,21 +54,69 @@ function auditLogPath({ receiverId, stateDir } = {}) {
 }
 
 /**
+ * Read EXACTLY `size` bytes (the fstat size, already <= MAX_AUDIT_LOG_BYTES) into a size-FITTED buffer — NOT a
+ * cap-sized buffer. The cap is 64 MB; pre-allocating that per read (as lib/record-store's cap+1 readBoundedText
+ * does — cheap there at a 1 MB cap) would be absurd for a tiny log. A same-uid grow AFTER the fstat is bounded to
+ * `size` (no unbounded read). A same-uid SHRINK after the fstat (a short read, n < size) FAILS CLOSED: it means the
+ * file changed under us between fstat and read, so we reject rather than parse a truncated PREFIX — which, with
+ * crafted padding, could be valid JSON for a DIFFERENT (smaller) log than the one fstat'd. A legit unmodified read
+ * always gets n === size (appendLeaf writes via ATOMIC RENAME, so the pinned inode never shrinks under the fd). A
+ * per-store read strategy, deliberately DIFFERENT from record-store's — each store's read path is sized + audited
+ * for its OWN bound.
+ */
+function readAllBounded(fd, size) {
+  const buf = Buffer.alloc(size);
+  let n = 0;
+  let r = 0;
+  do { r = fs.readSync(fd, buf, n, size - n, n); n += r; } while (r > 0 && n < size);
+  if (n !== size) throw new Error('audit-log-corrupt: short read (' + n + ' < ' + size + ')'); // TOCTOU: shrank after fstat
+  return buf.toString('utf8', 0, n);
+}
+
+/**
  * The ordered array of record_ids. An ABSENT file -> [] (a legit empty log / first append). A PRESENT but
- * corrupt/tampered file -> THROWS (fail-closed: never silently reset an append-only log to empty, which would
- * forge a fresh root and erase history).
+ * corrupt/tampered/oversize/non-regular/symlinked file -> THROWS (fail-closed: never silently reset an append-only
+ * log to empty, which would forge a fresh root and erase history). READ is fd-safe (Phase 2b): open no-follow +
+ * no-block, fstat the SAME fd, reject non-regular / oversize BEFORE a size-bounded read (a same-uid multi-GB plant
+ * cannot OOM us; a symlink redirect is refused at open, no longer silently followed).
  */
 function readLeaves(file) {
+  const seg = path.basename(path.dirname(path.dirname(file))); // the receiver segment (alert context; <base>/<seg>/audit/leaves.json)
   let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); }
-  catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+  let fd = null;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const st = fs.fstatSync(fd);                                          // the OPEN fd's inode — swap-immune
+    if (!st.isFile()) throw new Error('audit-log-corrupt: non-regular file');
+    if (st.size > MAX_AUDIT_LOG_BYTES) throw new Error('audit-log-corrupt: oversize (' + st.size + ' > ' + MAX_AUDIT_LOG_BYTES + ')');
+    raw = readAllBounded(fd, st.size);
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return [];                             // an ABSENT log -> legit empty (preserved; a normal miss, no alert)
+    // a PRESENT-but-anomalous log (symlink ELOOP / non-regular / oversize / EACCES / ...) fails CLOSED: THROW, never
+    // a silent reset to []. security.md ("a fail-closed decision must be OBSERVABLE"): emit an out-of-band attack
+    // alert (record-store loadRecordFile parity), THEN throw. Preserve an explicit 'audit-log-corrupt' detail; wrap a
+    // raw io error so every fail-closed reason is uniformly prefixed (the callers surface e.message as {ok:false, reason}).
+    const reason = (e && typeof e.message === 'string' && e.message.startsWith('audit-log-corrupt'))
+      ? e.message
+      : ('audit-log-corrupt: unreadable (' + ((e && e.code) || (e && e.name) || 'error') + ')');
+    refuseAlert('audit-log-read-anomaly', { class: 'attack', seg, detail: reason });
+    throw (e && e.message === reason) ? e : new Error(reason);
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* best-effort */ } }
+  }
+  // content-layer: a present, readable-but-corrupt/tampered append-only log -> emit 'integrity' then THROW (fail-closed).
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw new Error('audit-log-corrupt: invalid JSON'); }
+  try { parsed = JSON.parse(raw); }
+  catch { refuseAlert('audit-log-corrupt', { class: 'integrity', seg, detail: 'invalid JSON' }); throw new Error('audit-log-corrupt: invalid JSON'); }
   if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.leaves)) {
+    refuseAlert('audit-log-corrupt', { class: 'integrity', seg, detail: 'bad shape' });
     throw new Error('audit-log-corrupt: bad shape');
   }
   for (const id of parsed.leaves) {
-    if (typeof id !== 'string' || !HEX64.test(id)) throw new Error('audit-log-corrupt: non-hex leaf');
+    if (typeof id !== 'string' || !HEX64.test(id)) {
+      refuseAlert('audit-log-corrupt', { class: 'integrity', seg, detail: 'non-hex leaf' });
+      throw new Error('audit-log-corrupt: non-hex leaf');
+    }
   }
   return parsed.leaves.slice();
 }
@@ -243,4 +301,7 @@ module.exports = {
   detectFork,
   appendAudited,
   reconcile,
+  // Exported for the size-cap test (drive readAllBounded DIRECTLY on a fd, and reference the cap the read enforces).
+  readAllBounded,
+  MAX_AUDIT_LOG_BYTES,
 };

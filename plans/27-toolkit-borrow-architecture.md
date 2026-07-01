@@ -135,8 +135,9 @@ vacuity-gated pure-verdict shape.
     Phase 2b), NOT silently dropped: `readLeaves` is genuinely DISTINCT — it fail-CLOSES by THROW (never
     fail-soft null) and the leaf log grows LEGITIMATELY unbounded (an append-only array of ids), so a fixed
     1 MB cap would false-reject a real log (~14k leaves). Phase 2b needs a growth-aware cap (or a streaming
-    parse) that PRESERVES the fail-closed-throw contract — a separate design decision (max leaf count),
-    warranting its own TDD + VALIDATE, not a rushed in-scope fold.
+    parse) that PRESERVES the fail-closed-throw contract — its own TDD + VALIDATE, not a rushed in-scope fold.
+    (Phase 2b SHIPPED — see the result section below; the chosen mechanism is a generous 64 MB BYTE cap, not a
+    leaf-count cap.)
 - **Phase 3 — codify the runtime-claim probe as a plan gate.** Method, not code. Add an inline
   `Probe: <cmd> -> <observed result>` field + a pre-approval FLAG. PACT's highest-value probe-class is the
   deployed-module-sha-match (live dogfoods run against separately-deployed brokers). Advisory-strong, not a
@@ -233,3 +234,47 @@ non-regular-FIFO, bounded-read race-proof). Suite: 25 files / 404 pass / 0 fail;
 
 **Net:** SHIP. A focused, non-vacuous DoS-close of the record-store read path; the sibling audit-log read is
 the tracked Phase-2b follow-up. No gate armed; SHADOW; no behavior change for a legit record.
+
+## Phase 2b — VALIDATE result (2026-07-01, branch `feat/audit-log-size-cap`)
+
+BUILT: `audit/audit-log.js readLeaves` bare `readFileSync` -> the fd-safe shape (`open(O_NOFOLLOW|O_NONBLOCK)`
+-> `fstat` same fd -> `!isFile`/oversize reject -> `readAllBounded(fd, st.size)` -> existing JSON/shape/hex
+checks). This is the sibling of #27 but DIVERGES in three load-bearing ways, each intentional:
+(1) **fail-CLOSED by throw** (never fail-soft null) — a present-but-anomalous log THROWS -> caller `{ok:false}`,
+NEVER a silent reset to `[]` (which would forge a fresh Merkle root + erase append-only history); only an ABSENT
+(ENOENT) log -> `[]`. (2) a **generous 64 MB BYTE cap** (`MAX_AUDIT_LOG_BYTES`) — the leaf log grows LEGITIMATELY,
+so a 1 MB cap would false-reject. (3) `readAllBounded` allocates **st.size**, not record-store's `cap+1` — a 64 MB
+per-read alloc would be absurd for a tiny log; a grow-after-fstat is bounded to st.size (no OOM), a truncated/grown
+body fails JSON.parse. TDD: 8 new tests (2 fail-closed regression guards that were previously UNTESTED, +
+oversize/symlink/non-regular/readAllBounded/observability/short-read). Suite: 25 files / 412 pass; eslint clean.
+
+**3-lens VALIDATE (parallel, read-only personas; hacker LIVE-probed per Rule 2a):**
+
+- **hacker -> SHIP.** 11 live probes, ZERO bypasses. The load-bearing invariant HOLDS (the only present-file
+  `[]`-return is a well-formed empty log; every anomaly — symlink/FIFO/dir/oversize/zero-byte/EACCES/corrupt —
+  throws). Oversize plant fails closed at 96 KB RSS (no OOM); a 3 GB grow-after-fstat reads only st.size (16 KB
+  RSS). **Recon-completeness: `readLeaves` WAS the last unbounded attacker-plantable store read — the
+  size-cap-before-read CLASS is now CLOSED for both the record + audit stores.** Its 3 LOWs are positive
+  verifications / named residuals (below), not defects.
+- **code-reviewer -> SHIP-WITH-NITS.** fd lifecycle, ENOENT preservation, readAllBounded (size-fitted, short-read,
+  size==0, shrink-after-fstat), the wrap logic all live-verified. MEDIUM (folded): the fail-closed rejects had no
+  `refuseAlert` (record-store parity gap) -> WIRED (read-layer `attack`, content-layer `integrity`) + a new
+  observability test. LOW (folded): the readAllBounded doc omitted the (safe) shrink case -> added.
+- **honesty-auditor -> SHIP-WITH-NITS.** Confirmed fail-closed-throw genuinely preserved across all 5 readers,
+  the 64 MB v0-bound + streaming-Merkle v-next residual honestly named, NS-9 respected. Folded: the same
+  observability MEDIUM (LOW here); non-regular test made guard-SPECIFIC (`/non-regular file/`); oversize test now
+  self-asserts the planted logical size; this plan's "max leaf count" wording -> "byte cap"; the 412/412 count is
+  orchestrator-attested (read-only lens). (The CodeRabbit MAJOR — readAllBounded short-read fail-closed — is folded;
+  its test is the 8th, taking the suite 411 -> 412.)
+
+**Named residuals (hacker LOW, honest completeness — NOT wave defects):**
+- **Per-op read cost of a large-but-valid log** — a valid just-under-cap (64 MB / ~900k-leaf) log costs a bounded
+  ~130 MB transient + ~2.5 s per audit op (readAllBounded + parse + merkleRoot on every `currentSTH`/proof). Bounded
+  (no OOM), REQUIRED (the log grows legitimately), and the fix is the already-named **streaming Merkle store (v-next)**.
+- **Tamper-to-empty is the integrity layer's job, not the read layer's** — a present `{leaves:[]}` is a valid empty
+  log; distinguishing it from an attacker who overwrote a populated log with `{leaves:[]}` is the append-only
+  integrity layer's job (STH freshness + consistency proofs + cross-node gossip — deferred to the network phase,
+  `audit-log.js:16-18`). The read layer's contract (never SILENTLY reset) holds.
+
+**Net:** SHIP. The size-cap-before-read class is CLOSED for both attacker-plantable stores; SHADOW; no gate armed;
+a legit log's behavior is unchanged.
