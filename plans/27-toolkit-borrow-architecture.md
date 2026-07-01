@@ -142,6 +142,11 @@ vacuity-gated pure-verdict shape.
   `Probe: <cmd> -> <observed result>` field + a pre-approval FLAG. PACT's highest-value probe-class is the
   deployed-module-sha-match (live dogfoods run against separately-deployed brokers). Advisory-strong, not a
   hard blocker (critique LOW: PACT already probes per-wave).
+  - **Phase 3 SHIPPED** -> `plans/PLAN-CONVENTIONS.md`. Recon confirmed the convention is ALREADY de-facto
+    practiced (a `## Runtime Probes` section + inline `Probe:` fields across ~16 plans), so the deliverable is
+    a doc that makes the implicit convention EXPLICIT + discoverable (the honest-labeling discipline + the
+    deployed-module-sha probe-class + the advisory-not-CI-gate rationale), NOT a new enforcer. Kept ADVISORY
+    deliberately: the real enforcement stays the per-wave VALIDATE + the pre-PR CodeRabbit gate.
 - **Phase 4 — the bidirectional borrow-BACKs (PACT -> toolkit).** (4a) no-env-fallback crypto — scope
   PRECISELY (critique): name `loadPublicKey` (default `allowEnvFallback:true`, flipping it REGRESSES
   edge/lesson callers) vs `loadSigningKey` (no such param); the safe borrow-back is opt-in-strict for the
