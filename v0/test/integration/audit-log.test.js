@@ -25,6 +25,14 @@ function test(name, fn) {
   catch (e) { fail++; console.error('  FAIL - ' + name + '\n         ' + (e && e.message)); }
 }
 function freshState() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pact-v0-audit-')); }
+// capture process.stderr.write for the duration of fn (the refuse-alert out-of-band channel).
+function captureStderr(fn) {
+  const orig = process.stderr.write;
+  const lines = [];
+  process.stderr.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try { fn(); } finally { process.stderr.write = orig; }
+  return lines.join('');
+}
 function buildRecord(overrides = {}) {
   const body = {
     ver: 'pact/0', type: 'CLAIM', src_persona_did: 'did:key:zAlice', parent_human_uid: 'human:alice',
@@ -193,6 +201,104 @@ test('reconcile rebuilds a record-without-leaf (crash between store-write and le
   // idempotent: a second reconcile adds nothing
   const rec2 = A.reconcile({ receiverId: RX, stateDir });
   assert.equal(rec2.added, 0); assert.equal(rec2.tree_size, 3);
+});
+
+// ===================== readLeaves fd-safe / size-cap (Phase 2b) + the fail-closed-throw contract =====================
+// "The store is not a sandbox": a same-uid write foothold can plant a hostile leaves.json. readLeaves now opens
+// O_NOFOLLOW|O_NONBLOCK, fstats, and caps st.size BEFORE the read — a multi-GB plant is refused before it OOMs the
+// reader; a symlink redirect is refused at open. The fail-CLOSED contract is PRESERVED: a present-but-anomalous log
+// THROWS -> the caller returns {ok:false}, NEVER a silent reset to [] (which would forge a fresh root + erase history).
+// Only an ABSENT (ENOENT) log -> [] (a legit empty / first append).
+
+function plantLeaves(opts, content) {
+  const file = A.auditLogPath(opts);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, content);
+  return file;
+}
+
+test('readLeaves fail-closed (PRESERVED): a corrupt (invalid-JSON) log THROWS -> {ok:false}, never a silent reset', () => {
+  const stateDir = freshState();
+  plantLeaves({ receiverId: RX, stateDir }, '{ this is not json');
+  const res = A.currentSTH(signerOpts, { receiverId: RX, stateDir });
+  assert.equal(res.ok, false, 'a corrupt append-only log must FAIL CLOSED, not reset to a fresh empty root');
+  assert.match(res.reason, /audit-log-corrupt/);
+});
+
+test('readLeaves fail-closed (PRESERVED): a bad-shape log (leaves not an array) THROWS -> {ok:false}', () => {
+  const stateDir = freshState();
+  plantLeaves({ receiverId: RX, stateDir }, JSON.stringify({ version: 1, leaves: 'nope' }));
+  assert.equal(A.currentSTH(signerOpts, { receiverId: RX, stateDir }).ok, false);
+});
+
+test('size-cap: an OVERSIZE log is refused at fstat (fail-closed) — not read into memory, not silently reset', () => {
+  const stateDir = freshState();
+  const file = plantLeaves({ receiverId: RX, stateDir }, '');
+  fs.truncateSync(file, A.MAX_AUDIT_LOG_BYTES + 1); // a SPARSE oversize file (metadata only; no 64 MB written)
+  assert.equal(fs.statSync(file).size, A.MAX_AUDIT_LOG_BYTES + 1, 'precondition: truncate set the logical size > cap');
+  const res = A.currentSTH(signerOpts, { receiverId: RX, stateDir });
+  assert.equal(res.ok, false, 'oversize must fail closed (never a silent reset to a fresh root)');
+  assert.match(res.reason, /oversize/);
+});
+
+test('O_NOFOLLOW: a symlinked leaves.json is REFUSED (not followed) -> fail-closed', () => {
+  const stateDir = freshState();
+  const target = path.join(stateDir, 'foreign-leaves.json');
+  fs.writeFileSync(target, JSON.stringify({ version: 1, leaves: [] })); // a valid log the attacker points AT
+  const file = A.auditLogPath({ receiverId: RX, stateDir });
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  try { fs.symlinkSync(target, file); } catch (e) { console.log('  (skip: symlink unsupported here: ' + e.code + ')'); return; }
+  const res = A.currentSTH(signerOpts, { receiverId: RX, stateDir });
+  assert.equal(res.ok, false, 'a symlinked log is refused (O_NOFOLLOW -> ELOOP), not silently followed');
+  assert.match(res.reason, /audit-log-corrupt/);
+});
+
+test('non-regular: a directory at the leaves.json path is refused (fstat !isFile) -> fail-closed', () => {
+  const stateDir = freshState();
+  const file = A.auditLogPath({ receiverId: RX, stateDir });
+  fs.mkdirSync(file, { recursive: true }); // a DIRECTORY at the leaves path
+  const res = A.currentSTH(signerOpts, { receiverId: RX, stateDir });
+  assert.equal(res.ok, false);
+  // guard-SPECIFIC: assert the !isFile() throw, not the io-fallback (a readSync on a dir fd would ALSO throw
+  // -> 'unreadable (EISDIR)', which still matches /audit-log-corrupt/, so a bare match wouldn't pin the guard).
+  assert.match(res.reason, /audit-log-corrupt: non-regular file/);
+});
+
+test('observability (security.md): a fail-closed read anomaly emits an out-of-band ATTACK alert (record-store parity)', () => {
+  const stateDir = freshState();
+  const file = plantLeaves({ receiverId: RX, stateDir }, '');
+  fs.truncateSync(file, A.MAX_AUDIT_LOG_BYTES + 1); // oversize -> the fail-closed read-layer anomaly
+  let res;
+  const out = captureStderr(() => { res = A.currentSTH(signerOpts, { receiverId: RX, stateDir }); });
+  assert.equal(res.ok, false, 'still fail-closed');
+  const line = out.split('\n').find((l) => l.includes('[PACT-REFUSE-ALERT]'));
+  assert.ok(line, 'a same-uid attack on the audit log must be observable out-of-band, not a silent {ok:false}');
+  const json = JSON.parse(line.slice(line.indexOf('{')));
+  assert.equal(json.class, 'attack', 'an oversize/symlink/non-regular plant is an attack-class read anomaly');
+  assert.match(json.detail, /oversize/);
+});
+
+test('bounded read (non-vacuous): readAllBounded reads AT MOST `size` bytes, never the whole (possibly-grown) file', () => {
+  const stateDir = freshState();
+  const big = path.join(stateDir, 'grow.bin');
+  fs.writeFileSync(big, Buffer.alloc(4096, 0x61)); // 4 KB
+  const fd = fs.openSync(big, 'r');
+  try { assert.equal(A.readAllBounded(fd, 1024).length, 1024, 'reads only `size` bytes (a grow-after-fstat is bounded)'); }
+  finally { fs.closeSync(fd); }
+  const fd2 = fs.openSync(big, 'r');
+  try { assert.equal(A.readAllBounded(fd2, 4096).length, 4096, 'reads the full file when size == length (not vacuously short)'); }
+  finally { fs.closeSync(fd2); }
+});
+
+test('readAllBounded fail-closed (CodeRabbit MAJOR): a short read (size > actual length) THROWS, never a truncated prefix', () => {
+  // a shrink-after-fstat (or any size mismatch) must FAIL CLOSED — never return a truncated prefix that could,
+  // with crafted padding, parse as valid JSON for a DIFFERENT (smaller) log than the one fstat'd.
+  const stateDir = freshState();
+  const f = path.join(stateDir, 'short.bin');
+  fs.writeFileSync(f, 'abc'); // 3 bytes
+  const fd = fs.openSync(f, 'r');
+  try { assert.throws(() => A.readAllBounded(fd, 100), /short read/, 'reading 100 from a 3-byte file must fail closed'); }
+  finally { fs.closeSync(fd); }
 });
 
 console.log(`\n[audit-log] ${pass} passed, ${fail} failed`);
