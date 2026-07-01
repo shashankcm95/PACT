@@ -176,6 +176,111 @@ test('refuse-alert: a normal miss (ENOENT — no such record) is SILENT (no fals
   assert.equal(out, '', 'a plain absent-record read must NOT emit a reject alert');
 });
 
+// --- Phase 2: the fd-safe bounded read (size-cap-before-read) -----------------------------------
+// "The store is not a sandbox": a same-uid write foothold can plant a hostile file at a valid
+// record-<64hex>.json name. loadRecordFile now opens O_NOFOLLOW|O_NONBLOCK, fstats the SAME fd, and
+// caps st.size BEFORE reading — a multi-GB plant is refused before it can OOM the reader, a symlink
+// redirect is refused at open, a FIFO/dir is refused at fstat. A legit record is UNCHANGED (fail-soft
+// null on any anomaly; deepFrozen body on success). The read-layer anomalies class as 'attack' (a
+// hostile object at a record path); the content-layer classes (integrity / attack co-forge) are unchanged.
+
+function alertLine(out) {
+  const line = out.split('\n').find((l) => l.includes('[PACT-REFUSE-ALERT]'));
+  return line ? JSON.parse(line.slice(line.indexOf('{'))) : null;
+}
+
+test('size-cap: an oversize file at a valid record path is SKIPPED + emits an attack alert (before parse)', () => {
+  const realId = R.computeRecordId(buildBody({ nonce: 'oversize-1' }));
+  const dir = S.recordStoreDir({ receiverId: RX, stateDir: STATE });
+  fs.mkdirSync(dir, { recursive: true });
+  // > MAX_RECORD_FILE_BYTES of junk: the size reject fires on fstat, BEFORE any read/parse (content irrelevant).
+  fs.writeFileSync(path.join(dir, 'record-' + realId + '.json'), 'x'.repeat(S.MAX_RECORD_FILE_BYTES + 1024));
+  let back;
+  const out = captureStderr(() => { back = S.readById(realId, { receiverId: RX, stateDir: STATE }); });
+  assert.equal(back, null, 'an oversize planted file is refused (fail-soft null)');
+  const json = alertLine(out);
+  assert.ok(json, 'the oversize refuse is observable out-of-band');
+  assert.equal(json.reason, 'oversize-record-file');
+  assert.equal(json.class, 'attack');
+});
+
+test('size-cap non-vacuity: the SAME shape UNDER the cap loads normally (the cap is what rejects)', () => {
+  // a genuine in-cap record round-trips — so the oversize test rejects on SIZE, not an unrelated defect.
+  const rec = buildRecord({ nonce: 'under-cap-1' });
+  assert.ok(S.appendRecord(rec, { receiverId: RX, stateDir: STATE }).ok);
+  assert.ok(S.readById(rec.record_id, { receiverId: RX, stateDir: STATE }), 'an in-cap record still loads');
+});
+
+test('O_NOFOLLOW: a symlink planted at a record path is REFUSED (intentional hardening) + alerts ELOOP', () => {
+  // stash a real, valid record OUTSIDE the store, then symlink the in-store record path to it. The prior
+  // readFileSync FOLLOWED the link (a same-uid redirect); O_NOFOLLOW refuses it atomically at open.
+  const rec = buildRecord({ nonce: 'symlink-tgt' });
+  const target = path.join(STATE, 'real-target.json');
+  fs.writeFileSync(target, JSON.stringify(rec));
+  const dir = S.recordStoreDir({ receiverId: RX, stateDir: STATE });
+  fs.mkdirSync(dir, { recursive: true });
+  try { fs.symlinkSync(target, path.join(dir, 'record-' + rec.record_id + '.json')); }
+  catch (e) { console.log('  (skip: symlink unsupported here: ' + e.code + ')'); return; }
+  let back;
+  const out = captureStderr(() => { back = S.readById(rec.record_id, { receiverId: RX, stateDir: STATE }); });
+  assert.equal(back, null, 'a symlinked record file is refused (no-follow), not silently followed');
+  const json = alertLine(out);
+  assert.ok(json, 'the symlink refusal is observable');
+  assert.equal(json.reason, 'unreadable-record-file');
+  assert.equal(json.class, 'attack');
+  assert.equal(json.io_code, 'ELOOP', 'O_NOFOLLOW surfaces ELOOP for a symlinked final component');
+});
+
+test('non-regular file: a directory at a record path is SKIPPED + alerts (fstat !isFile)', () => {
+  const realId = R.computeRecordId(buildBody({ nonce: 'nonreg-1' }));
+  const dir = S.recordStoreDir({ receiverId: RX, stateDir: STATE });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(path.join(dir, 'record-' + realId + '.json')); // a DIRECTORY at the record path
+  let back;
+  const out = captureStderr(() => { back = S.readById(realId, { receiverId: RX, stateDir: STATE }); });
+  assert.equal(back, null, 'a non-regular file at a record path is refused');
+  const json = alertLine(out);
+  assert.ok(json, 'the non-regular refuse is observable');
+  assert.equal(json.reason, 'non-regular-record-file');
+  assert.equal(json.class, 'attack');
+});
+
+test('non-regular (FIFO): a named pipe at a record path is refused via O_NONBLOCK+fstat (no hang) + alerts', () => {
+  // the O_NONBLOCK claim: a FIFO planted at a record path opens IMMEDIATELY (no writer -> no hang under
+  // O_RDONLY|O_NONBLOCK), then fstat().isFile() is false -> reject. (Guarded: mkfifo is POSIX-only.)
+  const realId = R.computeRecordId(buildBody({ nonce: 'fifo-1' }));
+  const dir = S.recordStoreDir({ receiverId: RX, stateDir: STATE });
+  fs.mkdirSync(dir, { recursive: true });
+  const fifo = path.join(dir, 'record-' + realId + '.json');
+  try { require('node:child_process').execFileSync('mkfifo', [fifo]); } // execFile (no shell) — path as argv
+  catch (e) { console.log('  (skip: mkfifo unavailable here: ' + (e && e.code) + ')'); return; }
+  let back;
+  const out = captureStderr(() => { back = S.readById(realId, { receiverId: RX, stateDir: STATE }); });
+  assert.equal(back, null, 'a FIFO at a record path is refused without hanging');
+  const json = alertLine(out);
+  assert.ok(json, 'the FIFO refuse is observable');
+  assert.equal(json.class, 'attack');
+  // O_RDONLY|O_NONBLOCK opens the FIFO -> fstat !isFile -> 'non-regular-record-file' (ENXIO is the O_WRONLY case).
+  assert.ok(['non-regular-record-file', 'unreadable-record-file'].includes(json.reason), 'reason: ' + json.reason);
+});
+
+test('bounded read (non-vacuous race proof): readBoundedText returns null when content exceeds the cap', () => {
+  // the TOCTOU-grow close: a file that PASSES the fstat size-check can still grow before the read. Drive
+  // readBoundedText DIRECTLY on a fd whose file is LARGER than the cap (bypassing the st.size pre-check
+  // that would otherwise shadow it) — it must return null (the oversize-race signal), never read unbounded.
+  const big = path.join(STATE, 'grow.bin');
+  fs.writeFileSync(big, Buffer.alloc(4096, 0x61)); // 4 KB
+  const fd = fs.openSync(big, 'r');
+  try { assert.equal(S.readBoundedText(fd, 1024), null, 'a 4 KB file under a 1 KB cap returns null (oversize-race)'); }
+  finally { fs.closeSync(fd); }
+  // and UNDER the cap it returns the EXACT bytes (the helper is not vacuously always-null).
+  const small = path.join(STATE, 'small.bin');
+  fs.writeFileSync(small, 'hello');
+  const fd2 = fs.openSync(small, 'r');
+  try { assert.equal(S.readBoundedText(fd2, 1024), 'hello', 'an in-cap read returns the exact bytes'); }
+  finally { fs.closeSync(fd2); }
+});
+
 // cleanup
 try { fs.rmSync(STATE, { recursive: true, force: true }); } catch { /* best-effort */ }
 

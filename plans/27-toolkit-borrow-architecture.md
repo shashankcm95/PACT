@@ -121,10 +121,22 @@ vacuity-gated pure-verdict shape.
 - **Phase 2 — size-cap-before-read (the FULL fd-safe shape).** Borrow the whole `readJoinKeyRaw` shape,
   not `readBoundedText` in isolation (critique HIGH). Preserve PACT's fail-soft null-return +
   `receiverSegment` keying; note the O_NOFOLLOW behavioral change (a symlinked record file now refused)
-  as an intentional hardening; add a non-vacuous test (plant an oversize file post-fstat proving the
-  race-close fires). **Do NOT extract a shared leaf** the toolkit deliberately refused to share
-  (`join-key-store.js:307` "NOT cross-store-shared") — inline a bounded read at each PACT read site, OR
-  explicitly justify unifying PACT's two paths where the toolkit's were not.
+  as a read-robustness NARROW (NS-9: a same-uid in-process check narrows, it does NOT harden trust); add a
+  non-vacuous test (plant an oversize file post-fstat proving the race-close fires). **Do NOT extract a
+  shared leaf** the toolkit deliberately refused to share (`join-key-store.js:307` "NOT cross-store-shared")
+  — inline a bounded read at each PACT read site, OR explicitly justify unifying PACT's two paths where the
+  toolkit's were not.
+  - **Phase-2 scope + the NAMED sibling residual (VALIDATE hacker HIGH / auditor MEDIUM, folded).** This
+    wave caps `record-store.js loadRecordFile` ONLY (the store's sole record read — `readById` /
+    `readByIdempotencyKey` / `listByReceiver` all funnel through it). The SIBLING `audit/audit-log.js:53
+    readLeaves` is the SAME bare-`readFileSync` DoS class on an attacker-plantable per-receiver store file
+    (`leaves.json`) — a live 200 MB-plant OOM was reproduced against `currentSTH` / `proveInclusion`, and it
+    also follows symlinks (no `O_NOFOLLOW`). It is a **NAMED, TRACKED residual** (its own micro-wave =
+    Phase 2b), NOT silently dropped: `readLeaves` is genuinely DISTINCT — it fail-CLOSES by THROW (never
+    fail-soft null) and the leaf log grows LEGITIMATELY unbounded (an append-only array of ids), so a fixed
+    1 MB cap would false-reject a real log (~14k leaves). Phase 2b needs a growth-aware cap (or a streaming
+    parse) that PRESERVES the fail-closed-throw contract — a separate design decision (max leaf count),
+    warranting its own TDD + VALIDATE, not a rushed in-scope fold.
 - **Phase 3 — codify the runtime-claim probe as a plan gate.** Method, not code. Add an inline
   `Probe: <cmd> -> <observed result>` field + a pre-approval FLAG. PACT's highest-value probe-class is the
   deployed-module-sha-match (live dogfoods run against separately-deployed brokers). Advisory-strong, not a
@@ -192,3 +204,32 @@ later.
 
 **The first PR (this branch) = Phase 1 only:** `refuse-alert.js` + wiring into `read-gate.js` +
 `record-store.js loadRecordFile` + tests. Observability infra; no behavior change; no gate armed.
+
+## Phase 2 — VALIDATE result (2026-07-01, branch `feat/record-store-size-cap`)
+
+BUILT: `record-store.js loadRecordFile` bare `readFileSync` -> the fd-safe shape (`openSync(O_RDONLY|
+O_NOFOLLOW|O_NONBLOCK)` -> `fstatSync` the same fd -> `!isFile` / oversize reject -> `readBoundedText`
+cap+1 bounded read -> the EXISTING parse/validate/#273 gates unchanged; fd closed in `finally`). Local
+`MAX_RECORD_FILE_BYTES = 1 MB` (NS-11: a local const, never imported UP from `identity/request-auth`).
+TDD: 6 new tests (oversize-reject, under-cap non-vacuity, O_NOFOLLOW-symlink-ELOOP, non-regular-dir,
+non-regular-FIFO, bounded-read race-proof). Suite: 25 files / 404 pass / 0 fail; eslint clean.
+
+**3-lens VALIDATE (parallel, read-only personas per Rule 3; hacker LIVE-probed per Rule 2a):**
+
+- **code-reviewer -> SHIP.** fd lifecycle, `raw` scoping, `readBoundedText` boundaries (empty / exactly-cap
+  / cap+1 / literal-`'null'`), the 1 MB cap, and full contract-preservation all live-verified. One LOW: the
+  bounded-read helper duplicates the toolkit's (DELIBERATE per this plan; documented cross-store convention).
+- **hacker -> SHIP-WITH-NITS.** 9 live probes; every read-path defense held (200 MB oversize -> 0 MB heap
+  reject; hardlink->size-rejected; FIFO->no-hang reject; symlink->ELOOP; unix-socket/deep-nest/empty/
+  literal-null -> fail-soft, never throw). Findings folded: HIGH = the audit-log `readLeaves` sibling (see
+  the NAMED Phase-2b residual under §4); LOW = `O_NOFOLLOW` guards the FINAL component only (a symlinked
+  ancestor is caught in depth by the size-cap + `checkWithinRoot`) -> a durable code comment was added.
+- **honesty-auditor -> SHIP-WITH-NITS.** Confirmed the wave delivers the Phase-2 spec, all 6 tests
+  non-vacuous, the 256 KB-frame premise holds, NS-11 respected. Findings folded: MEDIUM = the unnamed
+  audit-log sibling ("no silent caps") -> now NAMED (§4 Phase-2b); LOW = the "hardening" wording ->
+  reworded to a read-robustness NARROW (NS-9) in both the code and §4; LOW = the FIFO-no-hang claim was
+  untested -> a guarded FIFO test was added; NIT = the 404/404 count is orchestrator-attested (the auditor
+  is read-only).
+
+**Net:** SHIP. A focused, non-vacuous DoS-close of the record-store read path; the sibling audit-log read is
+the tracked Phase-2b follow-up. No gate armed; SHADOW; no behavior change for a legit record.
