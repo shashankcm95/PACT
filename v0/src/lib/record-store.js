@@ -39,6 +39,16 @@ const DEFAULT_STATE_DIR = path.join(os.homedir(), '.claude', 'pact-v0-store');
 const DIR_MODE = 0o700;
 const RECORD_FILE_RE = /^record-[a-f0-9]{64}\.json$/;
 
+// A DoS-prevention read cap (NOT a policy bound): reject a hostile oversize file BEFORE readSync can OOM
+// the reader. "The store is not a sandbox" — a same-uid write foothold can plant a multi-GB file at a
+// valid record-<64hex>.json name, and listByReceiver / readByIdempotencyKey scan the whole dir. PACT
+// already bounds a SIGNED frame to MAX_FRAME_BYTES (256 KB, identity/request-auth.js) at the sign
+// boundary; the on-disk record is that frame plus a few content-address fields, pretty-printed
+// (JSON.stringify(record, null, 2)). 1 MB is generous headroom that never false-rejects a legit record
+// yet refuses a multi-GB plant. Defined LOCAL (not imported from request-auth) so lib/ never depends UP
+// into identity/ — the NS-11 acyclic DAG (lib -> atms -> trust -> grounding) stays intact.
+const MAX_RECORD_FILE_BYTES = 1024 * 1024;
+
 /**
  * The per-receiver directory segment: sha256(receiverId).slice(0,16). Always a safe 16-hex
  * token, so traversal is impossible by construction. Returns null for a non-string/empty id.
@@ -118,14 +128,64 @@ function appendRecord(record, opts = {}) {
 }
 
 /**
+ * Bounded positional read through an already-open fd: read at most cap+1 bytes (the loop handles short
+ * reads) so a same-uid writer that GROWS the file after the fstat size-check cannot force an unbounded
+ * read (the TOCTOU-grow close). cap+1 and Buffer.alloc(cap+1) are load-bearing — a cap-sized buffer would
+ * overflow on the cap+1-n read. Returns the UTF-8 text, or null ONLY for the oversize case (so the
+ * caller's `text === null` is an unambiguous oversize-race signal; a literal-'null' file returns the
+ * STRING 'null', never the value). Inlined per store, NOT a shared leaf: PACT reconciles at
+ * point-of-use, and (mirroring the toolkit's join-key-store) each read path is audited independently.
+ */
+function readBoundedText(fd, cap) {
+  const buf = Buffer.alloc(cap + 1);
+  let n = 0;
+  let r = 0;
+  do { r = fs.readSync(fd, buf, n, cap + 1 - n, n); n += r; } while (r > 0 && n <= cap);
+  if (n > cap) return null;                                              // grew past the cap after fstat -> reject
+  return buf.toString('utf8', 0, n);
+}
+
+/**
  * Parse + validate + content-verify a single record file. null on any failure (fail-soft).
- * The verify-on-read gate is three-part (the #273 lesson): (a) record_id is a 64-hex STRING
- * (type before coercion); (b) filename txid == that field; (c) the body CONTENT hashes to it.
+ * READ is fd-safe (size-cap-before-read): open no-follow + no-block, fstat the SAME fd, reject a
+ * non-regular / oversize object BEFORE the bounded read (a same-uid multi-GB plant cannot OOM us; a
+ * symlink redirect is refused at open). The verify-on-read gate is then three-part (the #273 lesson):
+ * (a) record_id is a 64-hex STRING (type before coercion); (b) filename txid == that field; (c) the
+ * body CONTENT hashes to it.
  */
 function loadRecordFile(file) {
   const where = path.basename(file);
+  // (0) fd-safe read: broker-sign.js:130 uses the identical open idiom for the key. A symlink at a record
+  // path now refuses at open (O_NOFOLLOW -> ELOOP) — a read-path hardening over the prior readFileSync, which
+  // silently FOLLOWED a same-uid redirect. NS-9: this is read-ROBUSTNESS, NOT a trust hardening (a same-uid
+  // in-process check NARROWS; only a world-anchored signal HARDENS). O_NOFOLLOW guards the FINAL component
+  // only — a symlinked ANCESTOR dir is still followed, caught in depth by the size-cap below + readById's
+  // checkWithinRoot realpath anchor (do NOT drop that layer). O_NONBLOCK so a FIFO/device planted at a record
+  // path opens immediately (the fstat().isFile() below rejects it) instead of hanging.
   let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }    // a normal miss (ENOENT) — NO alert
+  let fd = null;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+    const st = fs.fstatSync(fd);                                          // the OPEN fd's inode — swap-immune
+    if (!st.isFile()) { refuseAlert('non-regular-record-file', { class: 'attack', file: where }); return null; }
+    if (st.size > MAX_RECORD_FILE_BYTES) {
+      refuseAlert('oversize-record-file', { class: 'attack', file: where, size: st.size });
+      return null;
+    }
+    // bounded read (race-proof): the st.size check above is a fast early reject, but a same-uid writer can
+    // grow the file between the fstat and the read. readBoundedText caps at MAX_RECORD_FILE_BYTES+1 and
+    // returns null ONLY if the content grew past the cap after the fstat — an observable oversize-race.
+    raw = readBoundedText(fd, MAX_RECORD_FILE_BYTES);
+    if (raw === null) { refuseAlert('oversize-record-file', { class: 'attack', file: where, kind: 'race' }); return null; }
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return null;                       // a normal miss — NO alert (unchanged)
+    // ELOOP (a symlink under O_NOFOLLOW), EACCES, ENXIO (a FIFO with no writer under O_NONBLOCK), ... a path
+    // that previously returned null SILENTLY (a same-uid object-swap dropping a record) is now observable.
+    refuseAlert('unreadable-record-file', { class: 'attack', file: where, io_code: (err && err.code) || 'error' });
+    return null;
+  } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* best-effort */ } }
+  }
   let parsed;
   try { parsed = JSON.parse(raw); }
   catch { refuseAlert('unparseable-record-file', { class: 'integrity', file: where }); return null; }
@@ -206,4 +266,8 @@ module.exports = {
   listByReceiver,
   recordStoreDir,
   receiverSegment,
+  // Exported for the bounded-read test (drive the helper DIRECTLY on a >cap fd, bypassing the st.size
+  // pre-check that would otherwise shadow it). MAX_RECORD_FILE_BYTES is the cap the read path enforces.
+  readBoundedText,
+  MAX_RECORD_FILE_BYTES,
 };
