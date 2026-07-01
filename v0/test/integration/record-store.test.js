@@ -23,6 +23,15 @@ function test(name, fn) {
   catch (e) { fail++; console.error('  FAIL - ' + name + '\n         ' + (e && e.message)); }
 }
 
+// capture process.stderr.write for the duration of fn (the refuse-alert out-of-band channel).
+function captureStderr(fn) {
+  const orig = process.stderr.write;
+  const lines = [];
+  process.stderr.write = (chunk) => { lines.push(String(chunk)); return true; };
+  try { fn(); } finally { process.stderr.write = orig; }
+  return lines.join('');
+}
+
 function buildBody(overrides = {}) {
   return {
     ver: 'pact/0', type: 'CLAIM',
@@ -141,6 +150,30 @@ test('store boundary REJECTS a both-target_* record (the CONTEST discriminant fi
   const res = S.appendRecord(rec, { receiverId: RX, stateDir: STATE });
   assert.equal(res.ok, false, 'a both-target_* record must be rejected at the store boundary');
   assert.match(res.reason, /invalid-record/);
+});
+
+test('refuse-alert: a content-address-mismatch (co-forge) on read emits an ATTACK alert out-of-band', () => {
+  const dir = S.recordStoreDir({ receiverId: RX, stateDir: STATE });
+  fs.mkdirSync(dir, { recursive: true });
+  const realId = R.computeRecordId(buildBody({ nonce: 'alert-c' }));
+  // field==filename id (hex string) but the body does NOT hash to it — the #273 co-forge signal.
+  const planted = { ...buildBody({ nonce: 'alert-c', src_persona_did: 'did:key:zAttacker' }), record_id: realId };
+  fs.writeFileSync(path.join(dir, 'record-' + realId + '.json'), JSON.stringify(planted));
+  let back;
+  const out = captureStderr(() => { back = S.readById(realId, { receiverId: RX, stateDir: STATE }); });
+  assert.equal(back, null, 'behavior UNCHANGED — the forged record is still skipped (fail-soft)');
+  assert.match(out, /\[PACT-REFUSE-ALERT\]/, 'the silent drop is now observable out-of-band');
+  const line = out.split('\n').find((l) => l.includes('[PACT-REFUSE-ALERT]'));
+  const json = JSON.parse(line.slice(line.indexOf('{')));
+  assert.equal(json.reason, 'content-address-mismatch');
+  assert.equal(json.class, 'attack', 'a co-forge is an ATTACK, not a benign integrity miss');
+});
+
+test('refuse-alert: a normal miss (ENOENT — no such record) is SILENT (no false alert)', () => {
+  const out = captureStderr(() => {
+    assert.equal(S.readById('f'.repeat(64), { receiverId: RX, stateDir: STATE }), null);
+  });
+  assert.equal(out, '', 'a plain absent-record read must NOT emit a reject alert');
 });
 
 // cleanup

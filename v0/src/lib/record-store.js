@@ -33,6 +33,7 @@ const { writeAtomicString } = require('./atomic-write');
 const { deepFreeze } = require('./deep-freeze');
 const { computeRecordId, validateRecord, deriveIdempotencyKey, HEX64 } = require('./record');
 const { checkWithinRoot, isSafePathSegment } = require('./path-canonicalize');
+const { refuseAlert } = require('./refuse-alert');
 
 const DEFAULT_STATE_DIR = path.join(os.homedir(), '.claude', 'pact-v0-store');
 const DIR_MODE = 0o700;
@@ -122,18 +123,31 @@ function appendRecord(record, opts = {}) {
  * (type before coercion); (b) filename txid == that field; (c) the body CONTENT hashes to it.
  */
 function loadRecordFile(file) {
+  const where = path.basename(file);
   let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }    // a normal miss (ENOENT) — NO alert
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { return null; }
+  try { parsed = JSON.parse(raw); }
+  catch { refuseAlert('unparseable-record-file', { class: 'integrity', file: where }); return null; }
   const validation = validateRecord(parsed);
-  if (!validation.valid) return null;
+  if (!validation.valid) { refuseAlert('invalid-record-on-read', { class: 'integrity', file: where }); return null; }
   const id = parsed.record_id;
-  if (typeof id !== 'string' || !HEX64.test(id)) return null;            // (a) type + shape, before coercion
-  if (path.basename(file) !== 'record-' + id + '.json') return null;     // (b) filename <-> field
+  if (typeof id !== 'string' || !HEX64.test(id)) {                       // (a) type + shape, before coercion
+    refuseAlert('record-id-not-hex-on-read', { class: 'integrity', file: where });
+    return null;
+  }
+  if (path.basename(file) !== 'record-' + id + '.json') {               // (b) filename <-> field
+    refuseAlert('filename-field-mismatch', { class: 'attack', file: where, record_id: id });
+    return null;
+  }
   let computed;
-  try { computed = computeRecordId(parsed); } catch { return null; }
-  if (computed !== id) return null;                                      // (c) field <-> content (S5-on-read)
+  try { computed = computeRecordId(parsed); }
+  catch { refuseAlert('record-uncomputable-on-read', { class: 'integrity', file: where }); return null; }
+  if (computed !== id) {                                                 // (c) field <-> content (S5-on-read)
+    // the body does not hash to its id — a #273 co-forge / tamper attempt (never benign).
+    refuseAlert('content-address-mismatch', { class: 'attack', file: where, record_id: id });
+    return null;
+  }
   return deepFreeze(parsed);
 }
 
