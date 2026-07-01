@@ -72,8 +72,8 @@ The single biggest finding: PACT is more co-evolved than a naive "copy the new s
 1. **Fail-closed OBSERVABLE emitter** (`refuse-alert.js`) — high/low/low — `kernel/egress/alert.js`
    (`emitEgressAlert`) -> new `v0/src/lib/refuse-alert.js`. Reconcile: PACT's DENY is NO-ECHO-TO-CALLER
    (anti-oracle), so this is an OUT-OF-BAND operator-side stderr signal the caller's return never carries;
-   token `[PACT-REFUSE-ALERT]`; the reason token distinguishes an ATTACK from a MISCONFIG. Never throws,
-   never gates. **This is Phase 1 + the first PR.**
+   token `[PACT-REFUSE-ALERT]`; the `class` field distinguishes an ATTACK from a MISCONFIG (the `reason`
+   names the specific drop path). Never throws, never gates. **This is Phase 1 + the first PR.**
 2. **Runtime-claim probe as a CODIFIED plan gate** — high/low/low (method) — `workflow.md` Runtime-Claim
    Probe Discipline + verify-plan check #9 -> PACT's plan discipline. Turns PACT's probe REFLEX into a
    pre-approval board FLAG. Phase 3.
@@ -106,7 +106,8 @@ vacuity-gated pure-verdict shape.
   legitimately-different derived bodies.
 - **Phase 1 — the fail-closed observable emitter.** `refuse-alert.js` + wiring into the SILENT
   fail-closed paths (`read-gate.js` drop-unverified; `record-store.js loadRecordFile` verify-on-read
-  rejects — the #273 tamper signal). Observability infra: NARROWS nothing, HARDENS nothing; report as
+  rejects, of which the content-address-mismatch is the #273 co-forge signal — integrity failures are
+  classed separately). Observability infra: NARROWS nothing, HARDENS nothing; report as
   "the deny path is now debuggable." **This is the first PR.**
   - **Phase-1 residual (M1, VALIDATE board — deferred, acceptable-for-SHADOW):** the emit is
     un-rate-limited (matching the toolkit's `emitEgressAlert`). `verifiedRecords` / `loadRecordFile` are
