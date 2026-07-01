@@ -23,6 +23,9 @@ sudo sysctl -w kernel.yama.ptrace_scope=2
 echo 'kernel.yama.ptrace_scope = 2' | sudo tee /etc/sysctl.d/10-ptrace.conf
 # core dumps: no host-readable core sink (L2 core leg + L0-core)
 sudo sysctl -w kernel.core_pattern=/dev/null ; echo 'kernel.core_pattern=/dev/null' | sudo tee /etc/sysctl.d/10-core.conf
+# apport RE-SETS core_pattern to its crash-handler pipe at boot, AFTER sysctl.d applies — so the persist above
+# is not enough on Ubuntu. Disable apport (and re-assert core_pattern=/dev/null after any reboot).
+sudo systemctl disable --now apport.service 2>/dev/null || true
 # swap: turn it off for the run (or use encrypted swap) so a key page cannot land on a host-readable device
 sudo swapoff -a
 # borrowed-cap scan (L0-borrowed-cap / VT-9): MUST be empty, and review setuid binaries
@@ -35,7 +38,9 @@ find / -perm -4000 -type f 2>/dev/null    # review: none coercible into reading 
 ```sh
 sudo useradd -r -s /usr/sbin/nologin pactbroker      # the broker uid (record it: id -u pactbroker)
 sudo useradd -m attacker                             # the host-uid attacker (a normal non-root uid)
-sudo install -d -m 0700 -o pactbroker -g pactbroker /etc/pact
+# the key DIR is 0755 (the KEY stays 0600): the operator uid must be able to lstat the key to confirm its
+# OWNER differs (custody-verify C2). A 0700 dir BLINDS the verifier -> it reports owner-unknown -> FAILs.
+sudo install -d -m 0755 -o pactbroker -g pactbroker /etc/pact
 # deploy the signing key 0600 owned by the broker uid (use your existing broker key material):
 sudo install -m 0600 -o pactbroker -g pactbroker broker.key /etc/pact/broker.key
 # the sudo wrapper must be a regular, non-group/world-writable file (L-pre / custody-verify C2.5)
