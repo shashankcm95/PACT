@@ -12,6 +12,7 @@
 const { listByReceiver } = require('../lib/record-store');
 const { verifyRecordSig } = require('../lib/edge-attestation');
 const { lookupPublicKey } = require('../identity/registry');
+const { refuseAlert } = require('../lib/refuse-alert');
 
 /**
  * Return only the records in the receiver's store whose signature verifies under the SENDER's
@@ -25,10 +26,28 @@ function verifiedRecords(registry, storeOpts) {
   const all = listByReceiver(storeOpts);
   const out = [];
   for (const rec of all) {
-    if (!rec || typeof rec.sig !== 'string' || typeof rec.record_id !== 'string') continue;
+    if (!rec || typeof rec.record_id !== 'string') {
+      // defensive: listByReceiver already filters null / bad-record_id rows, so this is unreachable
+      // in practice — a genuinely corrupt row if it ever appears (integrity).
+      refuseAlert('malformed-record-in-store', { class: 'integrity', record_id: rec && rec.record_id });
+      continue;
+    }
+    if (typeof rec.sig !== 'string') {
+      // a content-valid but UNSIGNED record — a normal fail-closed drop (the sender did not sign);
+      // most likely a producer MISCONFIG, NOT tamper. Kept out of the `integrity` (tamper) stream.
+      refuseAlert('unsigned-record', { class: 'misconfig', sender: rec.src_persona_did, record_id: rec.record_id });
+      continue;
+    }
     const pub = lookupPublicKey(registry, rec.src_persona_did);
-    if (!pub) continue; // unregistered sender — no key to verify against → contributes 0 (fail-closed)
+    if (!pub) {
+      // unregistered sender — no key to verify against → contributes 0 (fail-closed, unchanged).
+      // Likely a MISCONFIG (a legit sender not yet registered / a trust-anchor gap); operator triages.
+      refuseAlert('unregistered-sender', { class: 'misconfig', sender: rec.src_persona_did, record_id: rec.record_id });
+      continue;
+    }
     if (verifyRecordSig(rec.record_id, rec.sig, { publicKeyPem: pub })) out.push(rec);
+    // a stored record whose sig does NOT verify under the registered key is a forgery attempt (ATTACK).
+    else refuseAlert('sig-verify-failed', { class: 'attack', sender: rec.src_persona_did, record_id: rec.record_id });
   }
   return out;
 }
