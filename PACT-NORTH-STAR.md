@@ -102,6 +102,19 @@ gated only by disjoint, human-accountable evidence.* The build amended the *exec
     The only move that HARDENS remains the LIVE RUN: provision the VM -> walk the runbook L0-L4 -> `legs.json`
     verdict -> the honesty VALIDATE on the evidence (one axis, one box, one run; the hypervisor / same-uid-oracle /
     R3 residuals stay OPEN). Until that run, NOTHING in the heap-read leg has hardened (NS-9).
+12. **▶ 2026-07-01 — THE LIVE RUN HAPPENED: the heap-read axis HARDENED one axis (supersedes point 11's "not
+    yet run" status).** On a `multipass` Ubuntu 24.04 / kernel 6.8.0-124 VM under `ptrace_scope=2`, the signing
+    key was proven non-exfiltrable from the RUNNING broker's memory across BOTH the cross-uid (attacker 1001)
+    AND same-uid (pactbroker 999) boundaries — real `ptrace_may_access` kernel enforcement, non-vacuous (the L3
+    root-`gcore` positive control FOUND the PEM at the target pid), out-of-band attested (operator 1000, key
+    owner 999, cross-uid read denied). Verdict 24/24 PASS, `vacuous: false`, attested exit 0. Full evidence +
+    the honesty-VALIDATE ceiling: `docs/deployment/r-heap-run-2026-07-01.md`. **This HARDENS (OQ-NS-6: real
+    out-of-band kernel enforcement), it does not narrow** — the 4th custody signal and the FIRST on Linux
+    scope=2. HONEST CEILING (one box, one run, one axis): does NOT close the same-uid ORACLE (R2), the
+    hypervisor/root boundary (root CAN read — L3 shows it), R3, or the apex; config-conditional; the same-uid
+    axis is single-factor (scope=2 + no `PR_SET_PTRACER`, no uid-separation fallback). VALIDATE board
+    (code-reviewer + hacker LIVE-probe + honesty-auditor) folded; the runbook's key-dir mode (0700 -> 0755) +
+    the apport `core_pattern`-on-boot gotcha are fixed in the same pass.
 
 ## §3 Invariants that must never drift (the current load-bearing set)
 
