@@ -86,6 +86,16 @@ test('identity/ never imports trust or grounding (it sits BELOW trust — trust/
   assert.deepEqual(bad, [], 'identity/ reverse edge(s): ' + bad.join(', '));
 });
 
+test('independence/ is a pure leaf — imports no upper PACT layer (P5-W0 arming tripwire, plans/28)', () => {
+  // plans/28 P5-W0 (plans/27 §5 critique HIGH #1): independence appeared only as a banned TARGET
+  // (lib:62 / audit:67); no SOURCE-ban existed, so a future independence/arming.js reaching UP into
+  // identity/ or trust/ would have passed silently. Armed BEFORE any arming code exists. The ban list
+  // omits lib (independence may legally reach the floor) and scope (foundational); audit is banned
+  // for leaf-to-leaf symmetry (audit already bans independence — neither leaf may import the other).
+  const bad = offenders('independence', ['trust', 'grounding', 'identity', 'frame', 'atms', 'audit']);
+  assert.deepEqual(bad, [], 'independence/ reverse edge(s): ' + bad.join(', '));
+});
+
 test('grounding/ is a sink — no lower layer imports it', () => {
   const bad = [];
   for (const layer of ['lib', 'atms', 'trust', 'identity', 'frame', 'scope', 'independence', 'audit']) {
