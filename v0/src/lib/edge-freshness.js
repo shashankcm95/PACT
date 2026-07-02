@@ -13,6 +13,15 @@
 // removes the key from the host's reach (plans/30 §4, the #273 family). It does NOT eliminate replay: true one-shot
 // enforcement (a consume-on-first-use nonce store) is DEFERRED to the W2 consumer (hacker H2).
 //
+// W0-DISPOSITION (plans/35 W1 -- architect design-exploration + USER-ratified): computeEdgeFreshnessBasis +
+// verifyFreshEdge (the separate basis-SIGN + verify-the-basis-sig half) are DORMANT / NO CURRENT CONSUMER. The
+// Option-A signed-edge design binds freshness INSIDE the frame body, so the frame's EXISTING sig over record_id
+// (frame.js:60) + read-gate's verifyRecordSig authenticate the freshness fields -- only checkFreshnessWindow is
+// consumed (the future W2 read-gate predicate). The toolkit approvalSigBasis idiom OVER-transferred: egress's
+// approval was a SEPARATE object with no pre-existing sig, but a PACT edge IS a frame that already signs its
+// content-address. Retained (NOT deleted -- byte-lock caution) only against a hypothetical DETACHED-edge future (a
+// signed freshness tuple NOT inside a frame); flagged for a YAGNI removal review at arc-close.
+//
 // DOMAIN SEPARATION (architect M-1 -- defense-in-depth, NOT collision-closure): this basis is ed25519-over-a-
 // 64-hex signed by the SAME signRecordId as a frame record_id, a sigma_root binding, and (once wired) an edge sig
 // -- a cross-protocol signature-reuse surface. The `_type` tag domain-separates the HONESTLY-produced preimage so
@@ -147,6 +156,7 @@ module.exports = {
   EDGE_FRESHNESS_TYPE,
   DEFAULT_TTL_MS,
   MIN_NONCE_LEN,
+  isValidNonce,          // W1 (plans/35): exported so signed-edge reuses the ONE nonce floor (DRY, no re-impl).
   computeEdgeFreshnessBasis,
   checkFreshnessWindow,
   verifyFreshEdge,
