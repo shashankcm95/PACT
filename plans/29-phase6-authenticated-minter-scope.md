@@ -1,6 +1,6 @@
 ---
 lifecycle: persistent
-status: SCOPING -- awaiting USER go-ahead
+status: SCOPED -- USER decision DESIGN-ONLY (2026-07-01, section 8); no live crypto until a real cross-uid signing deployment
 plan: 29
 created: 2026-07-01
 supersedes: none
@@ -388,6 +388,24 @@ the ed25519 leaf, sync in the SAME wave.
    USER awareness). Both slot into read-gate uniformly (LENS A). A new type/field extends
    `record-schema.json` required[] and must respect the CONTEST at-most-one-target discriminant
    (record.js:160-164). Defer to build, or decide now?
+
+## §8-decision -- USER ruling (2026-07-01)
+
+**Decision 1 (build depth): DESIGN-ONLY -- Option B.** This doc IS the Phase-6 deliverable. NO live crypto
+(no W0/W1/W2 build) until a real cross-uid signing deployment is scheduled. Rationale: the SHADOW template
+would HARDEN nothing until that deploy (section 4/5), so building it now only accretes maintenance surface
+for a dark mechanism ahead of its unlock -- the tree stays lean and the template (sections 3/6) is fully
+specified, ready to build on deploy day. This resolves decision 3 (sequencing) by implication: HELD until a
+deployment is on the calendar.
+
+**Decision 2 (the eventual signer): DEFERRED to the deploy event.** The broker VEHICLE is reusable
+(section 4d); which signer to wire is a deploy-day call, not needed now.
+
+**Decision 4 (new edge TYPE vs freshness field): DEFERRED to the build.** A W1 design call; not decided now
+(there is no W1 under the design-only ruling).
+
+**Net:** Phase 6 is COMPLETE as a scoping/design artifact. The borrow arc (Phases 1-6) is fully scoped; the
+provenance HARDEN is a separate, un-scheduled operator-run deploy event, explicitly out of this arc.
 
 ## §9 Charter corrections summary (the LENS wins over `plans/27`)
 
