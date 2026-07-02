@@ -308,3 +308,20 @@ problem.
    (plans/30:236-238); a custody-hardened broker key is only meaningful once the registry binding is anchored.
    Recommended: resume plans/30 only after the registration-provenance HARDEN (not merely the narrowing leaf)
    lands, so they land coherent.
+
+## USER decisions (2026-07-02)
+
+1. **Scope: NARROW leaf now + scope the sigma_root HARDEN as apex.** Build the free in-process narrowing (option v:
+   did:key self-cert + first-writer immutability) as a SHADOW W0 leaf NOW -- labelled NARROW, closes key-swap (b),
+   does NOTHING against self-register/Sybil/root-spoof (those need the sigma_root HARDEN + U1). Scope the
+   world-anchored sigma_root HARDEN (option i+iv) as the apex; its deploy/attestation is a separate later go-ahead.
+2. **Arc coupling: keep the root-key custody SEPARATE from plans/30's broker-persona custody.** They anchor
+   different bindings (the root authorizes personas; the broker signs edges). Share the deploy MECHANISM if useful,
+   but scope them as distinct arcs. Resume plans/30 only AFTER the registration-provenance HARDEN lands (Open
+   Decision 5, recommended), so the two land coherent.
+3. **Sequencing (follows from 1+2):** W0 narrow leaf (now) -> sigma_root HARDEN scope+build (apex, needs the
+   operator attestation) -> resume plans/30 (broker-signing) -> the composed whole. The bootstrap chicken-and-egg
+   (Open Decision 2) is the sigma_root build's load-bearing tension, deferred to that wave.
+
+**NEXT: W0 -- the SHADOW in-process narrowing leaf** (did:key self-cert + first-writer immutability + a SHADOW
+registration verifier), its own plan -> VERIFY -> TDD -> VALIDATE -> PR. Labelled NARROW throughout (NS-9).
