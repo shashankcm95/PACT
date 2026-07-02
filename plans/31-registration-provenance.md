@@ -268,6 +268,11 @@ problem.
 
 ## What this does NOT do (NS-9)
 
+- **The W0 immutability leaf INTRODUCES a NEW residual: FIRST-WRITER SQUATTING** (VALIDATE honesty HIGH). Freezing
+  the first registration means an attacker who pre-registers an UNCLAIMED DID under its own binding permanently
+  denies it to the legit owner -- UNMITIGATED for opaque DIDs until did:key self-cert (well-formed did:key DIDs
+  resist it) or the `sigma_root` rotation path. A bounded cost knowingly traded for closing the always-open
+  key-swap; disclosed here, in `registry.js`'s docstring, and in a dedicated test -- never hidden.
 - Does NOT CLOSE registration-provenance in-process -- it can only NARROW. The world-anchored close is an out-of-
   band operator act (Probe 3-5 confirm every in-process boundary is relocatable, not eliminable).
 - Does NOT make "the edge proves WHO" true. Even a shipped `σ_root` HARDEN proves KEY-AUTHORIZATION only, and only
@@ -325,3 +330,30 @@ problem.
 
 **NEXT: W0 -- the SHADOW in-process narrowing leaf** (did:key self-cert + first-writer immutability + a SHADOW
 registration verifier), its own plan -> VERIFY -> TDD -> VALIDATE -> PR. Labelled NARROW throughout (NS-9).
+
+## W0 -- VALIDATE result (2026-07-02, first-writer immutability; did:key self-cert DEFERRED)
+
+**SHIPPED (this increment) = FIRST-WRITER IMMUTABILITY ONLY.** BUILT (TDD; the key-swap tests ran RED before the
+guard): `registerPersona` freezes an established persona's `(humanUid, publicKeyPem)` row -- identical re-register
+is an idempotent no-op, a differing re-register THROWS. Closes ATTACK (b) key-swap UNIVERSALLY (all DIDs, incl. the
+opaque ids `read-gate` uses). `custody-verify.js` CLI loader gains a DISTINCT `registry-immutability-violation`
+message (vs malformed-JSON). Stored row is `Object.freeze`d (defense-in-depth). 8 registry unit + 1 custody-verify
+integration test; suite 463/0; lint clean.
+
+**SCOPE DELTA (honesty MEDIUM + hacker LOW -- disclosed, not silent): did:key self-cert + the SHADOW verifier are
+DEFERRED, NOT delivered.** The plan's "recommended shape" listed both; this first increment ships immutability alone
+because did:key self-cert needs a hand-rolled base58btc/multicodec encoder (crypto-adjacent, error-prone) and bites
+ONLY well-formed did:key DIDs -- the fixtures use non-did:key placeholder ids, and `read-gate` keys on opaque DIDs
+today, so first-writer immutability is the higher-value, lower-risk key-swap close. did:key self-cert folds into the
+`sigma_root` apex wave (where it also gates first-registration honesty, resisting squatting for did:key DIDs).
+
+**NEW RESIDUAL this leaf INTRODUCES (honesty HIGH -- see "What this does NOT do"): FIRST-WRITER SQUATTING** -- an
+attacker pre-registering an unclaimed DID permanently denies it to the legit owner (UNMITIGATED for opaque DIDs
+until did:key self-cert / `sigma_root` rotation). A bounded cost traded for closing the always-open key-swap.
+
+**VALIDATE 3-lens (`wf_05b33c31-588`): code-reviewer SHIP-WITH-NITS · hacker SHIP-WITH-NITS (live-probed: the
+key-swap close has no false-negative bypass; the NARROW label is PROVEN accurate -- self-register (a)/Sybil (c)/
+root-spoof (d) still work exactly as claimed) · honesty CHANGES-REQUIRED -> all folded.** Folds: the custody-verify
+CLI error-distinction + test (code-rev HIGH); squatting disclosed in the code doc + a test + below (honesty HIGH);
+the scope-delta annotated here (honesty MEDIUM); `Object.freeze` + the threat-boundary comment (hacker LOW). INV-18
+"registry, never oracle" CONFIRMED preserved (a write-time integrity guard, not a read-time trust decision).
