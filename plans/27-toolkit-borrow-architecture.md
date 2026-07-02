@@ -336,3 +336,41 @@ exactly what the recon was run to prevent).
 migration paths recorded above): 4a's `loadPublicKey` default-FLIP (regresses live callers) and 4b's future
 `createMinter` new-LAYER (a design item — 4b is N/A as a leaf change). **Phases 1-4 (the low-risk borrow arc) are now
 COMPLETE; Phases 5-6 stay DARK (own scoping + explicit USER go-ahead).**
+
+## Phase-close sign-off — the WHOLE borrow arc (Phases 1-6), 2026-07-01
+
+**VERDICT: CLOSEABLE-WITH-NOTES.** A 3-lens phase-close board (`wf_d25ebcd4-249`) reviewed the INTEGRATED arc on
+merged main vs the per-phase exit criteria: **PM/honesty CLOSEABLE · Principal-SDE CLOSEABLE-WITH-NOTES ·
+Architect CLOSEABLE.** The arc closes as a coherent whole — PACT borrowed the toolkit's hardenings (observability,
+size-cap, arming shape, minter template) WITHOUT importing its coupling (no `emit-pr`, no `materialize`, no
+env-fallback); the NS-11 DAG stays acyclic + guarded; the two dormant forward-contracts (`isDeploySignalSet`,
+`armingCoherence`) are a clean deferral, protected by the whole-tree darkness tripwire.
+
+**As-merged, each exit criterion matches (PM, spot-checked against the tree):** Phase 1 emitter; Phase 2/2b both
+divergent size-cap strategies; Phase 3 conventions doc; Phase 4 reconciliation honestly downgraded to BOARD-GATED
+(not a false close); Phase 5 DARK arming (the darkness witness proven non-vacuous); Phase 6 design-only. The one
+CLOSED claim in the arc (the size-cap class) is a correctness close scoped precisely to the two attacker-plantable
+stores + re-labeled a read-robustness NARROW — the auditor independently enumerated every remaining `readFileSync`
+site to confirm no overclaim. All NS-2/NS-7/NS-9 labels honest; nothing NARROWED is reported CLOSED.
+
+**Findings folded at close:**
+- **[MEDIUM, Principal-SDE] Phase 0 (the transfer-provenance manifest EXTEND) was charted as a prerequisite but
+  never built** (`git log` on `v0/TRANSFER-PROVENANCE.md` = one pre-arc commit). The arc's three borrowed
+  primitives were never recorded in the manifest, and the proposed bidirectional CI check does not exist. FOLDED
+  (docs half): `v0/TRANSFER-PROVENANCE.md` now carries a "Borrow-arc transfers" section recording refuse-alert /
+  arm-flags / arming-coherence / the size-cap shape / the Phase-6 design-only entry, with borrow-direction + the
+  charter-correction seams. The cross-repo CI sha/vector-match check is a **NAMED RESIDUAL** (deferred; nothing in
+  1-6 depends on it; it would only bite a future canonical-json/ed25519 change — cross-repo CI infra, out of scope
+  for a design-only close).
+- **[LOW, Principal-SDE] stale status line** in `plans/28` (P5-W2 read as an open PR). FOLDED — refreshed to
+  ALL-MERGED (`c8c9790`).
+- **[LOW, PM] `node test/run.js` path** in the Phase-5 VALIDATE sections — verified CORRECT relative to repo root
+  (the runner is at `/test/run.js`, `TEST_DIR` defaults to `v0/test`); no change, noted as a point-of-use
+  re-probe reminder.
+- **[LOW, Architect] the byte-lock cross-repo discipline has no in-tree tripwire** — same root as the MEDIUM's CI
+  half; carried as the named residual above.
+
+**Arc disposition: the toolkit->PACT borrow arc (`plans/27`) is COMPLETE.** Phases 1-5 shipped (#25-#34); Phase 6
+is design-only (`plans/29`, #35). The one deferred residual (the cross-repo byte-lock CI) is recorded, not
+dropped. The provenance HARDEN (a deployed cross-uid signer signing live edges) is a separate, un-scheduled
+operator event, explicitly outside this arc.

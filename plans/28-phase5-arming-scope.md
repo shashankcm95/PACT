@@ -457,7 +457,7 @@ PACT workflow — when the Phase-6 signer lands, those FUTURE-contract labels mu
 
 ## Phase-5 status (2026-07-01)
 
-**P5-W0 + P5-W1 MERGED (#32, #33); P5-W2 OPEN as PR #34 (awaiting the USER merge gate).** With #34 the arming
+**P5-W0 + P5-W1 + P5-W2 ALL MERGED (#32 `4dbd177`, #33 `70e2a7b`, #34 `c8c9790`).** The arming
 HARNESS is mechanism-complete + DARK: a fully-DI both-or-neither coordination primitive + the single-arming-source
 parse leaf + the asymmetric deployed-signal predicate + a non-vacuous darkness witness. **Nothing arms** — the named
 gate surface (`convert.actionable`) stays U2-blocked; the signing arm awaits Phase 6. Phase 6 (the authenticated
