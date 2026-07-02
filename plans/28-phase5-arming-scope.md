@@ -375,3 +375,42 @@ This doc ships as its own docs PR (the Phase-3 precedent); P5-W0 ships as a sepa
 | 7 | Critique HIGH #2: name the REAL gate surface (`mayGate` unconsumed + receiver-agnostic; `convert.actionable` hardcoded false + U2-blocked) | ADDRESSED in §3 (primary `convert.actionable`, secondary `mayGate`-as-witness, U2 dependency LOUD) |
 | 8 | Everything ships DARK; NS-9 forbids reporting narrowed as hardened | ADDRESSED in §6 "What this does NOT do" + the honest-labeling header |
 | 9 | Doc is SCOPING only; build does not start; awaits USER go-ahead | ADDRESSED (§7 open decisions; RESOLVED by §8 — P5-W0 greenlit, W1+W2 gated) |
+
+---
+
+## P5-W0 — SHIPPED (2026-07-01, PR #32 merged `4dbd177`)
+
+The layering tripwire landed test-only, 10 lines; `audit` added to the ban list beyond the charter
+(leaf-to-leaf symmetry). NON-VACUITY proven live (a planted `independence->identity` probe went RED naming
+the exact offender, reverted GREEN). 413/0; CI green; pre-PR CodeRabbit CLI 0 findings (the PR bot was
+rate-limited on both #31/#32 — merged on CI + the CLI lens, the #11 precedent).
+
+## P5-W1 — VALIDATE result (2026-07-01, branch `feat/p5-w1-arming-source`; W1+W2 USER-greenlit)
+
+BUILT (TDD; the arm-flags tests ran RED before the leaf existed): NEW `v0/src/lib/arm-flags.js`
+(`parseEnabledFlag` hoisted VERBATIM from `request-auth.js`; `isDeploySignalSet` lenient/typo-fails-CLOSED,
+a labeled FORWARD-CONTRACT export for W2, UNCONSUMED in W1; `assessEnableFlag -> {enabled, misconfig}` with
+the misconfig refuse-alert, NO raw-token echo, never gates/throws) + `request-auth.js` delegates the strict
+parse + `broker-sign.js` single-reads REQUIRE_FRAME/PERSONA_DID at top-of-main and threads them (the real
+split-brain — the PERSONA_DID double-read — collapsed). 20 unit tests (incl. the mandatory typo/garbage fuzz
++ the named ASCII-trim-divergence tripwire) + 3 broker integration legs (shape-tripwire; live `'ture'`-typo
+decision-unchanged+alert on a REAL spawned broker; legacy no-alert). 436/0; eslint clean.
+
+**Pre-build VERIFY (2-lens, `wf_528a3da9-286`): architect + hacker both SOUND-WITH-CHANGES, 0 CRIT/HIGH.**
+Key folds: `assessEnableFlag` returns NO `deploySignal` field (an enable flag must never carry the lenient
+semantics — the hacker fold that reshaped the API); structured-field alert assertions (a bare
+`includes('misconfig')` is vacuous); the ASCII-trim divergence is a NAMED load-bearing test; the
+forward-contract label on `isDeploySignalSet`; the legacy-no-alert leg.
+
+**Post-build VALIDATE (3-lens, `wf_4ac11ab6-5b4`): code-reviewer SHIP · hacker SHIP-WITH-NITS (live probes
+vs the BUILT modules + real broker spawns: all 5 attack vectors SAFE — no oracle reopen, no log injection
+[a newline-bearing flagName emits exactly ONE escaped line], no strict/lenient consumer divergence, no
+fail-OPEN garbage token, collapse decision-identical) · honesty-auditor SHIP.** Folded: the hacker NIT
+(`String(flagName)` evaluated outside `refuseAlert`'s try — a throwing `toString` broke the never-throws
+contract in a live probe; now a guarded coercion + a regression test) + the reviewer NIT (a drain-order
+comment: the assess call is a non-exiting write, safe before the stdin drain) + the honesty LOW folded into
+the PR body (the "byte-identical" claim scopes to the sign decision + stdout/exit contract; stderr
+deliberately gains ONE advisory line on a present-but-invalid flag — that line IS the feature).
+
+**Honest scope (NS-9):** parsing + observability only. Nothing arms, narrows, or hardens; `isDeploySignalSet`
+ships dormant (first consumer = W2's `armingCoherence`). The named gate surface stays U2-blocked (§3).

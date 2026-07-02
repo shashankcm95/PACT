@@ -23,22 +23,15 @@
 'use strict';
 
 const { computeRecordId } = require('../lib/record');
+const { parseEnabledFlag } = require('../lib/arm-flags');
 
 // A presented body is bounded: a frame is small (persona did + payload). Beyond this is a DoS / not-a-frame
 // -> refuse WITHOUT parsing. broker-sign.js ALSO caps the stdin read at this bound (volume) plus a wall-clock
 // read deadline (time) -- a byte cap alone does not bound a slow-loris pipe.
 const MAX_FRAME_BYTES = 256 * 1024;
 
-// Strict flag parse: ONLY the literal '1' (after an ASCII-space/tab trim) enables; ONLY '0' disables;
-// ANY other value (incl. 'true'/'false'/'2'/'') returns null -> the caller falls to the default. NEVER
-// !!env -- '0' / 'false' / '  ' are all truthy strings, which would silently re-open the blind oracle.
-function parseEnabledFlag(raw) {
-  if (typeof raw !== 'string') return null;
-  const t = raw.replace(/^[ \t]+|[ \t]+$/g, '');
-  if (t === '1') return true;
-  if (t === '0') return false;
-  return null;
-}
+// The strict '1'/'0' flag parse was HOISTED to lib/arm-flags.js (plans/28 P5-W1 single-arming-source:
+// ONE definition; this module delegates). Semantics unchanged -- see the leaf's header.
 
 /**
  * Resolve whether require-frame mode is ON. DEFAULT-ON gated on PACT_BROKER_PERSONA_DID presence (Q5): on a
