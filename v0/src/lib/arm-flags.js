@@ -22,12 +22,21 @@
 
 const { refuseAlert } = require('./refuse-alert');
 
+// ASCII space/tab trim ONLY (see the header rationale: Unicode whitespace stays significant, so a
+// Unicode-padded token never collapses to a recognized one) -- the SINGLE source shared by all three
+// parses below, so the load-bearing trim semantics cannot silently drift apart on a future edit
+// (CodeRabbit #33 fold; the named divergence test guards the same property from the outside).
+function trimAscii(s) {
+  return s.replace(/^[ \t]+|[ \t]+$/g, '');
+}
+
 // Strict flag parse: ONLY the literal '1' (after an ASCII-space/tab trim) enables; ONLY '0' disables;
 // ANY other value (incl. 'true'/'false'/'2'/'') returns null -> the caller falls to the default. NEVER
 // !!env -- '0' / 'false' / '  ' are all truthy strings, which would silently re-open the blind oracle.
+// (Hoisted from request-auth.js; semantics hoist-identical, pinned by the unit suite.)
 function parseEnabledFlag(raw) {
   if (typeof raw !== 'string') return null;
-  const t = raw.replace(/^[ \t]+|[ \t]+$/g, '');
+  const t = trimAscii(raw);
   if (t === '1') return true;
   if (t === '0') return false;
   return null;
@@ -41,7 +50,7 @@ function parseEnabledFlag(raw) {
 function isDeploySignalSet(raw) {
   if (typeof raw === 'boolean') return raw;
   if (typeof raw !== 'string') return false;
-  const t = raw.replace(/^[ \t]+|[ \t]+$/g, '').toLowerCase();
+  const t = trimAscii(raw).toLowerCase();
   if (t === '') return false;                                          // unset
   if (t === '0' || t === 'false' || t === 'no' || t === 'off') return false; // explicit falsey
   return true;                                                         // truthy OR a typo => fail closed
@@ -61,7 +70,7 @@ function isDeploySignalSet(raw) {
  */
 function assessEnableFlag(flagName, raw) {
   const enabled = parseEnabledFlag(raw);
-  const present = typeof raw === 'string' && raw.replace(/^[ \t]+|[ \t]+$/g, '') !== '';
+  const present = typeof raw === 'string' && trimAscii(raw) !== '';
   const misconfig = present && enabled === null;
   if (misconfig) {
     // guarded coercion (VALIDATE-hacker fold): String(flagName) evaluates in THIS frame, outside
