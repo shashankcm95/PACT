@@ -43,7 +43,7 @@ test('precondition: the src/ enumeration is non-empty (else "nothing requires it
   assert.ok(allSrcFiles(SRC).length > 0, 'src enumeration empty -- the witness would disarm silently');
 });
 
-test('DORMANT: no src module requires edge-freshness (it is wired to nothing -- W0 arms nothing)', () => {
+test('DORMANT: edge-freshness is imported ONLY by the dormant signed-edge producer (W1 exact-set allowlist)', () => {
   const importers = allSrcFiles(SRC)
     .filter((f) => !/edge-freshness\.js$/.test(f))
     // match BOTH the bare `require('.../edge-freshness')` and the explicit `.js` form (CodeRabbit Major): a regex
@@ -51,7 +51,11 @@ test('DORMANT: no src module requires edge-freshness (it is wired to nothing -- 
     // VACUOUSLY when an importer uses the extension. `(?:\.js)?` closes the hole.
     .filter((f) => /require\(['"][^'"]*edge-freshness(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f));
-  assert.deepEqual(importers, [], 'edge-freshness must be imported by NOTHING in W0; found: ' + importers.join(', '));
+  // W1 UPDATE (plans/35): identity/signed-edge.js legitimately imports edge-freshness (isValidNonce/MIN_NONCE_LEN,
+  // DRY). It is the DELIBERATE one-entry allowlist -- signed-edge is ITSELF dormant (signed-edge-darkness-witness),
+  // so the "consumed by nothing LIVE" guarantee holds transitively. EXACT-SET (deepEqual, NEVER .includes): any
+  // OTHER importer -- especially a trust/grounding fold pulling checkFreshnessWindow -- goes RED, the intended signal.
+  assert.deepEqual(importers.sort(), ['identity/signed-edge.js'], 'edge-freshness must be imported ONLY by the dormant signed-edge producer; found: ' + importers.join(', '));
 });
 
 console.log(`\n[edge-freshness-darkness-witness] ${pass} passed, ${fail} failed`);
