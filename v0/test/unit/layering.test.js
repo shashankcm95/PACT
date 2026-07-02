@@ -96,6 +96,18 @@ test('independence/ is a pure leaf — imports no upper PACT layer (P5-W0 arming
   assert.deepEqual(bad, [], 'independence/ reverse edge(s): ' + bad.join(', '));
 });
 
+test('scope/ is a pure leaf — imports no upper PACT layer (plans/33 W2: closes the scope->trust darkness-witness seam)', () => {
+  // VALIDATE honesty MINOR (plans/33 W2): scope/ appeared only as a banned TARGET (lib:62 / audit:67 / grounding
+  // sink:101) and as an OMITTED source (the independence ban's comment calls scope "foundational"). No SOURCE-ban
+  // existed, so a future scope/*.js reaching UP into trust/admission-gate (or identity/registration-provenance)
+  // would wire the DARK gate live yet trip NEITHER the admission-gate require.cache witness (which scans
+  // trust/grounding/frame only) NOR any layering ban. scope.js imports nothing today; this arms the tripwire at
+  // the source-text level (caught even when the module is not required at test time). Omits lib (scope may reach
+  // the floor) per the independence-leaf precedent.
+  const bad = offenders('scope', ['trust', 'grounding', 'identity', 'frame', 'atms', 'independence', 'audit']);
+  assert.deepEqual(bad, [], 'scope/ reverse edge(s): ' + bad.join(', '));
+});
+
 test('grounding/ is a sink — no lower layer imports it', () => {
   const bad = [];
   for (const layer of ['lib', 'atms', 'trust', 'identity', 'frame', 'scope', 'independence', 'audit']) {
