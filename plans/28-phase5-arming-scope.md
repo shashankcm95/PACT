@@ -414,3 +414,51 @@ deliberately gains ONE advisory line on a present-but-invalid flag — that line
 
 **Honest scope (NS-9):** parsing + observability only. Nothing arms, narrows, or hardens; `isDeploySignalSet`
 ships dormant (first consumer = W2's `armingCoherence`). The named gate surface stays U2-blocked (§3).
+
+## P5-W2 — VALIDATE result (2026-07-01, branch `feat/p5-w2-arming-coherence`; W1+W2 USER-greenlit)
+
+BUILT (TDD; both W2 tests ran RED before the module existed): NEW `v0/src/trust/arming-coherence.js` —
+`armingCoherence({admissionArmed, signingArmed}) -> {admissionArmed, coherent, reason}` (PURE both-or-neither;
+BOTH params strict-coerced `=== true` before any derivation) + `armingDecision(input)` (compute-then-EMIT, the
+intended consumer entry so a `coherent:false` is never silent; cause-keyed `refuseAlert`). Imports ONLY
+`../lib/refuse-alert`. NEW `arming-coherence.test.js` (15) + NEW `arming-darkness-witness.test.js` (3). Suite:
+`node test/run.js` -> **28 files, 454 passed, 0 failed, exit 0** (was 436; +18); eslint clean; layering green
+(trust->lib legal); the darkness witness proves ARMED == DARK (`mayGate` refuses, `convert.actionable` false)
+under full arming.
+
+**CHARTER CORRECTION #4 (fully-DI, NO new env var) — VERIFY-confirmed by BOTH lenses.** The toolkit's
+`armingCoherence` reads one real deployed flag (`LOOM_WORLD_ANCHOR_ARM`) because it OWNS one + has two live
+consumers that must not split-brain. PACT owns NO live arm flag (its world-anchored signer is Phase 6,
+DARK/unbuilt) and has ZERO consumers, so a new `PACT_*` admission env var would be a consumed-by-nothing
+runtime read (a fail-open confusion surface, worse than W1's labeled forward-contract). PACT reads zero flags;
+both arms are injected. This supersedes the plan-prose "sole-reader-of-one-flag" (§5) — the probed reality wins.
+
+**Pre-build VERIFY (2-lens, `wf_b04dcc73-79c`): architect + hacker both SOUND-WITH-CHANGES.** Folds: correction #4
+adopted; BOTH params strict-coerced (HIGH — a fully-DI port must defend both, not just the sibling); the
+darkness witness made NON-VACUOUS (hacker CRITICAL — as first drawn it was a tautology, causally disconnected
+from the gates); `armingDecision` as the emit-bearing consumer entry (no silent fail-closed); the
+`signing-armed-without-admission` "legit staging" rationale reframed as a FUTURE contract (PACT has no signer to
+stage toward); cause-keyed (not reason-keyed) alert.
+
+**Post-build VALIDATE (3-lens, `wf_aef859a0-c48`): code-reviewer SHIP · hacker SHIP (live probes vs the BUILT
+module: darkness-witness non-vacuity CONFIRMED capable-of-RED; no non-boolean fakes armed/coherent; no silent
+fail-closed; reads no env; reason is a fixed enum) · honesty-auditor SHIP-WITH-NITS.** Folded: the hacker LOW
+(the structural dormancy tripwire scanned only 2 of 7 decision-shaped modules -> now a COMPUTED whole-tree scan
+of all `v0/src/**/*.js`, so wiring arming into ANY future gate goes RED) + the `armingDecision(input = {})`
+default-param symmetry NIT + the honesty prose NITs (mechanism-1 vs mechanism-2 division of labor; the
+byte-identical/stderr-emit scope note). **Scope of "byte-identical / DARK": the GATE DECISIONS (`mayGate`,
+`convert.actionable`) + the pure return struct; `armingDecision` intentionally emits ONE operator-side stderr
+line on an incoherent XOR — that alert is the observability feature, not a darkness violation.**
+
+**Honest scope (NS-9):** a DORMANT coordination primitive. Both arms are forward-contracts (neither flag exists;
+the admission arm awaits a real gate, the signing arm awaits the Phase-6 cross-uid signer). It arms nothing,
+narrows nothing, hardens nothing. The "legit staging" asymmetry is the intended FUTURE contract, NOT a live
+PACT workflow — when the Phase-6 signer lands, those FUTURE-contract labels must flip to live (status-decay rule).
+
+## Phase-5 status (2026-07-01)
+
+**P5-W0 + P5-W1 + P5-W2 all SHIPPED** (W0 #32, W1 #33, W2 pending PR). The arming HARNESS is
+mechanism-complete + DARK: a fully-DI both-or-neither coordination primitive + the single-arming-source parse
+leaf + the asymmetric deployed-signal predicate + a non-vacuous darkness witness. **Nothing arms** — the named
+gate surface (`convert.actionable`) stays U2-blocked; the signing arm awaits Phase 6. Phase 6 (the authenticated
+cross-uid minter) stays DARK/design-only, its own scoping + go-ahead.
