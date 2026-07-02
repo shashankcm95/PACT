@@ -30,6 +30,7 @@ const fs = require('fs');
 const { isHex64, signRecordId } = require('../lib/edge-attestation');
 const { authorizeCaller } = require('./caller-auth');
 const { authorizeRequest, resolveRequireFrame, MAX_FRAME_BYTES } = require('./request-auth');
+const { assessEnableFlag } = require('../lib/arm-flags');
 
 // Bounded + DEADLINED stdin read (R2-WHAT frame channel). A byte cap bounds VOLUME; the deadline bounds TIME
 // (a directly-invoked broker on a never-EOF slow-loris pipe would otherwise hang forever -- fs.readFileSync(0)
@@ -65,10 +66,19 @@ async function main() {
   // R2-WHAT require-frame mode (plans/11). DEFAULT-ON gated on PACT_BROKER_PERSONA_DID presence: on a box
   // that opted into R2-WHAT (persona-did set), a DROPPED PACT_BROKER_REQUIRE_FRAME env fails CLOSED (ON),
   // never silently reopens the blind oracle. Strict '1'/'0' flag parse (resolveRequireFrame; never !!env).
-  const requireFrame = resolveRequireFrame({
-    requireFrameRaw: process.env.PACT_BROKER_REQUIRE_FRAME,
-    brokerPersonaDid: process.env.PACT_BROKER_PERSONA_DID,
-  });
+  //
+  // P5-W1 single-arming-source (plans/28): each arm-relevant env var is read from process.env EXACTLY ONCE,
+  // here, and THREADED to every consumer (the former PERSONA_DID double-read at the authorizeRequest call is
+  // collapsed). The READS stay in this broker process (host-untamperable per the root-owned wrapper model);
+  // the PARSE lives in lib/arm-flags. assessEnableFlag is OBSERVABILITY ONLY -- a present-but-invalid
+  // REQUIRE_FRAME token (e.g. 'ture', 'false') emits an operator-side misconfig alert; the DECISION below is
+  // unchanged (strict '1'/'0', else the persona-presence default -- exactly resolveRequireFrame's contract).
+  // assessEnableFlag never throws and never exits -- safe BEFORE the stdin drain below (the drain-first
+  // rule guards EXIT-capable gates; a pure stderr write cannot EPIPE the host's input write).
+  const requireFrameRaw = process.env.PACT_BROKER_REQUIRE_FRAME;
+  const brokerPersonaDid = process.env.PACT_BROKER_PERSONA_DID;
+  assessEnableFlag('PACT_BROKER_REQUIRE_FRAME', requireFrameRaw);
+  const requireFrame = resolveRequireFrame({ requireFrameRaw, brokerPersonaDid });
 
   // In require-frame mode the caller presents the frame PREIMAGE body on stdin. DRAIN it FIRST -- before any
   // gate that can process.exit -- so the host's execFileSync `input:` write always completes (else the host
@@ -99,7 +109,7 @@ async function main() {
     requireFrame,
     claimedRecordId: process.argv[2],
     presentedBodyRaw,
-    brokerPersonaDid: process.env.PACT_BROKER_PERSONA_DID,
+    brokerPersonaDid, // the single top-of-main read, threaded (never a second process.env fetch)
   });
   if (req.decision === 'deny') fail('request not authorized');
   if (req.decision === 'disabled') {

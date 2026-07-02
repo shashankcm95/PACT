@@ -415,6 +415,42 @@ test('R2-WHAT: legacy mode (no persona, no flag) STILL signs the argv hex + LOUD
   assert.match(r.stderr, /per-request-auth DISABLED \(require-frame off\)/);
   w.cleanup();
 });
+
+// ====================== P5-W1: single-arming-source + misconfig observability (plans/28) ======================
+
+test('P5-W1 single-arming-source: broker-sign.js reads each arm env var EXACTLY once (mechanical shape-tripwire, NOT the enforcement -- the live legs below are the behavioral proof)', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'identity', 'broker-sign.js'), 'utf8');
+  // anchored to the full process.env.<NAME> token so prose mentions of the bare var name don't inflate
+  // the count (the header comments name these vars without the prefix). An alias/destructure read would
+  // evade this grep -- it is a cheap author-mistake tripwire; the live spawn legs are the real proof.
+  for (const v of ['PACT_BROKER_PERSONA_DID', 'PACT_BROKER_REQUIRE_FRAME']) {
+    const n = (src.match(new RegExp('process\\.env\\.' + v, 'g')) || []).length;
+    assert.equal(n, 1, v + ' must be read from process.env exactly once (found ' + n + ')');
+  }
+});
+
+test('P5-W1: REQUIRE_FRAME="ture" (operator typo) + persona set -> decision UNCHANGED (default-ON still signs a valid frame) + the misconfig alert on stderr (non-vacuous on the REAL path)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const b = frameBody(w.ME);
+  const rid = computeRecordId(b);
+  const r = runFrame({ keyFile: me.keyFile, persona: w.ME, requireFrame: 'ture', recordId: rid, body: JSON.stringify(b) });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(verifyRecordSig(rid, r.stdout.trim(), { publicKeyPem: me.kp.publicKeyPem }), 'still signs: the typo falls to the persona-presence default (ON); the decision path is unchanged');
+  assert.match(r.stderr, /\[PACT-REFUSE-ALERT\] \{.*"class":"misconfig".*"reason":"arm-flag-misconfig"/, 'the misconfig alert is observable operator-side');
+  assert.doesNotMatch(r.stderr, /ture/, 'the raw token is never echoed');
+  w.cleanup();
+});
+
+test('P5-W1: legacy box (no persona, no flag) emits NO [PACT-REFUSE-ALERT] line (the alert delta is CONFINED to a present-but-invalid flag)', () => {
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const r = spawnSync(process.execPath, [BROKER, RID], { env: { PACT_BROKER_KEY_FILE: me.keyFile }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /PACT-REFUSE-ALERT/, 'no alert on the legacy path (unset flag is legal, not a misconfig)');
+  w.cleanup();
+});
+
 test('R2-WHAT FULL SEAM: buildFrame -> brokerSigner presents the body -> receiveFrame ACCEPTS', () => {
   const w = freshWorld();
   const me = w.personas[w.ME];
