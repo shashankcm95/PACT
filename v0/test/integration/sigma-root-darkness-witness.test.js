@@ -44,11 +44,14 @@ test('(A) STRUCTURAL: no live-fold module (trust/grounding/frame) pulls a W1 mod
   // HIGH-2). And inspect the ACTUAL resolved require.cache GRAPH, not a textual grep -- immune to a string-built
   // / obfuscated require path a regex would miss (VALIDATE code-reviewer HIGH). This test file itself requires
   // NEITHER W1 module, so any W1 key in require.cache after loading the fold means a fold module pulled it in.
+  // EXCLUDE admission-gate.js (plans/33 W2): it is the PERMITTED dormant consumer of registration-provenance
+  // (the armed gate composes the W1 verifier), and is ITSELF wired to nothing -- proven by
+  // admission-gate-darkness-witness. Any OTHER trust/grounding/frame module pulling a W1 module in -> RED.
   const foldFiles = [
     ...jsFilesUnder(path.join(SRC, 'trust')),
     ...jsFilesUnder(path.join(SRC, 'grounding')),
     ...jsFilesUnder(path.join(SRC, 'frame')),
-  ];
+  ].filter((f) => !/[/\\]admission-gate\.js$/.test(f));
   assert.ok(foldFiles.length >= 9, 'sanity: found the live-fold modules incl. frame/ (' + foldFiles.length + ')');
   for (const f of foldFiles) require(f);
   const leaked = Object.keys(require.cache).filter((p) => /[/\\]identity[/\\](sigma-root|registration-provenance)\.js$/.test(p));

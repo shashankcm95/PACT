@@ -65,24 +65,29 @@ test('ARMED == DARK (convert.actionable): full arming does NOT flip actionable',
   assert.equal(out.actionable, false, 'convert.actionable stays false under full arming (INV-16, U2 open)');
 });
 
-test('STRUCTURAL dormancy tripwire: NO src module imports the arming primitive (whole-tree; the durable "arms nothing")', () => {
+test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dormant admission-gate (its first + only consumer)', () => {
   // COMPUTED whole-tree scan, not a hardcoded pair (VALIDATE-hacker LOW: 5 other decision-shaped trust
-  // modules exist; a future edit wiring arming into read-gate/issuance-policy/... must go RED too, not
-  // just the two witnessed gates). Anchored to a require() call so a prose mention cannot false-fail.
-  // When a future wave legitimately wires arming into a gate, THIS going RED is the intended
-  // deliberate-update signal (never silently broaden the allowlist).
-  const offenders = [];
+  // modules exist; a future edit wiring arming into read-gate/issuance-policy/... must go RED too). Anchored to
+  // a require() call so a prose mention cannot false-fail.
+  //
+  // W2 UPDATE (plans/33): admission-gate.js is arming-coherence's FIRST consumer -- it is the DELIBERATE
+  // allowlist entry the original comment anticipated ("when a future wave legitimately wires arming into a gate,
+  // THIS going RED is the intended deliberate-update signal; never silently broaden the allowlist"). The
+  // allowlist has EXACTLY one entry, and admission-gate is ITSELF DARK (wired to nothing -- proven by
+  // admission-gate-darkness-witness), so the "arms nothing" guarantee holds transitively. ANY OTHER importer,
+  // or admission-gate being wired into a live gate, goes RED.
+  const importers = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
       const fp = path.join(d, e.name);
       if (e.isDirectory()) walk(fp);
       else if (e.name.endsWith('.js') && e.name !== 'arming-coherence.js') {
-        if (/require\(['"][^'"]*arming-coherence['"]\)/.test(fs.readFileSync(fp, 'utf8'))) offenders.push(path.relative(SRC, fp));
+        if (/require\(['"][^'"]*arming-coherence['"]\)/.test(fs.readFileSync(fp, 'utf8'))) importers.push(path.relative(SRC, fp));
       }
     }
   };
   walk(SRC);
-  assert.deepEqual(offenders, [], 'src module(s) wiring arming into a gate: ' + offenders.join(', '));
+  assert.deepEqual(importers.sort(), ['trust/admission-gate.js'], 'arming-coherence must be imported ONLY by the dormant admission-gate; found: ' + importers.join(', '));
 });
 
 console.log(`\n[arming-darkness-witness] ${pass} passed, ${fail} failed`);
