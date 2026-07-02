@@ -88,8 +88,9 @@ the env/file key and calls `signRecordId` directly. The HARDEN removes EACH leg 
 | **Register an attacker persona + self-sign under it (the READ side)** | **NOT CLOSED by this arc** -- `read-gate` keys on the host-writable registry, which makes no provenance claim | the #273 family / U1 -- SEPARATE anchor (`registry.js:22-29`, `read-gate.js:41`) |
 
 With the FIRST FOUR legs composed and the broker signing a LIVE VOUCH/CONFIRM edge, an edge claiming the BROKER'S
-persona in `read-gate.verifiedRecords` genuinely came from the broker's key-holder (the cross-uid process) -- the
-broker persona's KEY-CUSTODY is world-anchored (PROVENANCE OF THE KEY), not merely integrity. **This is the first
+persona in `read-gate.verifiedRecords` only proves the registry-mapped key signed it (CodeRabbit #37 Major: not that
+the broker persona is the durable source once the host-writable mapping can move -- that is exactly the plans/31
+gap) -- the broker persona's KEY-CUSTODY is world-anchored (PROVENANCE OF THE KEY), not merely integrity. **This is the first
 world-anchored key-custody signal on a trust-graph edge.** But the FIFTH leg stays OPEN: the host can self-register a
 DIFFERENT persona and sign authentic edges under it (that is R3/U1, not broker-key compromise), and the registry
 binding "DID P -> pubkey K" is itself host-writable -- so "the edge proves WHO" is FALSE in general; only "the
