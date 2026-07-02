@@ -97,5 +97,54 @@ test('the existing input-validation throws are preserved (empty fields)', () => 
   assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:z', humanUid: 'h', publicKeyPem: '' }), /publicKeyPem required/);
 });
 
+// ===================== plans/32 W1: the root-key model (registerRoot / lookupRootKey) =====================
+
+const ROOT_KEY_A = '-----BEGIN PUBLIC KEY-----\nAAA-root-key-A\n-----END PUBLIC KEY-----';
+const ROOT_KEY_B = '-----BEGIN PUBLIC KEY-----\nBBB-root-key-B\n-----END PUBLIC KEY-----';
+
+test('registerRoot: records a root key + is looked up per-root (no ambient default)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_A });
+  assert.equal(reg.lookupRootKey(r, 'human:alice'), ROOT_KEY_A);
+  assert.equal(reg.lookupRootKey(r, 'human:nobody'), null, 'no ambient default -- unknown root -> null');
+});
+
+test('registerRoot first-writer immutability: identical re-seed is a no-op; a conflicting re-seed THROWS', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_A });
+  assert.doesNotThrow(() => reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_A }), 'idempotent re-seed');
+  assert.throws(
+    () => reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_B }),
+    /immutable|already registered|root-key/i,
+    'root-key squatting / swap on an established root must throw (first-writer-wins)',
+  );
+  assert.equal(reg.lookupRootKey(r, 'human:alice'), ROOT_KEY_A, 'the ORIGINAL root key survives the rejected swap');
+});
+
+test('F3: registerRoot does NOT add to the live-gated roots Set (single-writer preserved -- isKnownRoot only via registerPersona)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_A });
+  assert.equal(reg.isKnownRoot(r, 'human:alice'), false, 'a seeded-but-persona-less root is NOT frame-admissible (roots Set untouched)');
+  assert.equal(reg.lookupRootKey(r, 'human:alice'), ROOT_KEY_A, 'but its root key IS recorded');
+});
+
+test('M1 type-gate: registerRoot rejects non-string / empty fields ([] and {} pass a bare truthiness test)', () => {
+  const r = reg.createRegistry();
+  assert.throws(() => reg.registerRoot(r, { humanUid: [], rootPublicKeyPem: ROOT_KEY_A }), /string|required/i, 'array humanUid rejected');
+  assert.throws(() => reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: {} }), /string|required/i, 'object root key rejected');
+  assert.throws(() => reg.registerRoot(r, { humanUid: '', rootPublicKeyPem: ROOT_KEY_A }), /string|required/i, 'empty humanUid rejected');
+  assert.throws(() => reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: '' }), /string|required/i, 'empty root key rejected');
+});
+
+test('additive: the root-key model does not disturb the existing persona functions', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: 'human:alice', rootPublicKeyPem: ROOT_KEY_A });
+  reg.registerPersona(r, { personaDid: 'did:key:zAlice', humanUid: 'human:alice', publicKeyPem: KEY_A });
+  assert.equal(reg.lookupPublicKey(r, 'did:key:zAlice'), KEY_A, 'persona key unaffected');
+  assert.equal(reg.rootOf(r, 'did:key:zAlice'), 'human:alice', 'rootOf unaffected');
+  assert.equal(reg.isKnownRoot(r, 'human:alice'), true, 'the persona registration is what makes it a known root');
+  assert.equal(reg.lookupRootKey(r, 'human:alice'), ROOT_KEY_A, 'the root key coexists');
+});
+
 console.log(`\n[registry] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
