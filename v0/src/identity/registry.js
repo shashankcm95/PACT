@@ -8,9 +8,10 @@
 
 'use strict';
 
-/** A fresh, empty registry. */
+/** A fresh, empty registry. `rootKeys` (plans/32 W1) is the spec `HumanRoot := {human_uid, K_root_pub}` model --
+ *  independent of the live-read `roots` Set + `personas` Map. */
 function createRegistry() {
-  return { roots: new Set(), personas: new Map() };
+  return { roots: new Set(), personas: new Map(), rootKeys: new Map() };
 }
 
 /**
@@ -77,4 +78,44 @@ function rootOf(reg, personaDid) {
   return p ? p.humanUid : null;
 }
 
-module.exports = { createRegistry, registerPersona, isKnownRoot, lookupPublicKey, rootOf };
+/**
+ * Seed a human root's PUBLIC key -- the spec `HumanRoot := {human_uid, K_root_pub}` (plans/32 W1). This is the
+ * anchor sigma_root verifies against. RECORDS only -- mints no trust (INV-18); the sigma_root check is a SEPARATE
+ * advisory verifier, never a registration reject here.
+ *
+ * FIRST-WRITER IMMUTABILITY (mirrors registerPersona's W0 guard): an identical re-seed is an idempotent no-op; a
+ * conflicting re-seed is REJECTED (the root key is IMMUTABLE, first-writer-wins).
+ *
+ * IT DELIBERATELY DOES NOT `roots.add` (VERIFY architect F3): `roots` -- the Set the LIVE fold reads at
+ * frame.js:94 (isKnownRoot / root_valid) -- stays SINGLE-WRITER (registerPersona), so seeding a root key adds NO
+ * new writer to a live-gated predicate. A seeded-but-persona-less root is NOT frame-admissible (correct: no
+ * persona under it => nothing to admit). `rootKeys` is fully independent of both live-read structures.
+ *
+ * NEW RESIDUAL this INTRODUCES (disclosed, NS-9): ROOT-KEY SQUATTING -- a same-uid attacker who seeds a `humanUid`
+ * before the operator does permanently binds it to the attacker's root key (strictly worse than persona squatting
+ * -- the root anchors EVERY persona under it). Mitigation is a deployment-ordering invariant, not a code fix: seed
+ * genesis roots in a CLEAN registry before any untrusted `registerRoot` access (plans/32 runbook step 3).
+ * @throws {TypeError} on a missing field, or a re-seed that would mutate an established root's key.
+ */
+function registerRoot(reg, { humanUid, rootPublicKeyPem }) {
+  if (typeof humanUid !== 'string' || !humanUid) throw new TypeError('humanUid required');
+  if (typeof rootPublicKeyPem !== 'string' || !rootPublicKeyPem) throw new TypeError('rootPublicKeyPem required');
+  const existing = reg.rootKeys.get(humanUid);
+  if (existing !== undefined) {
+    if (existing !== rootPublicKeyPem) {
+      throw new TypeError('registerRoot: root ' + humanUid + ' is already seeded with a DIFFERENT root key -- the root key is IMMUTABLE (first-writer-wins; a root-key swap/squat is refused). Seed genesis roots in a clean registry before untrusted access.');
+    }
+    return reg; // idempotent no-op
+  }
+  reg.rootKeys.set(humanUid, rootPublicKeyPem);
+  return reg; // NOTE: no roots.add (F3) -- roots stays single-writer for the live isKnownRoot gate
+}
+
+/** The seeded root PUBLIC key for a human root, or null. PER-ROOT (never a shared default -- mirrors
+ *  lookupPublicKey). Distinct from `isKnownRoot`: a persona-seeded root is "known" with a null root key. */
+function lookupRootKey(reg, humanUid) {
+  const k = reg && reg.rootKeys && reg.rootKeys.get(humanUid);
+  return k || null;
+}
+
+module.exports = { createRegistry, registerPersona, registerRoot, isKnownRoot, lookupPublicKey, lookupRootKey, rootOf };
