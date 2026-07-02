@@ -274,5 +274,21 @@ test('CLI arg guard: a value-flag followed by another flag exits 2 (does not swa
   assert.match(r.stderr, /--key requires a value/);
 });
 
+test('registry loader: a duplicate personaDid with a CONFLICTING binding exits 2 with a DISTINCT immutability-violation message (plans/31 W0, code-reviewer HIGH)', () => {
+  const { spawnSync } = require('child_process');
+  const CLI = path.resolve(__dirname, '../../src/identity/custody-verify.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cv-dupreg-')); _dirs.push(dir);
+  const registryFile = path.join(dir, 'personas.json');
+  // two rows for the SAME DID with DIFFERENT keys (a stale/merged/hand-edited duplicate)
+  fs.writeFileSync(registryFile, JSON.stringify([
+    { personaDid: 'did:key:zDup', humanUid: 'human:a', publicKeyPem: 'KEY-ONE' },
+    { personaDid: 'did:key:zDup', humanUid: 'human:a', publicKeyPem: 'KEY-TWO' },
+  ]));
+  const r = spawnSync(process.execPath, [CLI, '--key', '/x', '--persona', 'did:key:zDup', '--broker-user', 'b', '--wrapper', '/w', '--registry', registryFile], { encoding: 'utf8' });
+  assert.equal(r.status, 2, 'a conflicting-duplicate registry exits 2 (config error)');
+  assert.match(r.stderr, /registry-immutability-violation/, 'the message is DISTINCT from the malformed-JSON class');
+  assert.doesNotMatch(r.stderr, /malformed JSON/, 'not conflated with the parse-failure message');
+});
+
 console.log(`\n[custody-verify] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

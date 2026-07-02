@@ -243,11 +243,21 @@ function main() {
     process.exit(2);
   }
   let registry;
+  let entries;
   try {
-    const entries = JSON.parse(fs.readFileSync(o.registryFile, 'utf8'));
-    registry = createRegistry();
+    entries = JSON.parse(fs.readFileSync(o.registryFile, 'utf8'));
+  } catch (e) { process.stderr.write('custody-verify: cannot load registry (unreadable / malformed JSON): ' + (e && e.message) + '\n'); process.exit(2); }
+  registry = createRegistry();
+  try {
     for (const e of entries) registerPersona(registry, e);
-  } catch (e) { process.stderr.write('custody-verify: cannot load registry: ' + (e && e.message) + '\n'); process.exit(2); }
+  } catch (e) {
+    // DISTINCT from the malformed-JSON class above (plans/31 W0, code-reviewer HIGH): first-writer immutability
+    // now rejects a registry.json with two CONFLICTING rows for the same personaDid (a stale/merged/hand-edited
+    // duplicate). Name it so an operator debugging exit 2 can tell 'your JSON is broken' from 'you have two
+    // rows for one DID -- dedup them'. Same exit 2 (a config error, not a failed custody check = exit 1).
+    process.stderr.write('custody-verify: registry-immutability-violation (a personaDid appears twice with a different binding -- dedup the registry.json): ' + (e && e.message) + '\n');
+    process.exit(2);
+  }
 
   const signer = crossUidBrokerSigner({ brokerUser: o.brokerUser, wrapperPath: o.wrapperPath, sudoPath: o.sudoPath });
   const report = verifyCrossUidCustody({ keyFile: o.keyFile, signer, registry, personaDid: o.personaDid, wrapperPath: o.wrapperPath });
