@@ -42,13 +42,18 @@ test('precondition: the src/ enumeration is non-empty (else "nothing requires it
   assert.ok(allSrcFiles(SRC).length > 0, 'src enumeration empty -- the witness would disarm silently');
 });
 
-test('DORMANT: no src module requires signed-edge (the freshness-edge producer is wired to nothing -- W1 mints nothing live)', () => {
+test('DORMANT: signed-edge is imported ONLY by the W3 mint harness (its FIRST + only src consumer -- W3 exact-set allowlist)', () => {
   const importers = allSrcFiles(SRC)
     .filter((f) => !/signed-edge\.js$/.test(f))
     // match BOTH the bare and the explicit `.js` form (the W0 CodeRabbit-Major lesson -- do not miss `.js` imports).
     .filter((f) => /require\(['"][^'"]*signed-edge(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f));
-  assert.deepEqual(importers, [], 'signed-edge must be imported by NOTHING in W1; found: ' + importers.join(', '));
+  // W3 UPDATE (plans/37): identity/mint-fresh-vouch.js is signed-edge's FIRST src consumer (it composes
+  // buildSignedVouchSpec -> createMinter -> mint). It is the DELIBERATE one-entry allowlist -- the harness is
+  // ITSELF dormant (mint-fresh-vouch-darkness-witness proves nothing in src requires IT either), so the "nothing
+  // LIVE mints via signed-edge" guarantee holds transitively. EXACT-SET (deepEqual, NEVER .includes): any SECOND
+  // consumer -- a live-path fold pulling the producer -- goes RED, the intended deliberate-update signal.
+  assert.deepEqual(importers.sort(), ['identity/mint-fresh-vouch.js'], 'signed-edge must be imported ONLY by the W3 mint harness; found: ' + importers.join(', '));
 });
 
 console.log(`\n[signed-edge-darkness-witness] ${pass} passed, ${fail} failed`);
