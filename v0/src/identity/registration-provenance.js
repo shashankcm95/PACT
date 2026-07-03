@@ -16,6 +16,11 @@ const { lookupPublicKey, lookupRootKey, rootOf } = require('./registry');
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 
+// The crypto-verify check id. Its LONE failure (R0-R2 pass, only R3 fails) is the "present-but-does-not-verify"
+// forgery shape the armed gates (admission-gate / registration-gate) key their integrity-vs-misconfig split on.
+// Exported as the single source of truth so a rename here can never silently desync a consumer's whitelist.
+const R3_VERIFIES = 'R3-verifies';
+
 /**
  * PURE verdict over caller-supplied fields. No I/O, no registry read. COMPUTES the crypto check from the
  * primitive (never trusts a pre-passed boolean -- the #273 lesson: verify the thing, don't read a self-asserted
@@ -47,7 +52,7 @@ function assessRegistrationProvenance(facts) {
 
   // R3 -- the load-bearing crypto check. verifySigmaRoot is itself fail-closed + never-throws.
   const r3 = r0 && r1 && r2 && verifySigmaRoot({ personaDid, publicKeyPem, controller, sigmaRoot, rootPublicKeyPem });
-  checks.push({ id: 'R3-verifies', status: r3 ? 'PASS' : 'FAIL', detail: r3 ? 'sigma_root verifies over the binding under the root key' : 'sigma_root does NOT verify (absent / tampered / wrong root key)' });
+  checks.push({ id: R3_VERIFIES, status: r3 ? 'PASS' : 'FAIL', detail: r3 ? 'sigma_root verifies over the binding under the root key' : 'sigma_root does NOT verify (absent / tampered / wrong root key)' });
 
   const sigmaRootChecksPassed = r3; // r3 already ANDs r0..r2; kept as the single source of the pass-leg
 
@@ -101,4 +106,4 @@ function assessRegistrationFromRegistry(reg, opts) {
   } catch { return failClosed('malformed registry or opts -- fail-closed'); }
 }
 
-module.exports = { assessRegistrationProvenance, assessRegistrationFromRegistry };
+module.exports = { assessRegistrationProvenance, assessRegistrationFromRegistry, R3_VERIFIES };

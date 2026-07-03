@@ -25,7 +25,7 @@
 'use strict';
 
 const { armingDecision } = require('./arming-coherence');
-const { assessRegistrationFromRegistry } = require('../identity/registration-provenance');
+const { assessRegistrationFromRegistry, R3_VERIFIES } = require('../identity/registration-provenance');
 const { refuseAlert } = require('../lib/refuse-alert');
 
 /**
@@ -116,7 +116,7 @@ function admissionDecision(input, policy = {}) {
   // WHITELIST, not an exclusion list (VALIDATE code-reviewer MED): "R3 alone failed" is the ONLY forgery shape.
   // An exclusion list (NOT R1 AND NOT R2) would mis-class an R0-binding + R3 failure as `integrity`, and would
   // need syncing with every future check id registration-provenance might add. A whitelist can never over-class.
-  const isForgery = failed.length === 1 && failed[0] === 'R3-verifies';
+  const isForgery = failed.length === 1 && failed[0] === R3_VERIFIES;
   refuseAlert('admission-rejected', { class: isForgery ? 'integrity' : 'misconfig', cause: 'sigma-root-unverified', persona: personaDid });
   return { admit: false, armed: true, reason: 'sigma-root-unverified', provenance: prov };
 }
