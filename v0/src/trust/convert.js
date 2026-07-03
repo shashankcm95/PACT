@@ -11,6 +11,7 @@
 'use strict';
 
 const { verifiedRecords } = require('./read-gate');
+const { filterFreshVouches } = require('./vouch-freshness');
 const { DISJOINT_PATHS_K } = require('./params');
 const { independenceLabel } = require('../independence/weak-flag');
 const { rootOf } = require('../identity/registry');
@@ -70,9 +71,16 @@ function maxVertexDisjointPaths(edges, src, sink) {
   return flow;
 }
 
-/** DISJOINT_PATHS(me, agent) — the structural vertex-disjoint path count over the vouch graph. */
+/**
+ * DISJOINT_PATHS(me, agent) — the structural vertex-disjoint path count over the vouch graph.
+ * W2 (plans/36): the sig-verified records pass through filterFreshVouches BEFORE the graph-build.
+ * DISARMED (no meCtx.freshness — every caller today) => identity pass-through, byte-identical. ARMED
+ * (meCtx.freshness={now,ttlMs}) => stale/no-freshness VOUCHes drop (the H1 authorization post-condition),
+ * NARROWING the advisory count (never gating — actionable stays false, NS-9). {now,ttlMs} are DEPLOY constants.
+ */
 function disjointPaths(meCtx, meDid, agentDid) {
-  const edges = buildVouchGraph(verifiedRecords(meCtx.registry, meCtx.storeOpts));
+  const verified = verifiedRecords(meCtx.registry, meCtx.storeOpts);
+  const edges = buildVouchGraph(filterFreshVouches(verified, meCtx && meCtx.freshness));
   return maxVertexDisjointPaths(edges, meDid, agentDid);
 }
 
