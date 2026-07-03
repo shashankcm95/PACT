@@ -43,7 +43,7 @@ test('precondition: the src/ enumeration is non-empty (else "nothing requires it
   assert.ok(allSrcFiles(SRC).length > 0, 'src enumeration empty -- the witness would disarm silently');
 });
 
-test('DORMANT: edge-freshness is imported ONLY by the dormant signed-edge producer (W1 exact-set allowlist)', () => {
+test('DORMANT: edge-freshness is imported ONLY by signed-edge + the disarmed vouch-freshness filter (W2 exact-set allowlist)', () => {
   const importers = allSrcFiles(SRC)
     .filter((f) => !/edge-freshness\.js$/.test(f))
     // match BOTH the bare `require('.../edge-freshness')` and the explicit `.js` form (CodeRabbit Major): a regex
@@ -51,11 +51,14 @@ test('DORMANT: edge-freshness is imported ONLY by the dormant signed-edge produc
     // VACUOUSLY when an importer uses the extension. `(?:\.js)?` closes the hole.
     .filter((f) => /require\(['"][^'"]*edge-freshness(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f));
-  // W1 UPDATE (plans/35): identity/signed-edge.js legitimately imports edge-freshness (isValidNonce/MIN_NONCE_LEN,
-  // DRY). It is the DELIBERATE one-entry allowlist -- signed-edge is ITSELF dormant (signed-edge-darkness-witness),
-  // so the "consumed by nothing LIVE" guarantee holds transitively. EXACT-SET (deepEqual, NEVER .includes): any
-  // OTHER importer -- especially a trust/grounding fold pulling checkFreshnessWindow -- goes RED, the intended signal.
-  assert.deepEqual(importers.sort(), ['identity/signed-edge.js'], 'edge-freshness must be imported ONLY by the dormant signed-edge producer; found: ' + importers.join(', '));
+  // W2 UPDATE (plans/36): trust/vouch-freshness.js is edge-freshness's SECOND consumer (it imports
+  // checkFreshnessWindow + isValidNonce, DRY). UNLIKE signed-edge (structurally dormant --
+  // signed-edge-darkness-witness), vouch-freshness IS wired into a live module (convert via disjointPaths), so
+  // the dormancy for its path is now BEHAVIORAL: disarmed-by-default => the filter is inert => byte-identical
+  // (proven by vouch-freshness-convert.test.js's disarmed==unfiltered assertion + the dpArmed<dpDisarmed
+  // non-vacuity precondition). EXACT-SET (deepEqual, NEVER .includes): any THIRD importer -- a grounding/read-gate
+  // fold pulling checkFreshnessWindow DIRECTLY into a live path (bypassing the disarmed filter) -- goes RED.
+  assert.deepEqual(importers.sort(), ['identity/signed-edge.js', 'trust/vouch-freshness.js'], 'edge-freshness must be imported ONLY by signed-edge + vouch-freshness; found: ' + importers.join(', '));
 });
 
 console.log(`\n[edge-freshness-darkness-witness] ${pass} passed, ${fail} failed`);
