@@ -31,7 +31,7 @@ edge, `operator-deploy-A.md` = the ordered sequence). This is the **record of ex
 
 `custody-verify.js` against the deployed broker, run as the host uid:
 
-```
+```text
 [PASS] C0-root       — not running as root (uid 1000)
 [PASS] C1-keypresent — key file present + non-empty (119 bytes)
 [PASS] C2-denied     — host read denied (EACCES) + key FILE owned by a DIFFERENT uid (999 != 1000)
@@ -55,7 +55,7 @@ live-edge signal below.
 A **freshness-bound VOUCH** minted through the cross-uid custody boundary (`crossUidBrokerSigner` -> `sudo -n -u
 pactbroker` -> the wrapper -> `broker-sign.js` reading the uid-999 key) via `mintFreshVouch`, then read back:
 
-```
+```text
 minted broker->target FRESHNESS-BOUND VOUCH via cross-uid signer  (ok=true)
 verifiedRecords total      = 2
 broker-attributed+verified = 1   (the broker edge verifies under the registered key)
