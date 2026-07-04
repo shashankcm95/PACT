@@ -64,7 +64,7 @@ an unanchored persona's records. This is the exact step plans/33's Sequencing na
 
 Pure, TOTAL (never-throws), disarmed-by-default -- the structural twin of `vouch-freshness.js`.
 
-```
+```text
 isArmed(regProvenanceOpts) -> boolean   (+ emits a misconfig alert on a PRESENT-but-malformed arm)
   Read regProvenanceOpts inside a try/catch (F3 -- a hostile-Proxy opts get-trap disarms-with-alert, never throws).
   DISARMED (silent, byte-identical -- the every-caller-today path) iff regProvenanceOpts is ABSENT (undefined/null).
@@ -99,7 +99,7 @@ FAILING sigma_root (R3 fails, R0-R2 pass -- the ONLY forgery shape, a whitelist 
 
 ## Wiring (`v0/src/trust/convert.js`, `disjointPaths` -- 2-line disarmed-inert diff)
 
-```
+```js
 const { filterAnchoredRecords } = require('./registration-gate');            // NEW require
 // inside disjointPaths, mirroring plans/36:117-126:
 const verified = verifiedRecords(meCtx.registry, meCtx.storeOpts);
@@ -247,3 +247,13 @@ verifier is live-in-the-graph but DISARMED (gates nothing) until the operator in
   forgery whitelist. (admission-gate.js is a plans/33 file touched only for this 1-line centralization.)
 
 Full suite 615/0 + eslint clean after the folds.
+
+**Async CodeRabbit (on PR #47) -- 2 trivial nitpicks; 1 folded, 1 DECLINED-with-reason:**
+- **MD040 (bare code fences in this plan) -> FOLDED:** tagged the module-shape fence `text` + the wiring fence `js`.
+- **"extract a shared `test/helpers/darkness-witness.js` for the importer-scan" -> DECLINED.** It cited the
+  `R3_VERIFIES` centralization as the parallel, but they are OPPOSITE cases: `R3_VERIFIES` is a shared DECISION VALUE
+  (a magic string whose drift silently changes a security CLASSIFICATION across modules -- centralizing PREVENTS
+  desync); the witness scan boilerplate is INDEPENDENT verification logic across 7 darkness-witness files -- sharing
+  it introduces a SINGLE POINT OF FAILURE (one bug in the shared scanner silently weakens all 7 security tripwires at
+  once). Self-contained witnesses are deliberate defense-in-depth (the intentional non-DRY of a security tripwire).
+  Also a 7-file repo-wide refactor, out of scope for this wave.
