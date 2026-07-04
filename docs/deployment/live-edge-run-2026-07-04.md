@@ -76,14 +76,18 @@ wrong key **drops**; the broker DID cannot be squatted).
   handle can self-register its OWN persona and sign authentic edges under it (equal own-persona standing — the 5th
   co-forge leg, `registry.js` threat boundary). Closing that needs the σ_root registration binding **AND** a
   consumer that privileges the broker persona — both OUT of this run.
-- **Gates nothing.** `convert(...).actionable` is hard-`false`, and the σ_root admission gate is **not wired into
-  the read-path** on this version (`read-gate.js` / `convert.js` never call `admissionDecision` — the "P1" wave is
-  not done). Arming σ_root here would be inert.
+- **Gates nothing.** `convert(...).actionable` is hard-`false`. The read-path σ_root FILTER
+  (`registration-gate.js` / `filterAnchoredRecords`, plans/39) IS wired into `convert.disjointPaths` but is
+  **disarmed by default** (no `meCtx.regProvenance` -> identity pass-through). Even ARMED it only **NARROWS** the
+  advisory disjoint-paths count — it never flips `actionable`, and it does not close the self-register leg. (The
+  separate `admissionDecision` reject-primitive, plans/33, is not wired; wiring it would gate no action either.)
 - **Does NOT close R3 / U1.** A legitimate holder of their own persona key still mints authentic records.
 - **"Still deployed" decays** — re-probe `kernel.yama.ptrace_scope`, `swapon --show`, `core_pattern` at each run.
 
 ## Follow-up (named, not done)
 
-The next real trust move on σ_root is **P1** — wiring `admissionDecision` into the live read-path — a code wave
-(plan -> VERIFY -> TDD -> VALIDATE -> PR -> redeploy), after which the genesis-root ceremony + the operator's A.3
-out-of-band attestation can actually gate, closing the "who minted" leg. See `sigma-root-deploy.md`.
+The read-path σ_root filter is **already built** (`registration-gate`, plans/39) — there is no code wave here. The
+remaining moves are the OPERATOR's, not a build: **arm** the filter (inject `meCtx.regProvenance={sigmaRoots}` +
+seed the root key), and perform the **A.3 out-of-band root-key attestation**. Even fully armed the filter only
+NARROWS the advisory count; only the A.3 attestation crosses SHADOW->hardened for the self-register leg. See
+`sigma-root-deploy.md` (§0 corrected).
