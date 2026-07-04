@@ -6,10 +6,17 @@
 // W1's headline claim is "SHADOW: gates no action, byte-identical live behavior." That claim must be WITNESSED
 // mechanically, not asserted in prose -- especially because registry.js (a module the LIVE fold imports) gains
 // new exports here. Two witnesses:
-//   (A) STRUCTURAL: no module under trust/** or grounding/** require()s sigma-root or registration-provenance.
+//   (A) CONTAINED-CONSUMERS (UPDATED plans/39): registration-provenance is imported by EXACTLY {admission-gate
+//       (dormant W2), registration-gate (plans/39 LIVE-but-DISARMED)}, and sigma-root by EXACTLY
+//       {registration-provenance}. plans/39 DELIBERATELY SUPERSEDES the original plans/32 "no fold module pulls a
+//       W1 module into the live graph" claim: it wires the verifier LIVE via registration-gate <-
+//       convert.disjointPaths, DISARMED-by-default (byte-identical -- witnessed by
+//       registration-gate-convert.test.js item 10; and registration-gate itself is imported ONLY by convert --
+//       registration-gate-darkness-witness). The darkness is now CONTAINMENT of the consumer set + the disarmed
+//       byte-identity, NOT structural absence. A THIRD, UNNAMED consumer of either W1 module fires RED (creep).
 //   (B) BEHAVIORAL: seeding a root key (registerRoot) changes NONE of the predicates the fold reads
 //       (isKnownRoot / lookupPublicKey / rootOf) -- the new writer touches only the independent rootKeys Map.
-// If either witness ever fires RED, the wave is no longer dark and the SHADOW claim is false.
+// If either witness ever fires RED beyond the named plans/39 wiring, the SHADOW/disarmed claim is broken.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -38,24 +45,25 @@ function jsFilesUnder(dir) {
   return out;
 }
 
-test('(A) STRUCTURAL: no live-fold module (trust/grounding/frame) pulls a W1 module into the require GRAPH', () => {
-  // Cover trust/ + grounding/ + FRAME/ -- frame.js:94 reads isKnownRoot (the live root_valid gate), the most
-  // safety-relevant registry consumer the earlier trust+grounding-only witness was blind to (VALIDATE honesty
-  // HIGH-2). And inspect the ACTUAL resolved require.cache GRAPH, not a textual grep -- immune to a string-built
-  // / obfuscated require path a regex would miss (VALIDATE code-reviewer HIGH). This test file itself requires
-  // NEITHER W1 module, so any W1 key in require.cache after loading the fold means a fold module pulled it in.
-  // EXCLUDE admission-gate.js (plans/33 W2): it is the PERMITTED dormant consumer of registration-provenance
-  // (the armed gate composes the W1 verifier), and is ITSELF wired to nothing -- proven by
-  // admission-gate-darkness-witness. Any OTHER trust/grounding/frame module pulling a W1 module in -> RED.
-  const foldFiles = [
-    ...jsFilesUnder(path.join(SRC, 'trust')),
-    ...jsFilesUnder(path.join(SRC, 'grounding')),
-    ...jsFilesUnder(path.join(SRC, 'frame')),
-  ].filter((f) => !/[/\\]admission-gate\.js$/.test(f));
-  assert.ok(foldFiles.length >= 9, 'sanity: found the live-fold modules incl. frame/ (' + foldFiles.length + ')');
-  for (const f of foldFiles) require(f);
-  const leaked = Object.keys(require.cache).filter((p) => /[/\\]identity[/\\](sigma-root|registration-provenance)\.js$/.test(p));
-  assert.deepEqual(leaked, [], 'NO fold module may pull a W1 module into the require graph while the wave is SHADOW -- leaked: ' + leaked.join(', '));
+test('(A) CONTAINED-CONSUMERS: the W1 modules have EXACTLY their named importers (a THIRD fires RED — creep)', () => {
+  // plans/39 SUPERSEDES the plans/32 "no fold module pulls a W1 module into the live graph" claim: it wires the
+  // verifier LIVE-but-DISARMED via registration-gate <- convert.disjointPaths (byte-identity witnessed in
+  // registration-gate-convert.test.js item 10; registration-gate's own single-consumer containment in
+  // registration-gate-darkness-witness). So the darkness is now CONTAINMENT of the direct-consumer set, not
+  // structural absence. Exact-set import edges (deepEqual, NEVER .includes) over the WHOLE src tree -- any UNNAMED
+  // new consumer of either W1 module -> RED. (A regex on the require form, the house-style of the vouch-freshness /
+  // registration-gate / edge-freshness witnesses; a string-built require would evade it, but none exists here.)
+  const files = jsFilesUnder(SRC);
+  assert.ok(files.length > 0, 'non-vacuity: the src enumeration must be non-empty');
+  const importersOf = (name) => files
+    .filter((f) => !new RegExp('[/\\\\]' + name + '\\.js$').test(f))
+    .filter((f) => new RegExp('require\\([\'"][^\'"]*' + name + '(?:\\.js)?[\'"]\\)').test(fs.readFileSync(f, 'utf8')))
+    .map((f) => path.relative(SRC, f).replace(/\\/g, '/'))
+    .sort();
+  assert.deepEqual(importersOf('registration-provenance'), ['trust/admission-gate.js', 'trust/registration-gate.js'],
+    'registration-provenance must be imported by EXACTLY {admission-gate (dormant W2), registration-gate (plans/39 live-disarmed)}');
+  assert.deepEqual(importersOf('sigma-root'), ['identity/registration-provenance.js'],
+    'sigma-root must be imported by EXACTLY {registration-provenance}');
 });
 
 test('(B) BEHAVIORAL: seeding a root key changes NONE of the fold-read predicates (isKnownRoot / lookupPublicKey / rootOf)', () => {

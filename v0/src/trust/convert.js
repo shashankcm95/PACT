@@ -11,6 +11,7 @@
 'use strict';
 
 const { verifiedRecords } = require('./read-gate');
+const { filterAnchoredRecords } = require('./registration-gate');
 const { filterFreshVouches } = require('./vouch-freshness');
 const { DISJOINT_PATHS_K } = require('./params');
 const { independenceLabel } = require('../independence/weak-flag');
@@ -77,10 +78,16 @@ function maxVertexDisjointPaths(edges, src, sink) {
  * DISARMED (no meCtx.freshness — every caller today) => identity pass-through, byte-identical. ARMED
  * (meCtx.freshness={now,ttlMs}) => stale/no-freshness VOUCHes drop (the H1 authorization post-condition),
  * NARROWING the advisory count (never gating — actionable stays false, NS-9). {now,ttlMs} are DEPLOY constants.
+ * W-plans/39: filterAnchoredRecords runs BEFORE filterFreshVouches -- DISARMED (no meCtx.regProvenance -- every
+ * caller today) it is an identity pass-through too, so the composition is byte-identical. ARMED (meCtx.regProvenance
+ * ={sigmaRoots}) it drops records from a src_persona_did whose sigma_root binding does not verify against the
+ * registry-seeded root key -- NARROWING the same advisory count (never gating). The order is a COST choice, not
+ * correctness: both are drop-only filters over the same set (kept set = intersection, commutative).
  */
 function disjointPaths(meCtx, meDid, agentDid) {
   const verified = verifiedRecords(meCtx.registry, meCtx.storeOpts);
-  const edges = buildVouchGraph(filterFreshVouches(verified, meCtx && meCtx.freshness));
+  const anchored = filterAnchoredRecords(verified, meCtx.registry, meCtx && meCtx.regProvenance);
+  const edges = buildVouchGraph(filterFreshVouches(anchored, meCtx && meCtx.freshness));
   return maxVertexDisjointPaths(edges, meDid, agentDid);
 }
 
