@@ -146,10 +146,10 @@ gates nothing; it is not a trust claim (see §8 for what actually hardened).
 
 ## 8. Success metrics
 
-**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **4**. Only this number
+**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **5**. Only this number
 reflects trust *advancing*; it is deliberately hard to move — it requires a real out-of-band cost, not code.
 
-**ACHIEVED — the 4 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
+**ACHIEVED — the 5 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
 loud honest ceiling — NS-9):
 
 | # | Signal | What it proved (world-anchored) | Honest ceiling — still OPEN |
@@ -158,6 +158,12 @@ loud honest ceiling — NS-9):
 | 2 | R2-WHO caller-auth | the allowlist denies a real distinct non-allowlisted OS uid at the cross-uid boundary; forged `SUDO_UID` discarded | R2-WHAT, R3, same-uid oracle; one box, one run |
 | 3 | R2-WHAT per-request auth | the broker signs only what it recomputes (persona-mismatch / record-id-mismatch denies) | narrows-not-closes R2 (entitled operator can assert any payload); persona-did is policy not crypto-bound; R3 |
 | 4 | R-heap non-exfiltration | on Linux `ptrace_scope=2`, the signing key is non-exfiltrable from the running broker's memory (cross-uid AND same-uid); 24/24 PASS, non-vacuous | does NOT close the same-uid oracle, hypervisor/root, R3, or the apex; config-conditional; one box, one run |
+| 5 | R2-provenance — live-edge key-custody | on box `rheap`, the cross-uid-custodied key (owner uid 999; host uid 1000 `EACCES`; `ptrace_scope=2`; attested) signed a **freshness-bound** VOUCH edge that verifies under the registered broker key; a host-only attacker cannot forge a broker-attributed edge (containment proven, `edge-provenance-proof.test.js`) | does NOT prove "who minted" in general (host-writable registry: a same-uid self-register weighs equally, the 5th co-forge leg OPEN); gates nothing (`actionable` false; the sigma-root gate is not wired into the read-path, P1 absent); R3 / U1 untouched; one box, one run |
+
+Signal 5 was established live on box `rheap` (2026-07-04) — full evidence + honest ceiling in
+[`deployment/live-edge-run-2026-07-04.md`](deployment/live-edge-run-2026-07-04.md). It re-confirms signals 1 and 4
+(at-rest key-custody) and extends them to a live trust-graph edge; it does **not** on its own close the "who
+minted" leg (that needs the sigma-root wiring, P1 — named in the run record's follow-up).
 
 **Health metrics** (necessary, not sufficient — NOT trust progress): the test suite green (run `node
 test/run.js` for the live count); the last full-substrate coherence checkpoint COHERENT 4/4; the layering
