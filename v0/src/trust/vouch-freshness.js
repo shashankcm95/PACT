@@ -35,19 +35,22 @@ const { refuseAlert } = require('../lib/refuse-alert');
  * the window). Any other shape, OR a throwing getter, => disarmed SILENTLY (byte-identical -- vouch-freshness owns
  * no partial-arm emit; a malformed/hostile opts has ALWAYS disarmed to the identity pass-through, unlike
  * registration-gate which EMITS reg-partial-arm). `!Array.isArray` is load-bearing (VERIFY-hacker F4): an array
- * with string-keyed now/ttlMs must DISARM, not arm. The pre-try guards (`!opts` / typeof / Array.isArray) never
- * fire a getter, so they stay outside the try -- byte-identical to the old first-line disarm predicate.
+ * with string-keyed now/ttlMs must DISARM, not arm -- and the `Array.isArray` check sits INSIDE the try (mirroring
+ * registration-gate.evalArm exactly), because `Array.isArray` on a REVOKED Proxy THROWS. Only `!opts` / `typeof`
+ * (both revoke- AND getter-safe) stay outside, so a revoked-Proxy opts disarms fail-closed rather than escaping the
+ * "never throws" contract (VALIDATE-hacker LOW: the last opts-side totality gap + the sibling-parity divergence).
  */
 function evalArm(freshnessOpts) {
-  if (!freshnessOpts || typeof freshnessOpts !== 'object' || Array.isArray(freshnessOpts)) return { armed: false };
+  if (!freshnessOpts || typeof freshnessOpts !== 'object') return { armed: false };  // absent/non-object -- revoke- + getter-safe
   try {
+    if (Array.isArray(freshnessOpts)) return { armed: false };  // INSIDE the try: a revoked-Proxy IsArray throw is caught (F4 array-disarm kept)
     const now = freshnessOpts.now;       // READ ONCE, inside the guard (Finding 2 -- the caller never re-reads)
     const ttlMs = freshnessOpts.ttlMs;
     const armed = typeof now === 'number' && Number.isFinite(now)
       && typeof ttlMs === 'number' && Number.isFinite(ttlMs) && ttlMs > 0;
     return armed ? { armed: true, now, ttlMs } : { armed: false };
   } catch {
-    return { armed: false };             // a hostile/two-face getter threw -> disarm fail-closed to the identity pass-through
+    return { armed: false };             // a hostile/two-face getter OR a revoked-Proxy IsArray threw -> disarm fail-closed to identity
   }
 }
 

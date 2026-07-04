@@ -155,6 +155,21 @@ test('TOTALITY (Finding 2b): a two-face freshnessOpts.now getter (valid then thr
   assert.equal(reads, 1, 'freshnessOpts.now is read EXACTLY once (evalArm returns the validated ref; the caller never re-reads)');
 });
 
+// ---- item 8d (VALIDATE-hacker LOW): a REVOKED-Proxy freshnessOpts -> disarm, never throws (Array.isArray inside try) ----
+test('TOTALITY (revoked Proxy): a revoked-Proxy freshnessOpts -> disarm (=== recs), never throws (sibling parity)', () => {
+  // Array.isArray on a revoked Proxy THROWS -- not a getter, so it was NOT covered by the getter-only try in the first
+  // pass and escaped OUTSIDE the try (the last opts-side totality gap + a divergence from registration-gate.evalArm,
+  // which puts Array.isArray inside the try). Now that Array.isArray sits inside the try, a revoked-Proxy opts must
+  // disarm fail-closed to the identity pass-through instead of DoS'ing disjointPaths/convert.
+  const recs = [vouch(fresh()), vouch(undefined)];
+  const { proxy, revoke } = Proxy.revocable({ now: NOW, ttlMs: TTL }, {});
+  revoke();
+  assert.throws(() => Array.isArray(proxy), 'precondition: Array.isArray on the revoked Proxy genuinely throws (non-vacuous)');
+  let out;
+  assert.doesNotThrow(() => { out = filterFreshVouches(recs, proxy); }, 'a revoked-Proxy opts must NOT escape (Array.isArray now inside the try)');
+  assert.equal(out, recs, 'a revoked-Proxy opts disarms to the identity pass-through (=== recs, byte-identical)');
+});
+
 // ---- item 9: immutability -- recs not mutated; armed returns a NEW array ----
 test('immutability: the armed path returns a NEW array; recs is never mutated', () => {
   const recs = [vouch(fresh()), vouch(undefined), vouch({ approved_at: NOW - 10 * DAY, nonce: VALID_NONCE })];
