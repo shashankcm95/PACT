@@ -233,5 +233,35 @@ test('monotonicity PROPERTY: dpArmed <= dpDisarmed over seeded random graphs (ar
   assert.ok(strictlyNarrowed > 0, 'NON-VACUITY: at least one trial must strictly narrow (else the property is trivially true); got ' + strictlyNarrowed);
 });
 
+// ---- plans/40 (recs-side totality): a hostile Proxy-over-array recs must not escape the for...of ----
+test('recs-side totality (plans/40): a hostile-iterator/length Proxy-array recs -> no escape, fail-closed', () => {
+  const good = vouch(fresh());
+  // (a) Symbol.iterator getter throws. Array.isArray sees through (true); a raw for...of throws. The fix
+  //     materializes via Array.prototype.slice.call (index-based, no iterator) -> real elements over a genuine array.
+  const iterHostile = new Proxy([good], { get(t, k) { if (k === Symbol.iterator) throw new Error('iter-boom'); return t[k]; } });
+  assert.equal(Array.isArray(iterHostile), true, 'precondition: Array.isArray sees through the proxy (guard passes)');
+  assert.throws(() => { for (const _ of iterHostile) { void _; } }, 'precondition: a raw for...of genuinely throws (non-vacuous)');
+  const orig = process.stderr.write.bind(process.stderr); process.stderr.write = () => true;
+  try {
+    let out;
+    assert.doesNotThrow(() => { out = filterFreshVouches(iterHostile, ARMED); }, 'must NOT escape a hostile-iterator recs');
+    assert.deepEqual(out, [good], 'slice.call bypasses the iterator -> the real fresh VOUCH is processed + KEPT');
+    // (b) length getter throws -> the materialize throws inside the guard -> fail-closed to [].
+    const lenHostile = new Proxy([good], { get(t, k) { if (k === 'length') throw new Error('len-boom'); return t[k]; } });
+    let out2;
+    assert.doesNotThrow(() => { out2 = filterFreshVouches(lenHostile, ARMED); });
+    assert.deepEqual(out2, [], 'a hostile length trap -> fail-closed to []');
+    // (c) SPECIES-hostile Proxy: Array.prototype.slice.call WOULD return a hostile non-array (for...of throws); the
+    //     LITERAL indexed copy never consults constructor/species, so it is immune (CodeRabbit Major fold).
+    const hostileSpeciesCtor = function () {};
+    Object.defineProperty(hostileSpeciesCtor, Symbol.species, { get() { return function () { const o = {}; Object.defineProperty(o, Symbol.iterator, { get() { throw new Error('species-iter'); } }); return o; }; } });
+    const speciesHostile = new Proxy([good], { get(t, k) { if (k === 'constructor') return hostileSpeciesCtor; return t[k]; } });
+    assert.throws(() => { for (const _ of Array.prototype.slice.call(speciesHostile)) { void _; } }, 'precondition: the OLD slice.call approach leaks (species -> non-array)');
+    let out3;
+    assert.doesNotThrow(() => { out3 = filterFreshVouches(speciesHostile, ARMED); }, 'the literal indexed copy is species-FREE -> no escape');
+    assert.deepEqual(out3, [good], 'the real fresh VOUCH is processed + KEPT (species trap never consulted)');
+  } finally { process.stderr.write = orig; }
+});
+
 console.log(`\n[vouch-freshness] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
