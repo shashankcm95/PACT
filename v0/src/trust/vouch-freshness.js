@@ -24,16 +24,31 @@ const { checkFreshnessWindow, isValidNonce } = require('../lib/edge-freshness');
 const { refuseAlert } = require('../lib/refuse-alert');
 
 /**
+ * Evaluate the arm signal ONCE and return the VALIDATED {now, ttlMs} refs (VALIDATE hacker Finding 2 -- mirrors
+ * registration-gate.evalArm's Finding 1 fix). A SINGLE, try-wrapped read of `freshnessOpts.now` / `.ttlMs`: the
+ * caller must NOT re-read them off the opts, so neither a FIRST-read hostile getter (defect a -- the old `isArmed`
+ * read now/ttlMs with no try/catch) NOR a two-face getter (defect b -- valid on read 1, throws on the caller's
+ * second read) can escape an unguarded read; the module's "TOTAL: never throws" contract stays true.
+ * Returns { armed:true, now, ttlMs } when armed, else { armed:false }.
  * ARMED iff freshnessOpts is a PLAIN object (not an array) carrying a finite-number `now` AND a finite-number
  * `ttlMs > 0` (mirrors checkFreshnessWindow's own bad-ttl guard -- a non-finite/non-positive ttlMs would neuter
- * the window). Any other shape => disarmed. `!Array.isArray` is load-bearing (VERIFY-hacker F4): an array with
- * string-keyed now/ttlMs must DISARM, not arm.
+ * the window). Any other shape, OR a throwing getter, => disarmed SILENTLY (byte-identical -- vouch-freshness owns
+ * no partial-arm emit; a malformed/hostile opts has ALWAYS disarmed to the identity pass-through, unlike
+ * registration-gate which EMITS reg-partial-arm). `!Array.isArray` is load-bearing (VERIFY-hacker F4): an array
+ * with string-keyed now/ttlMs must DISARM, not arm. The pre-try guards (`!opts` / typeof / Array.isArray) never
+ * fire a getter, so they stay outside the try -- byte-identical to the old first-line disarm predicate.
  */
-function isArmed(freshnessOpts) {
-  if (!freshnessOpts || typeof freshnessOpts !== 'object' || Array.isArray(freshnessOpts)) return false;
-  const { now, ttlMs } = freshnessOpts;
-  return typeof now === 'number' && Number.isFinite(now)
+function evalArm(freshnessOpts) {
+  if (!freshnessOpts || typeof freshnessOpts !== 'object' || Array.isArray(freshnessOpts)) return { armed: false };
+  try {
+    const now = freshnessOpts.now;       // READ ONCE, inside the guard (Finding 2 -- the caller never re-reads)
+    const ttlMs = freshnessOpts.ttlMs;
+    const armed = typeof now === 'number' && Number.isFinite(now)
       && typeof ttlMs === 'number' && Number.isFinite(ttlMs) && ttlMs > 0;
+    return armed ? { armed: true, now, ttlMs } : { armed: false };
+  } catch {
+    return { armed: false };             // a hostile/two-face getter threw -> disarm fail-closed to the identity pass-through
+  }
 }
 
 /**
@@ -44,12 +59,13 @@ function isArmed(freshnessOpts) {
  *
  * @param {object[]} recs  the sig-verified records from read-gate.verifiedRecords.
  * @param {{now:number, ttlMs:number}|undefined} freshnessOpts  the DEPLOY-CONSTANT window (meCtx.freshness);
- *   absent/malformed => disarmed. now/ttlMs are read ONLY here -- NEVER off a record.
+ *   absent/malformed => disarmed. now/ttlMs are read ONLY off freshnessOpts (in evalArm, ONCE) -- NEVER off a record.
  * @returns {object[]} recs unchanged (disarmed) or a NEW array of the fresh-kept records (armed).
  */
 function filterFreshVouches(recs, freshnessOpts) {
-  if (!isArmed(freshnessOpts)) return recs;              // DISARMED -- inert, no drops, no alerts, byte-identical
-  const { now, ttlMs } = freshnessOpts;
+  const arm = evalArm(freshnessOpts);                    // evaluate the arm ONCE (single, try-wrapped now/ttlMs read)
+  if (!arm.armed) return recs;                           // DISARMED -- inert, no drops, no alerts, byte-identical
+  const { now, ttlMs } = arm;                            // the VALIDATED refs -- NEVER re-read off freshnessOpts (Finding 2)
   if (!Array.isArray(recs)) return [];                   // TOTAL (CodeRabbit): armed + a non-iterable recs must not
                                                          // throw at `for...of` (OUTSIDE the per-record try/catch).
                                                          // Fail CLOSED to [] (no records -> no edges) rather than
