@@ -98,7 +98,47 @@ function crossVerify(premiseId, meCtx, now, recs) {
 
   let rConfirmers = 0;
   for (const w of perHumanDecay.values()) rConfirmers += w; // decay-weighted distinct-human survival
-  const nConfirmers = perHumanDecay.size;
+  let nConfirmers = perHumanDecay.size;
+
+  // plans/41 — the U2 DEMOTE-ONLY entanglement seam (SHADOW/dormant). The detector is dormant by default
+  // (meCtx has no `entanglementDetector` -> epistemicIndependence's default detectEntanglement never fires ->
+  // byte-identical). ARMED (a future DEPLOY-GATED injection, or a test), it flags correlated confirmer
+  // CLUSTERS; each cluster collapses to ONE effective confirmation (the MAX member weight; ALL member keys
+  // removed — never a SUM, never an add — VERIFY C1), and a monotonic clamp guarantees the demote can only
+  // hold-or-LOWER every weight (can only TIGHTEN; never promote — NS-9 / research/24 §4.1). The label is the
+  // SOLE derivation site (research/23 §4.3): we read the label's VERDICT, we never call the detector here.
+  const label = independenceLabel(
+    { topological: nConfirmers },
+    { confirmerSet: [...perHumanDecay.keys()], detectorFn: meCtx && meCtx.entanglementDetector },
+  );
+  const verdict = label.epistemic;
+  if (verdict && typeof verdict === 'object' && verdict.flag === 'ENTANGLEMENT-DETECTED') {
+    // Collapse each entangled cluster to ONE effective confirmation = the MAX member weight, members REMOVED
+    // (never a SUM, never an add — VERIFY C1). The cluster's contribution is accumulated SEPARATELY (clusterR/
+    // clusterN), NOT written back into `demoted` under a synthetic key — so it can never collide with a real
+    // rootOf key (VALIDATE M1). Members are DE-DUPLICATED first: a hostile `entangled:[[k,k]]` must not re-read
+    // an already-deleted key -> `Math.max(w, undefined)` = NaN, which the clamp (NaN comparisons are false) could
+    // not catch, floating strength to the forbidden novice 0.5 (VALIDATE H1).
+    const demoted = new Map(perHumanDecay);          // NEW map — never mutate perHumanDecay (VERIFY M2)
+    let clusterR = 0;
+    let clusterN = 0;
+    for (const cluster of verdict.entangled) {
+      const members = [...new Set(cluster.filter((k) => demoted.has(k)))]; // present + DISTINCT (H1 dedup)
+      if (members.length <= 1) continue;             // a 0/1-distinct-member cluster demotes nothing
+      let w = 0;
+      for (const k of members) { w = Math.max(w, demoted.get(k)); demoted.delete(k); }
+      clusterR += w;                                 // the whole cluster contributes ONE entry = its MAX weight
+      clusterN += 1;
+    }
+    let rDemoted = clusterR;
+    for (const w of demoted.values()) rDemoted += w;
+    const nDemoted = demoted.size + clusterN;
+    // monotonic clamp (VERIFY C1): a demote can ONLY tighten. `Number.isFinite` guards a stray NaN from slipping
+    // past the clamp (NaN comparisons are always false) — fail to the pre-demote value (VALIDATE H1 defense).
+    rConfirmers = Number.isFinite(rDemoted) ? Math.min(rConfirmers, rDemoted) : rConfirmers;
+    nConfirmers = Number.isFinite(nDemoted) ? Math.min(nConfirmers, nDemoted) : nConfirmers;
+  }
+
   // strength = SL expectation on [0,1]. FLOOR 0 with no confirmer: an UNCONFIRMED premise has no
   // verification — it must not read as the novice base-rate 0.5 (that would let an ungrounded chain
   // float to mid-strength, defeating the INV-9 weakest-link / empty-MIN honesty floor).
@@ -107,7 +147,7 @@ function crossVerify(premiseId, meCtx, now, recs) {
     strength,
     r: rConfirmers,          // the raw decay-weighted distinct-human survival (premise-score's r-leg)
     n_confirmers: nConfirmers,
-    label: independenceLabel({ topological: nConfirmers }), // overall WEAK (k minted roots fabricate k)
+    label,                   // overall WEAK (k minted roots fabricate k); carries the demote verdict (advisory)
     advisory: true,
   };
 }

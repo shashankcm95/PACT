@@ -619,5 +619,121 @@ test('U1 residual is REAL: N distinct human roots DO inflate cross-verify confir
   w.cleanup();
 });
 
+// ==================== plans/41: the U2 DEMOTE-ONLY entanglement SEAM (SHADOW/dormant) ====================
+// A premise with TWO distinct-human earned confirmers -> nConfirmers=2. The DORMANT default detector never
+// fires (byte-identical). An injected `meCtx.entanglementDetector` that flags the confirmers as one CLUSTER
+// collapses them to 1 effective confirmation -> the count/strength hold-or-LOWER (monotonic clamp -- can only
+// TIGHTEN, NEVER promote) and the demotion PROPAGATES into premiseScore. NS-9: it narrows, never hardens.
+
+function twoConfirmerWorld() {
+  const w = freshWorld();
+  w.add('did:key:zHuman'); w.add('did:key:zC1'); w.add('did:key:zC2');
+  w.emit('did:key:zC1', 'CLAIM', { claim: { content: 'earns standing' } });
+  w.emit('did:key:zC2', 'CLAIM', { claim: { content: 'earns standing' } });
+  const prem = emitPremise(w, 'did:key:zHuman', 'a twice-confirmed premise');
+  w.emit('did:key:zC1', 'CONFIRM', { target_premise_id: prem.id });
+  w.emit('did:key:zC2', 'CONFIRM', { target_premise_id: prem.id });
+  return { w, prem };
+}
+const flagAllAsOne = (confirmerSet) => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[...confirmerSet]] });
+
+test('u2-seam: DORMANT default -> byte-identical cross-verify (2 distinct-human confirmers stay 2)', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const cv = crossVerify(prem.id, w.meCtx);
+  assert.equal(cv.n_confirmers, 2, 'disarmed: both distinct-human confirmers count (byte-identical)');
+  assert.ok(cv.strength > 0);
+  assert.equal(cv.label.epistemic, 'WEAK', 'dormant: no demote verdict on the label');
+  w.cleanup();
+});
+
+test('u2-seam: ARMED sentinel collapses the entangled cluster -> 1 effective confirmation (demote + propagate)', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const disarmed = crossVerify(prem.id, w.meCtx);
+  const armedCtx = Object.assign({}, w.meCtx, { entanglementDetector: flagAllAsOne });
+  const armed = crossVerify(prem.id, armedCtx);
+  assert.equal(armed.n_confirmers, 1, 'the 2-member cluster collapses to 1 effective confirmation');
+  assert.ok(armed.r <= disarmed.r, 'r can only hold-or-decrease (monotonic clamp)');
+  assert.ok(armed.strength <= disarmed.strength, 'strength can only hold-or-decrease (NEVER promote)');
+  assert.equal(armed.label.epistemic.flag, 'ENTANGLEMENT-DETECTED', 'the demote verdict rides the label');
+  // propagation (F3): the demotion flows into premiseScore
+  const psArmed = premiseScore(prem.id, armedCtx);
+  const psDisarmed = premiseScore(prem.id, w.meCtx);
+  assert.ok(psArmed.r <= psDisarmed.r, 'the demotion propagates into premiseScore.r');
+  w.cleanup();
+});
+
+test('u2-seam (C1): NO detector return can INFLATE the count or PROMOTE (monotonic clamp)', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const disarmed = crossVerify(prem.id, w.meCtx);
+  // a bogus cluster of SYNTHETIC keys not in the set (a would-be set-union inflate) can never RAISE anything
+  const ghost = () => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [['human:ghost1', 'human:ghost2', 'human:ghost3']] });
+  const g = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: ghost }));
+  assert.ok(g.n_confirmers <= disarmed.n_confirmers, 'a bogus cluster can never RAISE the confirmer count');
+  assert.ok(g.r <= disarmed.r, 'never inflates r');
+  assert.ok(g.strength <= disarmed.strength, 'never promotes strength');
+  // a positive-shaped return is normalized away -> no demote, byte-identical
+  const p = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: () => 'STRONG' }));
+  assert.equal(p.n_confirmers, disarmed.n_confirmers, 'a positive return is normalized -> no change');
+  w.cleanup();
+});
+
+test('u2-seam (H1): a throwing detector never breaks the read path (returns the disarmed result)', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const disarmed = crossVerify(prem.id, w.meCtx);
+  const armed = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: () => { throw new Error('hostile'); } }));
+  assert.equal(armed.n_confirmers, disarmed.n_confirmers, 'a throwing detector -> WEAK -> byte-identical, never throws');
+  w.cleanup();
+});
+
+test('u2-seam (M2): the demote builds a NEW map -- the original confirmer decay is not mutated across reads', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const armedCtx = Object.assign({}, w.meCtx, { entanglementDetector: flagAllAsOne });
+  const a = crossVerify(prem.id, armedCtx);
+  const b = crossVerify(prem.id, armedCtx); // a second read must yield the identical demoted result (no state carry)
+  assert.equal(a.n_confirmers, b.n_confirmers);
+  assert.equal(a.r, b.r);
+  w.cleanup();
+});
+
+test('u2-seam (VALIDATE H1): a DUPLICATE cluster member never makes r NaN / floats strength to 0.5', () => {
+  const { w, prem } = twoConfirmerWorld();
+  const disarmed = crossVerify(prem.id, w.meCtx);
+  const dupOnly = (cs) => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[cs[0], cs[0], cs[0]]] });
+  const d = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: dupOnly }));
+  assert.ok(Number.isFinite(d.r), 'a duplicate-member cluster must never make r NaN');
+  assert.notEqual(d.strength, 0.5, 'strength must never float to the forbidden novice base-rate');
+  assert.equal(d.n_confirmers, disarmed.n_confirmers, 'a 1-distinct-member cluster demotes nothing');
+  const mixedDup = (cs) => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[cs[0], cs[0], cs[1]]] });
+  const m = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: mixedDup }));
+  assert.ok(Number.isFinite(m.r), 'a mixed-dup cluster stays finite');
+  assert.equal(m.n_confirmers, 1, 'the distinct {C1,C2} collapses to 1');
+  assert.ok(m.r <= disarmed.r && m.strength <= disarmed.strength, 'still can only tighten');
+  w.cleanup();
+});
+
+test('u2-seam (VALIDATE M1): an UNINVOLVED confirmer is never shadowed by the collapse (no synthetic-key merge)', () => {
+  const w = freshWorld();
+  w.add('did:key:zHuman'); w.add('did:key:zC1'); w.add('did:key:zC2'); w.add('did:key:zC3');
+  ['did:key:zC1', 'did:key:zC2', 'did:key:zC3'].forEach((c) => w.emit(c, 'CLAIM', { claim: { content: 'earns standing' } }));
+  const prem = emitPremise(w, 'did:key:zHuman', 'a thrice-confirmed premise');
+  ['did:key:zC1', 'did:key:zC2', 'did:key:zC3'].forEach((c) => w.emit(c, 'CONFIRM', { target_premise_id: prem.id }));
+  assert.equal(crossVerify(prem.id, w.meCtx).n_confirmers, 3);
+  const collapseTwo = () => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[w.personas['did:key:zC1'].human, w.personas['did:key:zC2'].human]] });
+  const armed = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: collapseTwo }));
+  assert.equal(armed.n_confirmers, 2, 'only the flagged {C1,C2} collapses; the uninvolved C3 survives (never merged)');
+  w.cleanup();
+});
+
+test('u2-seam (F1): the demotion PROPAGATES into creatorStanding; disarmed is byte-identical', () => {
+  const { w, prem } = twoConfirmerWorld();
+  void prem;
+  const human = w.personas['did:key:zHuman'].human;
+  const disarmed = creatorStanding(human, w.meCtx);
+  const armed = creatorStanding(human, Object.assign({}, w.meCtx, { entanglementDetector: flagAllAsOne }));
+  assert.ok(armed.standing <= disarmed.standing, "collapsing the creator's confirmers can only lower their standing");
+  assert.equal(creatorStanding(human, w.meCtx).standing, disarmed.standing, 'a second disarmed read is byte-identical');
+  w.cleanup();
+});
+
 console.log(`\n[grounding] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
