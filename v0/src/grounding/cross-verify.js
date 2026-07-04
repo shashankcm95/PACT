@@ -113,21 +113,34 @@ function crossVerify(premiseId, meCtx, now, recs) {
   );
   const verdict = label.epistemic;
   if (verdict && typeof verdict === 'object' && verdict.flag === 'ENTANGLEMENT-DETECTED') {
-    // Collapse each entangled cluster to ONE effective confirmation = the MAX member weight, members REMOVED
-    // (never a SUM, never an add — VERIFY C1). The cluster's contribution is accumulated SEPARATELY (clusterR/
-    // clusterN), NOT written back into `demoted` under a synthetic key — so it can never collide with a real
-    // rootOf key (VALIDATE M1). Members are DE-DUPLICATED first: a hostile `entangled:[[k,k]]` must not re-read
-    // an already-deleted key -> `Math.max(w, undefined)` = NaN, which the clamp (NaN comparisons are false) could
-    // not catch, floating strength to the forbidden novice 0.5 (VALIDATE H1).
+    // Merge the flagged clusters into CONNECTED COMPONENTS (union-find) so the collapse is ORDER-INDEPENDENT +
+    // deterministic: overlapping clusters `[[A,B],[B,C]]` are ONE entangled group {A,B,C} -> one confirmation,
+    // not an order-dependent partial merge (VALIDATE/CodeRabbit Major). A component collapses to its MAX member
+    // weight (never a SUM — VERIFY C1); members are removed and the component's SINGLE contribution is
+    // accumulated separately (clusterR/clusterN), never a synthetic map key that could collide with a real
+    // rootOf id (VALIDATE M1). Union-find keys are DISTINCT, so a hostile `[[k,k]]` cannot re-read a deleted key
+    // -> `Math.max(w, undefined)` = NaN (VALIDATE H1). Only PRESENT confirmers (`demoted.has`) enter a component.
     const demoted = new Map(perHumanDecay);          // NEW map — never mutate perHumanDecay (VERIFY M2)
+    const parent = new Map();
+    const find = (x) => {
+      let r = x; while (parent.get(r) !== r) r = parent.get(r);
+      while (parent.get(x) !== r) { const n = parent.get(x); parent.set(x, r); x = n; } // path-compress
+      return r;
+    };
+    for (const cluster of verdict.entangled) {
+      const members = (Array.isArray(cluster) ? cluster : []).filter((k) => demoted.has(k));
+      for (const k of members) if (!parent.has(k)) parent.set(k, k);
+      for (let i = 1; i < members.length; i += 1) parent.set(find(members[i]), find(members[0]));
+    }
+    const components = new Map();                     // component root -> [distinct member keys]
+    for (const k of parent.keys()) { const r = find(k); if (!components.has(r)) components.set(r, []); components.get(r).push(k); }
     let clusterR = 0;
     let clusterN = 0;
-    for (const cluster of verdict.entangled) {
-      const members = [...new Set(cluster.filter((k) => demoted.has(k)))]; // present + DISTINCT (H1 dedup)
-      if (members.length <= 1) continue;             // a 0/1-distinct-member cluster demotes nothing
+    for (const members of components.values()) {
+      if (members.length <= 1) continue;             // a singleton component demotes nothing
       let w = 0;
       for (const k of members) { w = Math.max(w, demoted.get(k)); demoted.delete(k); }
-      clusterR += w;                                 // the whole cluster contributes ONE entry = its MAX weight
+      clusterR += w;                                 // the whole component contributes ONE entry = its MAX weight
       clusterN += 1;
     }
     let rDemoted = clusterR;

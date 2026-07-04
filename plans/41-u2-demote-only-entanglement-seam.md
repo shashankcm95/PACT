@@ -103,7 +103,7 @@ The structural "imported by exactly one" tripwire is **N/A** here (the seam is w
 | File | Change |
 |---|---|
 | `v0/src/independence/weak-flag.js` | demote-only `epistemicIndependence(confirmerSet,{detectorFn})` (undefined-guard → try/catch → exact-set normalize); `detectEntanglement` dormant default; `independenceLabel` threads `confirmerSet`; `overall` object-safe WEAK; `mayGate` unchanged. |
-| `v0/src/grounding/cross-verify.js` | thread `confirmerSet` at the LIVE label only; max-with-removal collapse + monotonic clamp + single demoted map; byte-identical disarmed. |
+| `v0/src/grounding/cross-verify.js` | thread `confirmerSet` at the LIVE label only; **union-find connected-component** collapse (max-with-removal, deterministic/order-independent — CodeRabbit Major) + `Number.isFinite` monotonic clamp + single demoted map; byte-identical disarmed. |
 | `v0/test/unit/weak-flag.test.js` (NEW) | RED-first — §5. |
 | `v0/test/integration/grounding.test.js` (extend) | the behavioral witness is FOLDED HERE (not a standalone file — VALIDATE F1): disarmed byte-identity + armed propagation through cross-verify, `premiseScore`, and `creatorStanding` (2 of the 3 named downstream consumers; `verificationStrength` reads the clamped `.strength`, covered transitively). Plus the VALIDATE H1 dup-member + M1 no-shadow regressions. |
 
@@ -169,6 +169,12 @@ byte-identical disarmed · `actionable` untouched hard-`false` · `mayGate`/`con
   byte-identity + `actionable`-untouched verified; deferred MEASURE + M1 arming named loud. F1 (witness scope
   over-claim vs the built coverage) → §3.3/§4 re-narrated + `creatorStanding` witness added. F2 (the 3-quantity
   clamp is really a 2-clamp + a monotone strength derivation) → §3.2 re-narrated.
+- **CodeRabbit (async PR bot) — 2 folded (636→637).** **Major** (`cross-verify.js`): overlapping clusters
+  `[[A,B],[B,C]]` made the collapse ORDER-DEPENDENT (`r` varied by cluster order) → replaced the per-cluster
+  loop with a UNION-FIND connected-components merge (deterministic; also subsumes the H1 dedup) + an
+  order-independence RED test. **Minor** (`weak-flag.js`): `epistemicIndependence(_, null)` threw on the param
+  destructure before the totality guard (a real gap in this PR's new 2-arg signature) → `opts || {}` + a RED
+  test. Both premise-probed valid before folding.
 
 ## §9 Residuals (LOUD — NS-9)
 

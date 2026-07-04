@@ -69,7 +69,11 @@ function mayGate(label, { highStakes } = {}) {
  */
 // AMENDED plans/41 (research/24 §4.1 + research/23 §1): DEMOTE-ONLY range `{WEAK, ENTANGLEMENT-DETECTED}` —
 // NEVER a positive STRONG. Per-record `(confirmerSet, {detectorFn})`; the detector ships DORMANT.
-function epistemicIndependence(confirmerSet, { detectorFn = detectEntanglement } = {}) {
+function epistemicIndependence(confirmerSet, opts) {
+  // `opts || {}` — a NULL second arg (not just undefined) must not throw on destructure before the totality
+  // guard (a `= {}` PARAM default only covers undefined; VALIDATE/CodeRabbit). Keeps the "never throws" H1
+  // contract true for the full public surface, not merely the internal object-literal caller.
+  const { detectorFn = detectEntanglement } = opts || {};
   // GUARD FIRST (VERIFY F1/H2): a zero-arg call (mayGate) or a no-confirmerSet consumer (convert) is
   // STRUCTURALLY exempt — WEAK before any detector runs, so the demote path is unreachable without a confirmer
   // set and mayGate stays authoritative regardless of what a future default detector does.

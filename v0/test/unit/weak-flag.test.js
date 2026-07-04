@@ -56,6 +56,8 @@ test('totality (H1): a throwing / trapping detector normalizes to WEAK, never th
   assert.equal(epistemicIndependence(SET, { detectorFn: () => { throw new Error('hostile'); } }), 'WEAK');
   const trap = new Proxy({}, { get() { throw new Error('trap'); } });
   assert.equal(epistemicIndependence(SET, { detectorFn: () => trap }), 'WEAK');
+  assert.equal(epistemicIndependence(SET, null), 'WEAK');   // a NULL opts arg must not throw on destructure (CodeRabbit)
+  assert.equal(epistemicIndependence(null, null), 'WEAK');
 });
 
 test('mayGate: fail-closed on high-stakes (zero-arg lift-point -> WEAK), forged label voided -- unchanged', () => {

@@ -735,5 +735,22 @@ test('u2-seam (F1): the demotion PROPAGATES into creatorStanding; disarmed is by
   w.cleanup();
 });
 
+test('u2-seam (CodeRabbit Major): overlapping clusters merge to a connected component -- order-INDEPENDENT', () => {
+  const w = freshWorld();
+  w.add('did:key:zHuman'); w.add('did:key:zA'); w.add('did:key:zB'); w.add('did:key:zC');
+  ['did:key:zA', 'did:key:zB', 'did:key:zC'].forEach((c) => w.emit(c, 'CLAIM', { claim: { content: 'earns standing' } }));
+  const prem = emitPremise(w, 'did:key:zHuman', 'a thrice-confirmed premise');
+  ['did:key:zA', 'did:key:zB', 'did:key:zC'].forEach((c) => w.emit(c, 'CONFIRM', { target_premise_id: prem.id }));
+  assert.equal(crossVerify(prem.id, w.meCtx).n_confirmers, 3);
+  const A = w.personas['did:key:zA'].human; const B = w.personas['did:key:zB'].human; const C = w.personas['did:key:zC'].human;
+  // [[A,B],[B,C]] and its reverse are the SAME connected component {A,B,C} -> collapse to 1, order-independent
+  const fwd = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: () => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[A, B], [B, C]] }) }));
+  const rev = crossVerify(prem.id, Object.assign({}, w.meCtx, { entanglementDetector: () => ({ flag: 'ENTANGLEMENT-DETECTED', entangled: [[B, C], [A, B]] }) }));
+  assert.equal(fwd.n_confirmers, 1, 'overlapping clusters {A,B},{B,C} are one component -> 1 confirmation');
+  assert.equal(fwd.n_confirmers, rev.n_confirmers, 'order-INDEPENDENT n');
+  assert.equal(fwd.r, rev.r, 'order-INDEPENDENT r (deterministic, no cluster-order dependence)');
+  w.cleanup();
+});
+
 console.log(`\n[grounding] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
