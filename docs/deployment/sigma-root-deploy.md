@@ -27,11 +27,11 @@ effect) or dishonest (asserting an arm you cannot back — NS-9 theater):
 
 | # | Prerequisite | Why the arm needs it | Menu item / plan |
 |---|---|---|---|
-| P1 | **Wire `admissionDecision` into the read-gate pre-filter** | Until a fold calls the gate, arming has NO effect — the gate is not on any live path. Byte-identical when disarmed. | the "wire gate into read-gate" wave |
+| P1 | **Read-path σ_root filter — ALREADY BUILT** as `registration-gate.js` (`filterAnchoredRecords`, plans/39), wired into `convert.disjointPaths`, disarmed-by-default. This row originally said "wire `admissionDecision`"; the equivalent read-path gate shipped as `registration-gate` instead — `admissionDecision` is a SEPARATE dormant reject-primitive (plans/33), wired to nothing. | **DONE** (SHADOW/disarmed) — arm by injecting `meCtx.regProvenance={sigmaRoots}`; even armed it only NARROWS the advisory count. | plans/39 |
 | P2 | **Land the Phase-6 world-anchored signer** (`plans/30` broker-signing) | The arm is **both-or-neither** (`arming-coherence.js:48`): `admissionArmed(out) = admissionArmed && signingArmed`. Arming admission REQUIRES `signingArmed === true`, which is only HONEST once a real signer exists. Asserting it with no signer is NS-9 theater. | `plans/30` |
 | P3 | **Genesis root minted + seeded + ATTESTED** (Phase A below) | The armed gate verifies σ_root against the seeded root key; the attestation is what makes a PASS mean anything. | this runbook, Phase A |
 
-**Honest deploy order:** P1 (wire) → P3 (Phase A genesis + attest) → Phase B (provision personas) → P2 (signer) →
+**Honest deploy order:** P1 (wire) is **DONE** (`registration-gate`, plans/39) → P3 (Phase A genesis + attest) → Phase B (provision personas) → P2 (signer) →
 Phase C (arm) → Phase D (grandfather ramp). You CAN exercise the armed path as a **controlled dogfood** before P2
 by injecting both flags in a throwaway harness — but that is a test, not a harden, and must never touch a live
 registry or claim a trust advance.
@@ -117,7 +117,7 @@ seam once plans/30 lands so `K_root_priv` never materializes in a provisioning p
 
 ## Phase C — Arm the gate (the DARK→armed crossing)
 
-> **Do not reach this phase until P1 (wire) and P2 (signer) are done** — see §0. Arming before P1 is inert;
+> **Do not reach this phase until P1 (wire — DONE via `registration-gate`) and P2 (signer) are done** — see §0. Arming before P1 is inert;
 > arming `signingArmed:true` before P2 asserts a signer PACT cannot back (NS-9).
 
 The gate reads the arm on its own guarded path, independent of the attacker-influenced record fields
