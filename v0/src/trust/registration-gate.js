@@ -76,8 +76,22 @@ function filterAnchoredRecords(recs, registry, regProvenanceOpts) {
   const sigmaRoots = arm.sigmaRoots;               // the VALIDATED ref -- NEVER re-read off the opts (Finding 1)
   if (!Array.isArray(recs)) return [];             // TOTAL: armed + a non-iterable recs -> [] (never a for..of throw)
 
+  // plans/40: Array.isArray sees THROUGH a Proxy-over-array, so a hostile iterator / length / element / SPECIES trap
+  // could escape the per-record try at the for...of itself. Materialize into a LITERAL array via indexed reads --
+  // species-FREE (a `[]` literal NEVER consults `constructor[Symbol.species]`, unlike Array.prototype.slice, which
+  // can be steered to return a hostile non-array whose for...of then throws -- CodeRabbit) AND iterator-free
+  // (index-based, never invokes Symbol.iterator). A throwing length/index trap fails CLOSED here. `list` is a genuine
+  // literal array -> its for...of is the native, un-hijackable iterator. Unreachable live (recs is a plain
+  // JSON-parsed array off disk); makes "TOTAL: never throws" honest for an in-memory hostile caller.
+  let list;
+  try {
+    const len = recs.length >>> 0;                 // ToUint32; a hostile length getter throws -> caught
+    list = [];
+    for (let i = 0; i < len; i += 1) list[i] = recs[i]; // indexed reads into a LITERAL array; a hostile index getter throws -> caught
+  } catch { refuseAlert('recs-unreadable', { class: 'integrity', cause: 'recs-materialize-threw' }); return []; }
+
   const out = [];
-  for (const rec of recs) {
+  for (const rec of list) {
     try {
       if (!rec || typeof rec.src_persona_did !== 'string') {
         refuseAlert('reg-unanchored', { class: 'integrity', cause: 'malformed-record' });

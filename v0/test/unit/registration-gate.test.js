@@ -221,5 +221,36 @@ test('TOTAL: a null element DROPS; armed + a non-array recs -> [] (no for..of th
   assert.equal(filterAnchoredRecords(null, reg, undefined), null, 'DISARMED keeps identity even for a non-array (byte-identical contract)');
 });
 
+// ---- plans/40 (recs-side totality): a hostile Proxy-over-array recs must not escape the for...of ----
+test('recs-side totality (plans/40): a hostile-iterator/length Proxy-array recs -> no escape, fail-closed', () => {
+  const { reg, sigmaRoots } = anchoredWorld();
+  const legitRec = vouch(LEGIT, 'did:key:zX');
+  // (a) a Proxy whose Symbol.iterator getter throws. Array.isArray sees THROUGH it (true) so the guard passes; a raw
+  //     for...of would throw. The fix materializes via Array.prototype.slice.call (index-based, no iterator) -> the
+  //     real elements are iterated over a genuine array.
+  const iterHostile = new Proxy([legitRec], { get(t, k) { if (k === Symbol.iterator) throw new Error('iter-boom'); return t[k]; } });
+  assert.equal(Array.isArray(iterHostile), true, 'precondition: Array.isArray sees through the proxy (guard passes)');
+  assert.throws(() => { for (const _ of iterHostile) { void _; } }, 'precondition: a raw for...of genuinely throws (non-vacuous)');
+  let out;
+  assert.doesNotThrow(() => { out = quiet(() => filterAnchoredRecords(iterHostile, reg, { sigmaRoots })); }, 'the filter must NOT escape a hostile-iterator recs');
+  assert.deepEqual(out, [legitRec], 'slice.call bypasses the iterator -> the real anchored element is processed + KEPT');
+  // (b) a Proxy whose length getter throws -> the materialize throws inside the guard -> fail-closed to [] + alert.
+  const lenHostile = new Proxy([legitRec], { get(t, k) { if (k === 'length') throw new Error('len-boom'); return t[k]; } });
+  let out2; let alerts;
+  assert.doesNotThrow(() => { alerts = captureAlerts(() => { out2 = filterAnchoredRecords(lenHostile, reg, { sigmaRoots }); }); });
+  assert.deepEqual(out2, [], 'a hostile length trap -> fail-closed to []');
+  assert.ok(alerts.some((a) => /recs-unreadable/.test(a)), 'the materialize failure EMITS a recs-unreadable alert');
+  // (c) SPECIES-hostile Proxy: constructor -> a ctor whose [Symbol.species] returns a non-array with a throwing
+  //     iterator. Array.prototype.slice.call WOULD return that hostile object (for...of then throws); the LITERAL
+  //     indexed copy never consults constructor/species, so it is immune (CodeRabbit Major fold).
+  const hostileSpeciesCtor = function () {};
+  Object.defineProperty(hostileSpeciesCtor, Symbol.species, { get() { return function () { const o = {}; Object.defineProperty(o, Symbol.iterator, { get() { throw new Error('species-iter'); } }); return o; }; } });
+  const speciesHostile = new Proxy([legitRec], { get(t, k) { if (k === 'constructor') return hostileSpeciesCtor; return t[k]; } });
+  assert.throws(() => { for (const _ of Array.prototype.slice.call(speciesHostile)) { void _; } }, 'precondition: the OLD slice.call approach leaks (species -> non-array -> for..of throws)');
+  let out3;
+  assert.doesNotThrow(() => { out3 = quiet(() => filterAnchoredRecords(speciesHostile, reg, { sigmaRoots })); }, 'the literal indexed copy is species-FREE -> no escape');
+  assert.deepEqual(out3, [legitRec], 'the real anchored element is processed + KEPT (species trap never consulted)');
+});
+
 console.log(`\n[registration-gate] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
