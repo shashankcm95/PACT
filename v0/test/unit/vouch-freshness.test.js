@@ -127,6 +127,49 @@ test('TOTAL: a throwing getter on rec.* is a DROP (try/catch), never a throw; a 
   assert.deepEqual(filterFreshVouches([vouch(frWithThrowingNonce), good], ARMED), [good]);
 });
 
+// ---- item 8b (Finding 2, defect a): a FIRST-read-throwing freshnessOpts getter -> disarm, never a throw ----
+test('TOTALITY (Finding 2a): a first-read-throwing freshnessOpts.now/.ttlMs getter -> disarm (=== recs), never throws', () => {
+  // the old arm-check read now/ttlMs OUTSIDE any try/catch, so a hostile getter on freshnessOpts escaped on the FIRST
+  // read and DoS'd the whole convert readout. evalArm now try-wraps the read -> a throw disarms to the identity path.
+  const recs = [vouch(fresh()), vouch(undefined)];
+  const hostileNow = { ttlMs: TTL, get now() { throw new Error('boom-now-read1'); } };
+  const hostileTtl = { now: NOW, get ttlMs() { throw new Error('boom-ttl-read1'); } };
+  for (const opts of [hostileNow, hostileTtl]) {
+    let out;
+    assert.doesNotThrow(() => { out = filterFreshVouches(recs, opts); }, 'a first-read hostile opts getter must NOT escape (evalArm try/catch)');
+    assert.equal(out, recs, 'a throwing arm-read disarms to the identity pass-through (=== recs, byte-identical)');
+  }
+});
+
+// ---- item 8c (Finding 2, defect b): a two-face freshnessOpts getter is read EXACTLY once -> no second-read escape ----
+test('TOTALITY (Finding 2b): a two-face freshnessOpts.now getter (valid then throws) is read EXACTLY once, no escape', () => {
+  // the old filterFreshVouches re-read {now,ttlMs} off freshnessOpts a SECOND time after the arm check, so a two-face
+  // getter (valid on read 1, throws on read 2) escaped the un-try'd re-read. evalArm returns the validated ref -> the
+  // caller never re-reads, so the getter fires exactly once (mirrors registration-gate's "Finding 1 totality" test).
+  let reads = 0;
+  const opts = { ttlMs: TTL, get now() { reads += 1; if (reads >= 2) throw new Error('now-read2-boom'); return NOW; } };
+  const good = vouch(fresh());
+  let out;
+  assert.doesNotThrow(() => { out = filterFreshVouches([good], opts); }, 'a two-face getter must NOT escape (single, guarded read)');
+  assert.deepEqual(out, [good], 'armed with the first-read now -> the fresh VOUCH is KEPT');
+  assert.equal(reads, 1, 'freshnessOpts.now is read EXACTLY once (evalArm returns the validated ref; the caller never re-reads)');
+});
+
+// ---- item 8d (VALIDATE-hacker LOW): a REVOKED-Proxy freshnessOpts -> disarm, never throws (Array.isArray inside try) ----
+test('TOTALITY (revoked Proxy): a revoked-Proxy freshnessOpts -> disarm (=== recs), never throws (sibling parity)', () => {
+  // Array.isArray on a revoked Proxy THROWS -- not a getter, so it was NOT covered by the getter-only try in the first
+  // pass and escaped OUTSIDE the try (the last opts-side totality gap + a divergence from registration-gate.evalArm,
+  // which puts Array.isArray inside the try). Now that Array.isArray sits inside the try, a revoked-Proxy opts must
+  // disarm fail-closed to the identity pass-through instead of DoS'ing disjointPaths/convert.
+  const recs = [vouch(fresh()), vouch(undefined)];
+  const { proxy, revoke } = Proxy.revocable({ now: NOW, ttlMs: TTL }, {});
+  revoke();
+  assert.throws(() => Array.isArray(proxy), 'precondition: Array.isArray on the revoked Proxy genuinely throws (non-vacuous)');
+  let out;
+  assert.doesNotThrow(() => { out = filterFreshVouches(recs, proxy); }, 'a revoked-Proxy opts must NOT escape (Array.isArray now inside the try)');
+  assert.equal(out, recs, 'a revoked-Proxy opts disarms to the identity pass-through (=== recs, byte-identical)');
+});
+
 // ---- item 9: immutability -- recs not mutated; armed returns a NEW array ----
 test('immutability: the armed path returns a NEW array; recs is never mutated', () => {
   const recs = [vouch(fresh()), vouch(undefined), vouch({ approved_at: NOW - 10 * DAY, nonce: VALID_NONCE })];
