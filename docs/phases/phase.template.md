@@ -42,7 +42,7 @@
 
 - [ ] Build + Test tasks complete; the test suite + linters green.
 - [ ] Validate run and findings folded.
-- [ ] ADR recorded.
+- [ ] ADR or FORK entry recorded when the phase introduces a meaningful decision.
 - [ ] Committed + pushed (per the repo's merge convention).
 - [ ] Reconciliation with the PRD done (below); next phase scoped.
 
