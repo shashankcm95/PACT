@@ -19,8 +19,10 @@
  * @param {{topological:number}} axes
  * @param {{verdictFn?:Function, configFn?:Function}} [seam]
  */
-function independenceLabel({ topological }, { verdictFn = epistemicIndependence, configFn = configStability } = {}) {
-  const epistemic = verdictFn();          // the SOLE U2 lift-point (default) — derived, not a literal
+function independenceLabel({ topological }, { verdictFn = epistemicIndependence, configFn = configStability, confirmerSet, detectorFn } = {}) {
+  const epistemic = verdictFn(confirmerSet, { detectorFn }); // SOLE U2 lift-point; threads the confirmer set +
+                                          // detector (both undefined at convert/mayGate -> WEAK). A demote
+                                          // verdict OBJECT may ride `epistemic`; `overall` stays WEAK (object-safe below).
   const config_stability = configFn();    // the SOLE config-stability lift-point (default) — derived
   const top = typeof topological === 'number' ? topological : 0; // computed Menger count (a count, not a verdict)
   // overall = WEAK while ANY verdict axis is WEAK. The non-WEAK branch (<computed>) is INTENTIONALLY pinned
@@ -29,6 +31,8 @@ function independenceLabel({ topological }, { verdictFn = epistemicIndependence,
   // NOTE: because BOTH branches are 'WEAK' today, the §3 derivation guard CANNOT prove overall is derived
   // (only epistemic/config_stability are sentinel-proven). The future wave that defines the non-WEAK branch
   // MUST add an injection assertion exercising it, or it silently re-introduces a literal (VALIDATE code-rev).
+  // OBJECT-SAFE (plans/41): a demote-verdict OBJECT is `!== 'WEAK'`, so it falls to the pinned-WEAK else-branch
+  // — a demotion NEVER surfaces in `overall`; it acts on the WEIGHT the sink reads off `epistemic` (research/24 §4.1).
   const overall = (epistemic === 'WEAK' || config_stability === 'WEAK') ? 'WEAK' : /* TODO(P5): <computed> */ 'WEAK';
   return { topological: top, epistemic, config_stability, overall };
 }
@@ -63,9 +67,44 @@ function mayGate(label, { highStakes } = {}) {
  * SHADOW weight, the eventual convert.actionable flip) reads through here — so the WEAK flag lifts
  * here and ONLY here. Do not scatter epistemic judgments elsewhere. ***
  */
-function epistemicIndependence() {
-  return 'WEAK'; // axis 4 is OPEN; the cheap axes can never substitute for it (until P5 replaces THIS fn)
+// AMENDED plans/41 (research/24 §4.1 + research/23 §1): DEMOTE-ONLY range `{WEAK, ENTANGLEMENT-DETECTED}` —
+// NEVER a positive STRONG. Per-record `(confirmerSet, {detectorFn})`; the detector ships DORMANT.
+function epistemicIndependence(confirmerSet, opts) {
+  // `opts || {}` — a NULL second arg (not just undefined) must not throw on destructure before the totality
+  // guard (a `= {}` PARAM default only covers undefined; VALIDATE/CodeRabbit). Keeps the "never throws" H1
+  // contract true for the full public surface, not merely the internal object-literal caller.
+  const { detectorFn = detectEntanglement } = opts || {};
+  // GUARD FIRST (VERIFY F1/H2): a zero-arg call (mayGate) or a no-confirmerSet consumer (convert) is
+  // STRUCTURALLY exempt — WEAK before any detector runs, so the demote path is unreachable without a confirmer
+  // set and mayGate stays authoritative regardless of what a future default detector does.
+  if (confirmerSet == null) return 'WEAK';
+  // TOTALITY (VERIFY H1): the read path faces attacker-controlled store bytes. The detector CALL *and* the
+  // shape-normalization (a hostile getter on `ret.flag`/`ret.entangled` throws on ACCESS) both sit INSIDE the
+  // try — any throw fails to WEAK, never out (crossVerify calls this over verifiedRecords).
+  try {
+    // SINGLE-READ contract (VALIDATE M2): read `ret.flag` / `ret.entangled` ONCE each and immediately build a
+    // NEW sanitized array — a future double-read of a hostile getter would reopen a TOCTOU window.
+    const ret = detectorFn(confirmerSet);
+    // EXACT-SET / NO POSITIVE BRANCH (VERIFY C2/F6): honor ONLY the demote shape; ANYTHING else — a positive
+    // {flag:'STRONG'}, a truthy object, a non-array `entangled` — normalizes to WEAK. Strict flag equality,
+    // never a truthiness test; there is no code path that returns a positive.
+    if (ret && typeof ret === 'object' && ret.flag === 'ENTANGLEMENT-DETECTED' && Array.isArray(ret.entangled)) {
+      const entangled = ret.entangled
+        .filter((c) => Array.isArray(c))
+        .map((c) => c.filter((k) => typeof k === 'string')); // NEW, sanitized — never trust the detector object
+      return { flag: 'ENTANGLEMENT-DETECTED', entangled };
+    }
+  } catch { return 'WEAK'; }
+  return 'WEAK';
 }
+
+/**
+ * The DORMANT default entanglement detector (plans/41). Returns 'WEAK' for EVERY input — it never fires, so
+ * the seam is byte-identical live. The real BEI/CIG behavioral measure (research/24 §4.2/§6) needs live-agent
+ * outputs + a probe battery (DEFERRED); when it lands it becomes the injected detector via a DEPLOY-GATED
+ * crossing (research/24-amended residual — NOT a bare default reassignment). It can only ever DEMOTE, never promote.
+ */
+function detectEntanglement(/* confirmerSet */) { return 'WEAK'; }
 
 /**
  * The config-stability axis lift-point (the SIBLING of `epistemicIndependence`). Config stability is also
@@ -78,4 +117,4 @@ function configStability() {
   return 'WEAK'; // config attestation is OPEN; a self-asserted config_hash never substitutes (until P5 replaces THIS fn)
 }
 
-module.exports = { independenceLabel, mayGate, epistemicIndependence, configStability };
+module.exports = { independenceLabel, mayGate, epistemicIndependence, configStability, detectEntanglement };

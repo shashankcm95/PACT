@@ -98,7 +98,60 @@ function crossVerify(premiseId, meCtx, now, recs) {
 
   let rConfirmers = 0;
   for (const w of perHumanDecay.values()) rConfirmers += w; // decay-weighted distinct-human survival
-  const nConfirmers = perHumanDecay.size;
+  let nConfirmers = perHumanDecay.size;
+
+  // plans/41 — the U2 DEMOTE-ONLY entanglement seam (SHADOW/dormant). The detector is dormant by default
+  // (meCtx has no `entanglementDetector` -> epistemicIndependence's default detectEntanglement never fires ->
+  // byte-identical). ARMED (a future DEPLOY-GATED injection, or a test), it flags correlated confirmer
+  // CLUSTERS; each cluster collapses to ONE effective confirmation (the MAX member weight; ALL member keys
+  // removed — never a SUM, never an add — VERIFY C1), and a monotonic clamp guarantees the demote can only
+  // hold-or-LOWER every weight (can only TIGHTEN; never promote — NS-9 / research/24 §4.1). The label is the
+  // SOLE derivation site (research/23 §4.3): we read the label's VERDICT, we never call the detector here.
+  const label = independenceLabel(
+    { topological: nConfirmers },
+    { confirmerSet: [...perHumanDecay.keys()], detectorFn: meCtx && meCtx.entanglementDetector },
+  );
+  const verdict = label.epistemic;
+  if (verdict && typeof verdict === 'object' && verdict.flag === 'ENTANGLEMENT-DETECTED') {
+    // Merge the flagged clusters into CONNECTED COMPONENTS (union-find) so the collapse is ORDER-INDEPENDENT +
+    // deterministic: overlapping clusters `[[A,B],[B,C]]` are ONE entangled group {A,B,C} -> one confirmation,
+    // not an order-dependent partial merge (VALIDATE/CodeRabbit Major). A component collapses to its MAX member
+    // weight (never a SUM — VERIFY C1); members are removed and the component's SINGLE contribution is
+    // accumulated separately (clusterR/clusterN), never a synthetic map key that could collide with a real
+    // rootOf id (VALIDATE M1). Union-find keys are DISTINCT, so a hostile `[[k,k]]` cannot re-read a deleted key
+    // -> `Math.max(w, undefined)` = NaN (VALIDATE H1). Only PRESENT confirmers (`demoted.has`) enter a component.
+    const demoted = new Map(perHumanDecay);          // NEW map — never mutate perHumanDecay (VERIFY M2)
+    const parent = new Map();
+    const find = (x) => {
+      let r = x; while (parent.get(r) !== r) r = parent.get(r);
+      while (parent.get(x) !== r) { const n = parent.get(x); parent.set(x, r); x = n; } // path-compress
+      return r;
+    };
+    for (const cluster of verdict.entangled) {
+      const members = (Array.isArray(cluster) ? cluster : []).filter((k) => demoted.has(k));
+      for (const k of members) if (!parent.has(k)) parent.set(k, k);
+      for (let i = 1; i < members.length; i += 1) parent.set(find(members[i]), find(members[0]));
+    }
+    const components = new Map();                     // component root -> [distinct member keys]
+    for (const k of parent.keys()) { const r = find(k); if (!components.has(r)) components.set(r, []); components.get(r).push(k); }
+    let clusterR = 0;
+    let clusterN = 0;
+    for (const members of components.values()) {
+      if (members.length <= 1) continue;             // a singleton component demotes nothing
+      let w = 0;
+      for (const k of members) { w = Math.max(w, demoted.get(k)); demoted.delete(k); }
+      clusterR += w;                                 // the whole component contributes ONE entry = its MAX weight
+      clusterN += 1;
+    }
+    let rDemoted = clusterR;
+    for (const w of demoted.values()) rDemoted += w;
+    const nDemoted = demoted.size + clusterN;
+    // monotonic clamp (VERIFY C1): a demote can ONLY tighten. `Number.isFinite` guards a stray NaN from slipping
+    // past the clamp (NaN comparisons are always false) — fail to the pre-demote value (VALIDATE H1 defense).
+    rConfirmers = Number.isFinite(rDemoted) ? Math.min(rConfirmers, rDemoted) : rConfirmers;
+    nConfirmers = Number.isFinite(nDemoted) ? Math.min(nConfirmers, nDemoted) : nConfirmers;
+  }
+
   // strength = SL expectation on [0,1]. FLOOR 0 with no confirmer: an UNCONFIRMED premise has no
   // verification — it must not read as the novice base-rate 0.5 (that would let an ungrounded chain
   // float to mid-strength, defeating the INV-9 weakest-link / empty-MIN honesty floor).
@@ -107,7 +160,7 @@ function crossVerify(premiseId, meCtx, now, recs) {
     strength,
     r: rConfirmers,          // the raw decay-weighted distinct-human survival (premise-score's r-leg)
     n_confirmers: nConfirmers,
-    label: independenceLabel({ topological: nConfirmers }), // overall WEAK (k minted roots fabricate k)
+    label,                   // overall WEAK (k minted roots fabricate k); carries the demote verdict (advisory)
     advisory: true,
   };
 }
