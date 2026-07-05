@@ -123,7 +123,7 @@ gates nothing; it is not a trust claim (see §8 for what actually hardened).
 | Anti-equivocation audit log | per-receiver RFC-6962 Merkle log; verify-when-present | Shipped (SHADOW) |
 | U1 issuance-stake | non-transferable, slashable stake → advisory funded-root axis | Shipped (SHADOW) |
 | Registration-provenance (`sigma_root`) | persona↔key binding verification + disarmed-by-default read-filter | Shipped (SHADOW) |
-| Cross-uid custody (deployed) | kernel-enforced key non-exfiltration, proven live | **4 world-anchored HARDENs** (§8) |
+| Cross-uid custody (deployed) | kernel-enforced key non-exfiltration, proven live | **world-anchored HARDENs — live count in §8** |
 | Live-edge signer | operator-deployed cross-uid signer signing *live* trust-graph edges | Planned (operator act) |
 | Trust gating (`actionable → true`) | promote an advisory readout to an irreversible action | Future (blocked on U2) |
 
