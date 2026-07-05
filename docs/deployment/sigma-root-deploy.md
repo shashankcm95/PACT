@@ -78,7 +78,66 @@ SHADOW→hardened. The crypto (Phases B–C) only ever proves *K_root authorized
 *K_root belongs to a real human* — a same-uid host can self-generate + seed + self-sign a root key and pass every
 in-process check (registration-provenance.js:65 residual). Mechanisms (deployment's choice): a signed public
 statement tying `humanUid ↔ K_root_pub`, a transparency-log entry, a notarized record, an in-person
-key-signing. **Until this is done, everything below only NARROWS.**
+key-signing. **This deployment chose the transparency-log mechanism — the concrete recipe is below.** **Until this is done, everything below only NARROWS.**
+
+#### A.3 via transparency log — the Sigstore/cosign recipe (the `world-anchored`-tier mechanism)
+
+To be **harden-eligible** — not merely a `world-read` narrow (the three-tier evidence model
+`self-asserted` < `world-read` < `world-anchored`; #273: integrity != provenance) — the log entry must be a
+**DSSE-signed attestation from an authenticated (OIDC-bound) producer**, logged with an inclusion proof; a bare
+self-upload is only `world-read`. `cosign` keyless does it in one step: Fulcio issues an ephemeral cert for your
+OIDC identity, signs a DSSE in-toto statement over `K_root_pub`, logs it to Rekor, and writes a bundle carrying
+signature + cert + inclusion proof.
+
+1. **Predicate** `root-binding.json` — the `(humanUid, K_root_pub)` binding (`rootPublicKeyPem` **byte-identical**
+   to what A.2 seeds):
+
+   ```json
+   { "humanUid": "<your-scarce-human-uid>",
+     "rootPublicKeyPem": "<K_root_pub>",
+     "purpose": "PACT sigma_root HumanRoot genesis attestation",
+     "deployment": "<host>", "seededAt": "<ISO timestamp>" }
+   ```
+
+2. **Attest keyless + log to Rekor** (omit `--key` for the interactive OIDC flow):
+
+   ```sh
+   cosign attest-blob K_root_pub.pem \
+     --predicate root-binding.json --type custom \
+     --bundle root-attestation.sigstore.json --yes
+   ```
+
+   `K_root_pub`'s digest lands in the in-toto **subject** (cryptographically bound); the predicate rides
+   alongside. **Do NOT hardcode a Rekor URL** — Rekor v2 (GA 2025-10) rotates the public-good log; cosign
+   resolves the current log from the published TrustedRoot.
+
+3. **Verify — this asserts *who* signed (the anchor):**
+
+   ```sh
+   cosign verify-blob-attestation --bundle root-attestation.sigstore.json \
+     --certificate-identity <you@your-idp> \
+     --certificate-oidc-issuer <issuer-url> \
+     --type custom K_root_pub.pem
+   ```
+
+4. **Record** the `root-attestation.sigstore.json` bundle + Rekor `logIndex` / `UUID` in the run record, next to
+   the seeded registry. The bundle is self-verifying; "attested" becomes durable and re-checkable.
+
+**Honest ceiling (NS-9).** This world-anchors the *assertion* (tamper-evident, timestamped, publicly auditable,
+OIDC-bound) — a genuine HARDEN of the root key's provenance-to-an-identity. It does **not** prove that identity
+is a *distinct real human* (that bottoms out in the OIDC provider = the U1 frontier), and a single log admits a
+split view until an N-of-M witness network closes it. It world-anchors the *root*; it does not by itself
+prove *who minted* any edge — the enabler to then close **B**. Gates nothing (`convert.actionable` stays `false`).
+
+> **Machine-check seam (do NOT build now).** To later verify this attestation in-process, reuse the RFC-6962
+> inclusion-proof primitives the Embers substrate already built (`verify-inclusion.js` over a
+> `{leaf_hash, inclusion_proof:{leaf_index, tree_size, audit_path}, checkpoint:{root, tree_size}}` — the shape
+> a Rekor proof provides). That is an Option-B build (an `attestationRef`-on-root field), a named residual.
+
+**Sources:** cosign [signing with blobs](https://github.com/sigstore/docs/blob/main/content/en/cosign/signing/signing_with_blobs.md),
+[attest-blob](https://github.com/sigstore/cosign/blob/main/doc/cosign_attest-blob.md),
+[verify-blob-attestation](https://github.com/sigstore/cosign/blob/main/doc/cosign_verify-blob-attestation.md);
+[Rekor v2 GA](https://blog.sigstore.dev/rekor-v2-ga/).
 
 ---
 
