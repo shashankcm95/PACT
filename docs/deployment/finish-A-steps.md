@@ -51,8 +51,12 @@ const { generateEdgeKeypair } = require('./v0/src/lib/edge-attestation');
 const fs = require('fs');
 const { publicKeyPem, privateKeyPem } = generateEdgeKeypair();
 fs.writeFileSync('K_root_pub.pem', publicKeyPem);
-fs.mkdirSync(process.env.HOME + '/.pact-root', { recursive: true, mode: 0o700 });
-fs.writeFileSync(process.env.HOME + '/.pact-root/K_root_priv.pem', privateKeyPem, { mode: 0o600 });
+const rootDir = process.env.HOME + '/.pact-root';
+const privPath = rootDir + '/K_root_priv.pem';
+fs.mkdirSync(rootDir, { recursive: true, mode: 0o700 });
+fs.chmodSync(rootDir, 0o700);   // enforce on rerun: mkdir's mode is ignored when the dir already exists
+fs.writeFileSync(privPath, privateKeyPem, { mode: 0o600 });
+fs.chmodSync(privPath, 0o600);  // enforce on rerun: writeFileSync's mode only applies when the file is created
 console.log('K_root_pub.pem written; K_root_priv in ~/.pact-root (0600). NEVER copy priv to rheap, NEVER commit.');
 ```
 
