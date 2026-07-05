@@ -49,9 +49,27 @@ Signal 5 ([`live-edge-run-2026-07-04.md`](live-edge-run-2026-07-04.md)) world-an
 on a live edge. This (signal 6) world-anchors the ROOT key's provenance-to-an-identity — a different axis. The
 two cover the custody (broker) and provenance (root) faces of the same fabric, each one run with a loud ceiling.
 
+## Phase B — executed 2026-07-05 (SHADOW dogfood, NOT a signal)
+
+Phase B ran on the Mac (`a2b-provision.js`, off-box): `createRegistry` → `registerRoot(human:merlin95, K_root_pub)`
+(A.2 seed) → minted a persona key → `registerPersona(did:key:zMerlin1, human:merlin95, K_pub)` → `signSigmaRoot`
+with `K_root_priv`. A **SHADOW dogfood** then ran the read-path gate against the real record:
+
+- `assessRegistrationFromRegistry(reg, { personaDid, sigmaRoot })` → **`sigmaRootChecksPassed: true`** — the whole
+  chain verifies (attested root → seeded root → provisioned persona → gate verifies).
+- `requiresOutOfBandRootAttestation: true` — the EXPECTED honest residual: the in-process check cannot see the A.3
+  Rekor attestation, so it correctly flags that the root's trust rests on the external attestation (done in A.3).
+
+Artifacts in `~/.pact-root/phaseB/` (`persona-Kpriv.pem` `0600`, off-repo). **Honest ledger (NS-9):** this
+VALIDATED the read-path `registration-gate` MECHANISM end-to-end against real data — it is **NOT a 7th signal** (no
+out-of-band cost; the north-star stays **6**), it **gates nothing** (`convert.actionable` stays `false`), and the
+construction is a fresh in-memory registry on the Mac, **NOT persisted to rheap's live read-path** (that is the
+deferred Phase C). It sets up **closing Option B** (a persona provably bound to the attested root).
+
 ## Next (operator, deferred — NS-7)
 
-- **Phase B:** provision a persona under this root (the root signs the binding with `K_root_priv` on the Mac) —
-  sets up closing Option B.
-- **Phase C:** arm the read-path — gated on the P2 signer + a live root-schema registry path; NS-9 theater
-  without them. See [`sigma-root-deploy.md`](sigma-root-deploy.md).
+- **Phase B:** ✅ executed 2026-07-05 — see the section above (SHADOW dogfood passed; not a signal).
+- **P2 — the Phase-6 world-anchored signer** (`plans/30`): the next build; makes `signingArmed` honest
+  (both-or-neither). Phase C's arm is blocked on it.
+- **Phase C:** arm the read-path — gated on P2 + a live root-schema registry path; NS-9 theater without them.
+  See [`sigma-root-deploy.md`](sigma-root-deploy.md).
