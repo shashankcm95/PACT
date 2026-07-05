@@ -25,6 +25,7 @@ Ratified as the 6th world-anchored HARDEN signal. Full rationale + the runbook:
 | Root identity (`humanUid`) | `human:merlin95` |
 | OIDC identity (the anchor) | a Google account (`https://accounts.google.com`); the exact signer is recorded in the Rekor entry |
 | Rekor log index | `2079476377` (public, immutable) |
+| Rekor UUID | fetch via `rekor-cli get --log-index 2079476377` — the log index above is itself a canonical, sufficient re-identifier |
 | Bundle | `root-attestation.sigstore.json` (self-verifying) |
 | Predicate type | `custom` (in-toto; subject = `sha256(K_root_pub.pem)`) |
 
