@@ -1,6 +1,6 @@
 ---
 lifecycle: persistent
-status: SCOPING -- plan authored; pre-build VERIFY pending (no code yet)
+status: W1 DESIGNED -- pre-build 3-lens VERIFY PROCEED-WITH-FOLDS (folds baked into the W1 design below); ready to build (no code yet)
 source: architect-led recon (p2-signer-recon workflow, 2026-07-05) + Loom->PACT handoff (broker key vet)
 ---
 
@@ -189,7 +189,205 @@ so the arc can resume. W1 -> W2 -> W3 are code (SHADOW/disarmed, byte-identical 
 operator deploy + out-of-band attestation (USER, NS-7) -- the ONLY step that turns the SHADOW composition into a
 world-anchored HARDEN, and the potential 7th signal.
 
-## Pre-build VERIFY -- PENDING
+## Pre-build VERIFY -- DONE (Wave 1): PROCEED-WITH-FOLDS
 
-Per the kernel/security/auth 3-lens discipline, run a VERIFY board (architect + code-reviewer + hacker) against
-this plan BEFORE building W1. Not yet done. `/verify-plan`, or an explicit 3-lens spawn, is the next gate.
+A 3-lens board (architect + code-reviewer + hacker) ran 2026-07-05 against a grounded W1 draft + the real files
+(`sigma-root.js`, `request-auth.js`, `broker-sign.js`, `broker-client.js`, `broker-launch.js`, `edge-attestation.js`,
+`record.js`, `caller-auth.js`, `arm-flags.js`). All three returned **PROCEED-WITH-FOLDS** -- zero CRITICAL, zero
+NEEDS-REVISION. (Mechanism note: the first attempt was a schema'd Workflow that exhausted the StructuredOutput
+retry cap; re-run as free-text parallel agents, which is what produced these findings. No schema, no choke.)
+
+- **Architect (design/factoring):** PROCEED-WITH-FOLDS. Headline fold: do NOT copy-paste the TOCTOU-hardened key
+  vet into a second entrypoint -- extract a shared `broker-core.js`. Second fold: the root broker needs its OWN
+  WHO-allowlist, not the frame broker's. Keep the binding gate a SIBLING module (do not over-abstract).
+- **Code-reviewer (correctness):** PROCEED-WITH-FOLDS. Confirmed the `signSigmaRoot` body-thread is back-compat
+  (every existing caller passes `{privateKeyPem}`; `resolveSigner`'s closure ignores the 2nd arg,
+  `edge-attestation.js:80`). Folds: mirror the trust-side-only ASCII-trim asymmetry; a grep forward-guard test; the
+  `recordIdToSign: null`-on-every-deny invariant; preserve the per-branch close-before-fail control flow verbatim.
+- **Hacker (adversarial, LIVE probes -- reproduced the collision, not paper reasoning):** PROCEED-WITH-FOLDS.
+  Must-folds: state key separation as the PRIMARY invariant + a same-inode-refusal test (HIGH-1);
+  `resolveRequireBinding` MANDATORY default-ON + asymmetric flag parse (HIGH-2); controller-bind byte-mirrors
+  `personaBinds` (MED-1). Name the raised-stakes `#273` residual LOUD (MED-2).
+
+### The decisive finding (hacker HIGH-1, proven live)
+
+**KEY SEPARATION -- not the `_type` tag, not the disjoint-field set -- is the only thing that defuses cross-protocol
+signature reuse.** `computeRecordId` (the FRAME hasher, `record.js:52-60`) is field-AGNOSTIC: feed the frame broker a
+body that is byte-for-byte a binding preimage `{_type, controller, k_pub, persona_did}` and it computes and signs the
+exact `computeBindingId` output. The hacker reproduced this live (`bindingId == frameId`, and the sigma-root sig
+`verifyRecordSig`-accepted as a frame sig) **under a single key**. So if `PACT_ROOT_KEY_FILE` ever resolves to the
+same inode as `PACT_BROKER_KEY_FILE`, the whole design silently collapses into a cross-protocol signing oracle for the
+trust root. The `sigma-root.js:16-23` comment already hedges this ("computeRecordId is field-AGNOSTIC ... COULD be
+made to collide"); the plan's earlier W1 skeleton had the rationale backwards (it leaned on the `_type` tag). The
+load-bearing invariant is: **different keys + verifier-side domain-tag + recompute-bind-throws-on-a-frame-body.**
+
+## Wave 1 -- detailed design (folds baked in)
+
+### Recon-completeness correction to the gap statement
+
+The built-vs-gap ledger above calls W1 "the one unbuilt code seam" -- `signSigmaRoot(binding, {signer: crossUidBrokerSigner(...)})`.
+Grounding the design against HEAD showed that is an **undercount**. The cross-uid broker's entire WHAT-gate
+(`authorizeRequest` -> `computeRecordId` + persona-bind on `src_persona_did`, `request-auth.js:90-118`) is
+**frame-shaped**. A sigma-root binding has a DIFFERENT preimage (`computeBindingId`, `_type`-tagged, fields
+`{personaDid, publicKeyPem, controller}` -- no `src_persona_did`). So merely wiring the `{signer}` seam does NOT
+work: with require-frame ON the re-derived frame id `!=` the argv binding id -> `record-id-mismatch` (fail closed);
+with require-frame OFF the root key signs the argv hex BLINDLY (a universal oracle). W1 therefore needs a
+**binding-aware WHAT-gate + a custody-isolated root entrypoint**, not just the compose seam.
+
+### The pieces (as folded)
+
+**Piece A -- broker-side binding WHAT-gate (LOAD-BEARING, un-bypassable, runs in the separate uid).**
+New pure module `v0/src/identity/binding-request-auth.js`, a SIBLING to `request-auth.js` (architect Q2: do NOT
+unify behind a hasher-parameterized core -- the two hashers have OPPOSITE throw contracts; `computeRecordId` is
+permissive on arrays/scalars while `computeBindingId` throws on any missing field, so a unified core would hide a
+real security divergence). `authorizeBindingRequest({ requireBinding, claimedRecordId, presentedBodyRaw, brokerController })`:
+- drain/parse the presented BINDING body (reuse the bounded stdin read + `MAX_FRAME_BYTES` cap).
+- reject non-plain-object explicitly (MED-3: keep this even though `computeBindingId` would throw -- do not rely
+  on the throw as the sole gate; a future `requireField` refactor could reopen it).
+- **recompute-bind:** `id = computeBindingId(parsed)` wrapped in try/catch (a throw on a missing field -> fail
+  closed, mirroring `recomputeBinds` at `request-auth.js:71-73`); require `id === claimedRecordId` -- sign the
+  COMPUTED id, never the argv-asserted one.
+- **controller-bind (MED-1 -- byte-mirror `personaBinds`, `request-auth.js:56-61`):** typecheck BOTH operands to
+  non-empty string BEFORE the `===`; unset/whitespace-only `brokerController` -> explicit `deny('controller-unset')`.
+  Do NOT lean on `computeBindingId`'s body-side throw to cover the equality gate -- they are orthogonal.
+- ASCII-trim the TRUSTED side only (`brokerController` from env), byte-exact-untrimmed on the untrusted body's
+  `controller` (code-reviewer: mirror the `request-auth.js:101` asymmetry + its rationale).
+- every `deny` returns `{ decision, reason, recordIdToSign: null }` via a single `deny()` helper (code-reviewer:
+  preserve the null-on-every-deny invariant structurally, not per-branch).
+
+**Piece B -- extract `broker-core.js`; add a dedicated custody-isolated `sigma-root-broker.js` entrypoint.**
+Architect F1 (highest-value fold): do NOT copy-paste the ~90 lines of swap-resistant key vet + bounded stdin drain +
+caller-auth + fixed-no-echo fail + empty-stdout contract from `broker-sign.js` -- a forked copy of a TOCTOU-hardened
+vet WILL diverge (a CodeRabbit Major already caught a mask bug in that exact vet once). Extract:
+```
+broker-core.js       (new)  -- runBroker({ keyFileEnv, authorizeFn, requireFlagName, policyEnvName, allowlistEnv, disabledNotice })
+                               owns: readStdinBounded, authorizeCaller wiring, O_NOFOLLOW+fstat key vet (& 0o077),
+                               close-before-fail control flow (verbatim -- do NOT consolidate into one try/finally),
+                               fail()/stdout contract, last-resort main().catch.
+broker-sign.js       (thin) -- runBroker({ keyFileEnv:'PACT_BROKER_KEY_FILE', authorizeFn:authorizeRequest,
+                               requireFlagName:'PACT_BROKER_REQUIRE_FRAME', policyEnvName:'PACT_BROKER_PERSONA_DID',
+                               allowlistEnv:'PACT_BROKER_ALLOWED_UIDS' })
+sigma-root-broker.js (thin) -- runBroker({ keyFileEnv:'PACT_ROOT_KEY_FILE', authorizeFn:authorizeBindingRequest,
+                               requireFlagName:'PACT_BROKER_REQUIRE_BINDING', policyEnvName:'PACT_ROOT_CONTROLLER',
+                               allowlistEnv:'PACT_ROOT_ALLOWED_UIDS' })
+```
+Custody isolation is preserved because it lives at the PROCESS / uid / env boundary -- separate executables, separate
+key-file envs, separate wrappers/uids. A shared LIBRARY does not co-locate the keys; only a shared PROCESS would.
+- **HIGH-1 same-inode refusal (in `sigma-root-broker.js` / `broker-core`):** refuse if the resolved `PACT_ROOT_KEY_FILE`
+  inode == the resolved `PACT_BROKER_KEY_FILE` inode. A mis-deploy that points both at one key is the cross-protocol
+  oracle; fail closed + emit.
+- **F2 independent WHO-gate:** the root broker reads `PACT_ROOT_ALLOWED_UIDS`, NEVER `PACT_BROKER_ALLOWED_UIDS` --
+  reusing the frame allowlist would let anyone entitled to a K_broker frame sig also mint a K_root binding sig,
+  defeating the isolation. Typically a NARROWER allowlist.
+- **HIGH-2 mandatory fail-closed require-binding:** a new `resolveRequireBinding` mirroring `resolveRequireFrame`
+  (`request-auth.js:43-47`) -- DEFAULT-ON gated on `PACT_ROOT_CONTROLLER` presence; explicit `1`/`0` override; run
+  `assessEnableFlag('PACT_BROKER_REQUIRE_BINDING', raw)` for the misconfig alert; the deployed-signal reads through
+  the asymmetric `isDeploySignalSet` so an operator TYPO fails CLOSED (a garbage token on a controller-unset box must
+  NOT drop to the blind-argv passthrough -- that is a universal oracle for K_root). This promotes plan open-Q #3 from
+  "open" to CLOSED-MANDATORY.
+
+**Piece C -- host-side compose (thread the binding body).**
+`sigma-root.js:57-61`: change `signRecordId(bindingId, rootSignerOpts || {})` to `signRecordId(bindingId, rootSignerOpts || {}, binding)`
+-- pass the ALREADY-VALIDATED `binding` object as the preimage 3rd arg (code-reviewer: do not re-serialize; by that
+point `computeBindingId` has already thrown-and-been-caught if malformed). Back-compat PROVEN: every existing
+`signSigmaRoot` caller passes `{privateKeyPem}` (grep: `sigma-root.test.js`, `registration-gate*.test.js`,
+`registration-provenance.test.js`, `admission-gate.test.js`); `resolveSigner`'s in-process closure is single-param
+`(recordId)` (`edge-attestation.js:80`) so it ignores the body -- the direct path is inert. The cross-uid path uses
+`crossUidBrokerSigner`/`brokerSigner`, which ALREADY forwards `body` on the child's stdin (`broker-client.js:66-68`),
+so NO seam change is needed. Reuse `crossUidSudoArgs` verbatim for the root wrapper (LOW-2: no parallel argv builder).
+
+**Piece D -- tests (non-vacuous; folds included).**
+- unit `binding-request-auth`: valid binding -> allow (`id = computeBindingId`); a real, valid P-FRAME body ->
+  deny AND assert `computeBindingId` THROWS on it (the non-vacuous proof of domain separation, code-reviewer T4);
+  array/scalar -> deny; mismatched argv id -> `record-id-mismatch`; wrong controller -> `controller-mismatch`;
+  unset controller -> `controller-unset`; whitespace-only controller -> deny (the trim asymmetry, T3); EACH deny
+  asserts `recordIdToSign === null` and is proven to fire RED.
+- `broker-core` / `sigma-root-broker`: a grep forward-guard test -- `sigma-root-broker.js` references
+  `PACT_ROOT_*` and contains ZERO `PACT_BROKER_KEY_FILE` / `PACT_BROKER_PERSONA_DID` / `PACT_BROKER_ALLOWED_UIDS`
+  (T1, the copy-paste-wrong-key catch); the same-inode refusal test (T2); fd-leak-across-N-iterations on the shared
+  vet (T5); `broker-sign.js`'s EXISTING `broker.test.js` passes unchanged post-extraction (the behavioral-equivalence
+  gate for W1a).
+- integration: the full round-trip -- sign-through-broker -> `verifySigmaRoot` under the root PUBLIC key (T6,
+  load-bearing: a broker that produces a sig that does not verify is the silent-mis-wire `assertBrokerPersona`
+  exists to catch); a frame body refused; a blind argv hex (no body, require-binding ON) refused; the key vet still
+  refuses `0640`/`0644`, passes `0600`.
+
+### Sub-wave split (de-risk touching a live security file)
+
+The `broker-core.js` extraction refactors `broker-sign.js` -- a LIVE, hardened, security-critical file. Split W1 so
+the refactor is isolated and behavior-proven before any new signing path is added:
+- **W1a -- extract `broker-core.js`** (behavior-preserving). Move the drain/caller-auth/key-vet/fail/stdout-contract
+  into `broker-core`; `broker-sign.js` becomes a thin entrypoint injecting the frame params. GATE: `broker.test.js`
+  (+ the whole suite) passes UNCHANGED -- that is the behavioral-equivalence proof. No new behavior in W1a.
+- **W1b -- the binding path.** `binding-request-auth.js` + `sigma-root-broker.js` + the `signSigmaRoot` body-thread +
+  `resolveRequireBinding` + the same-inode refusal + all Piece-D tests.
+
+### Consolidated fold list (traceable to lens)
+
+| # | Fold | Lens | Piece |
+|---|---|---|---|
+| F1 | Extract `broker-core.js`; do NOT copy-paste the key vet | architect | B / W1a |
+| F2 | `PACT_ROOT_ALLOWED_UIDS` -- independent root WHO-gate (never reuse the frame allowlist) | architect + reviewer | B |
+| F3 | Restate domain separation: recompute-bind-throw is the gate; `_type` tag + different keys are defense-in-depth | architect + hacker + reviewer | A |
+| S1 | KEY SEPARATION is the PRIMARY invariant + a same-inode-refusal test (proven-live collision) | hacker HIGH-1 | B |
+| S2 | `resolveRequireBinding` MANDATORY default-ON + asymmetric flag parse (typo fails CLOSED) | hacker HIGH-2 | B |
+| S3 | controller-bind byte-mirrors `personaBinds` (both operands typechecked; unset -> explicit deny) | hacker MED-1 + reviewer | A |
+| S4 | Name the raised-stakes `#273` residual LOUD in the module header (see residuals) | hacker MED-2 | A |
+| C1 | Keep the explicit non-object reject (do not rely on the throw alone) | hacker MED-3 + reviewer | A |
+| C2 | `deny()` always sets `recordIdToSign: null`; test asserts the field directly | reviewer | A |
+| C3 | Preserve per-branch close-before-fail verbatim; do not consolidate into one try/finally | reviewer | B (subsumed by F1: one copy) |
+| C4 | Sibling entrypoint needs its own last-resort `main().catch(() => fail('internal error'))` | reviewer | B |
+| C5 | `signSigmaRoot` passes the already-validated `binding` object (no re-serialize) | reviewer | C |
+| T1-T6 | Test folds: grep-guard, same-inode, whitespace-controller, valid-frame-throws, fd-leak, full verify round-trip | reviewer + architect | D |
+
+### Environment variables (named before build -- F4)
+
+- `PACT_ROOT_KEY_FILE` -- the K_root private key path (distinct inode from `PACT_BROKER_KEY_FILE` -- enforced).
+- `PACT_ROOT_CONTROLLER` -- the root controller DID (e.g. `human:merlin95`); the policy env for controller-bind;
+  unset -> fail closed in require-binding mode.
+- `PACT_ROOT_ALLOWED_UIDS` -- the root broker's WHO-allowlist (independent of the frame broker's).
+- `PACT_BROKER_REQUIRE_BINDING` -- the require-binding flag (default-ON when `PACT_ROOT_CONTROLLER` is set).
+
+### Named NS-9 residuals (accepted for SHADOW; carried LOUD)
+
+- **R1 (hacker MED-2) -- raised-stakes `#273` co-forge.** `computeBindingId` is exported and `k_pub`
+  (`publicKeyPem`) is a CALLER-SUPPLIED string the root never independently authorized. controller-bind narrows to
+  ONE controller, but WITHIN `human:merlin95` a same-uid caller who reaches the root broker can mint "K_root
+  authorized MY key as persona P" for any P -- the payload-semantics ceiling, RAISED to the trust root. The
+  `sigma-root-broker.js` module header MUST name this LOUD (do NOT inherit the frame broker's residual framing
+  unchanged). Closes ONLY with a deployed + attested cross-uid signer (the same `#273`-close direction as the rest
+  of the substrate); until then, integrity != provenance.
+- **R2 (hacker LOW-1 + architect) -- replay/revocation is a `.v2` concern.** A sigma-root binding is idempotent
+  (no nonce); a replayed signature re-asserts the same static (persona, key, controller) fact -- harmless WHILE the
+  binding is a static truth. The risk emerges only if a later wave makes bindings REVOCABLE: a replayed
+  pre-revocation sig. The `.v2` rotation-epoch format (`sigma-root.js:23`) is what carries the freshness/revocation
+  field. Defer is safe ONLY with this assumption stated -- named here so the arm wave cannot forget it.
+- **R3 -- back-compat callers are inert.** All current `signSigmaRoot` callers use `{privateKeyPem}`; the body 3rd
+  arg is inert for them (probed, above). Open/Closed preserved.
+
+### Open questions -- board dispositions
+
+1. **Freshness scope (open-Q #1):** DEFER for SHADOW. `.v2` rotation-epoch carries revocation/freshness (R2). All
+   three lenses concur.
+2. **Deploy target + root uid (open-Q #2):** STILL a USER decision (rheap VM `ptrace_scope=2` vs a fresh Mac). The
+   board's strong recommendation: the root key gets its OWN distinct uid + key file + allowlist (the whole point of
+   Piece B's custody isolation). Re-probe `kernel.yama.ptrace_scope`, `swapon --show`, `core_pattern` at deploy.
+3. **P2-now vs hold-for-U2 (open-Q #3):** BUILD NOW (recon recommended; USER ratified -- "start implementation").
+   P2 is INFORM-only; `convert.actionable` stays hard-false.
+4. **Arm-signal shape (open-Q #4):** DISTINCT `PACT_ROOT_*` opt-in (not a reuse of the frame broker's arms) --
+   interface segregation, narrow arms (mirrors `plans/39`'s distinct `meCtx.regProvenance`). Settled by F2/F4.
+
+### Runtime probes (re-run at W1 build time -- repo state decays)
+
+- Probe: `grep -n "signRecordId(bindingId" v0/src/identity/sigma-root.js` -> confirm the body 3rd arg still unthreaded (Piece C target).
+- Probe: `grep -rn "PACT_ROOT_KEY_FILE\|PACT_ROOT_CONTROLLER\|PACT_ROOT_ALLOWED_UIDS\|REQUIRE_BINDING" v0/src/` -> expect NONE (all new).
+- Probe: `grep -n "readStdinBounded\|O_NOFOLLOW\|0o077\|authorizeCaller" v0/src/identity/broker-sign.js` -> the vet lines to extract into `broker-core` (W1a).
+- Probe: `grep -n "function sign(recordId, body)\|spawnOpts.input" v0/src/identity/broker-client.js` -> confirm the stdin body-forward still present (Piece C rests on it).
+- Probe: `grep -rn "computeRecordId(" v0/src/lib/record.js` -> confirm field-agnostic (the HIGH-1 collision premise).
+
+## Pre-build VERIFY -- board transcript pointers
+
+The three lens transcripts (architect / code-reviewer / hacker) ran 2026-07-05; their verdicts + folds are folded
+into the Wave 1 design above. This section supersedes the earlier "PENDING" note. The next gate is the W1a build
+(extract `broker-core`, behavior-preserving), then W1b (the binding path) -- both SHADOW/disarmed, byte-identical
+when the require-binding flag is off.
