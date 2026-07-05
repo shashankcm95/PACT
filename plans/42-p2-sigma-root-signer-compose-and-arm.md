@@ -85,7 +85,7 @@ in `custody-verify.js` -- a separate, correct wrapper-WRITABLE check, not the pr
 - Probe: `grep -n "0o077" v0/src/identity/broker-sign.js` -> owner-only key vet present (ALREADY hardened via #19; no fix needed).
 - Probe: `grep -n "actionable" v0/src/trust/convert.js` -> `convert.actionable` still hard-false (U2 open).
 
-## Plan skeleton (waves -- no code here; the build follows AFTER the VERIFY board)
+## Plan skeleton (waves -- no code here; the build follows the VERIFY board)
 
 - **Wave 0 -- re-probe + scope-lock.** Re-run the probes above against HEAD; record each `(claim, probe, result)`
   inline. VERIFY the owner-only broker key vet (already applied via #19 -- no code change; the sigma-root broker
@@ -178,14 +178,13 @@ in `custody-verify.js` -- a separate, correct wrapper-WRITABLE check, not the pr
    hard-false). Build the world-anchored signing HARDEN standalone now (OQ-NS-6: only a world-anchored signal
    HARDENS, and this is the first available), or hold until U2 so provenance + gating land together? Recon
    recommends build-now; the USER ratifies given P2 is INFORM-only.
-4. ~~The handoff doc~~ -- **RESOLVED** (read; the owner-only broker-key-vet fix is ALREADY APPLIED via #19 -- re-probed at HEAD, not a Wave 0 TODO).
-5. **Arm-signal shape** -- does the P2 mint producer reuse the `signingArmed` / `admissionArmed` both-or-neither
+4. **Arm-signal shape** -- does the P2 mint producer reuse the `signingArmed` / `admissionArmed` both-or-neither
    pair, or take its OWN distinct deploy-DI opt-in (mirroring `plans/39`'s choice of a distinct `meCtx.regProvenance`
    to keep arms narrow, interface segregation)?
 
 ## Sequencing
 
-W0 (re-probe + key-vet fix + settle open Qs) gates W1. `plans/31` (the precondition `plans/30 §9` named) is DONE,
+W0 (re-probe + scope-lock + settle open Qs) gates W1. `plans/31` (the precondition `plans/30 §9` named) is DONE,
 so the arc can resume. W1 -> W2 -> W3 are code (SHADOW/disarmed, byte-identical when off); W4 is docs; W5 is the
 operator deploy + out-of-band attestation (USER, NS-7) -- the ONLY step that turns the SHADOW composition into a
 world-anchored HARDEN, and the potential 7th signal.
