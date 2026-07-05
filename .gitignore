@@ -2,3 +2,12 @@ node_modules/
 .DS_Store
 *.log
 _SESSION-RESUME.md
+
+# PACT sigma_root deploy artifacts -- operator-local, NEVER commit.
+# Defense-in-depth: K_root_priv already lives outside the repo (~/.pact-root); these
+# globs close the accidental-commit path for the public artifacts + throwaway scripts too.
+*.pem
+*.sigstore.json
+root-binding.json
+a1-mint.js
+a2b-provision.js

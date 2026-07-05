@@ -48,6 +48,16 @@ now reserves an empty slot. The USER then chose the logically-PRIOR step:
 > remains the deferred hardening-leaning branch. **Recon 2026-06-23 chose the Merkle/CT-log anti-equivocation
 > layer (the spec §7 P0 gap) as the next BUILD** over these narrowing options — see `plans/15` (forthcoming).
 
+> **▶ RE-CONFIRM 2026-07-03 (USER, triggered by the Embers lessons-commons arriving):** the CONFIRM-provenance
+> carrier stays **DEFERRED**. Embers (a separate lessons-commons repo, `~/Documents/embers/`) provides a
+> world-anchored **merge-hash / contribution-PROVENANCE** source — but that is a DIFFERENT axis than the one
+> this carrier was blocked on (a world-anchored **substrate-DIVERSITY / independence** source, to make the
+> disjointness measure real). A provenance anchor does not populate the diversity/disjointness field, so
+> un-deferring now would still reserve a mostly-empty slot. Building ON the carrier also = Embers **Phase 4**
+> (the consumption→outcome CONFIRM loop), which is unbuilt. **Revisit when:** Embers Phase 4's CONFIRM loop
+> ships AND a concrete consumer here would measure something real from the CONFIRM provenance. (Embers-side
+> record: `~/Documents/blueprints/2026-07-01-embers-DECISIONS.md` FORK-3 row.)
+
 ## FORK-2 (2026-06-22) — the foundational entry: which trust-hardening sub-direction first?
 
 Within the foundational pivot (FORK-1 chose it), which sub-direction does the first wave take? Per OQ-NS-6,
