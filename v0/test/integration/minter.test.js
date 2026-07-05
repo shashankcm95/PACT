@@ -133,9 +133,11 @@ test('forward-guard (HEURISTIC, not adversarial): no non-test src/ file passes r
   // REAL guarantee is the structurally key-free minter (the sole src/ producer) + code review; this just
   // catches the honest mistake early.
   const SRC = path.join(__dirname, '..', '..', 'src');
-  // the crypto seam + key-gen + the buildFrame signature doc + the P-broker custody CLI (broker-sign.js
-  // is the ONE legitimate per-process key-LOADER — it reads PACT_BROKER_KEY_FILE and signs; see plans/05).
-  const ALLOW = new Set(['edge-attestation.js', 'keypair.js', 'frame.js', 'broker-sign.js']);
+  // the crypto seam + key-gen + the buildFrame signature doc + the P-broker custody core (broker-core.js
+  // is the ONE legitimate per-process key-LOADER — it reads the broker key file and signs; the broker-sign.js
+  // / sigma-root-broker.js entrypoints are thin wiring over it, plans/42 W1a. broker-sign.js is kept in the
+  // set defensively though it no longer holds the sign call; see plans/05).
+  const ALLOW = new Set(['edge-attestation.js', 'keypair.js', 'frame.js', 'broker-sign.js', 'broker-core.js']);
   const offenders = [];
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).forEach((e) => {
     const fp = path.join(d, e.name);
