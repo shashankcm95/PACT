@@ -146,10 +146,10 @@ gates nothing; it is not a trust claim (see §8 for what actually hardened).
 
 ## 8. Success metrics
 
-**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **5**. Only this number
+**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **6**. Only this number
 reflects trust *advancing*; it is deliberately hard to move — it requires a real out-of-band cost, not code.
 
-**ACHIEVED — the 5 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
+**ACHIEVED — the 6 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
 loud honest ceiling — NS-9):
 
 | # | Signal | What it proved (world-anchored) | Honest ceiling — still OPEN |
@@ -159,12 +159,19 @@ loud honest ceiling — NS-9):
 | 3 | R2-WHAT per-request auth | the broker signs only what it recomputes (persona-mismatch / record-id-mismatch denies) | narrows-not-closes R2 (entitled operator can assert any payload); persona-did is policy not crypto-bound; R3 |
 | 4 | R-heap non-exfiltration | on Linux `ptrace_scope=2`, the signing key is non-exfiltrable from the running broker's memory (cross-uid AND same-uid); 24/24 PASS, non-vacuous | does NOT close the same-uid oracle, hypervisor/root, R3, or the apex; config-conditional; one box, one run |
 | 5 | R2-provenance — live-edge key-custody | on box `rheap`, the cross-uid-custodied key (owner uid 999; host uid 1000 `EACCES`; `ptrace_scope=2`; attested) signed a **freshness-bound** VOUCH edge that verifies under the registered broker key; a host-only attacker cannot forge a broker-attributed edge (containment proven, `edge-provenance-proof.test.js`) | does NOT prove "who minted" in general (host-writable registry: a same-uid self-register weighs equally, the 5th co-forge leg OPEN); gates nothing (`actionable` hard-false; the read-path sigma-root filter `registration-gate` is wired but disarmed, and even armed only narrows the advisory count); R3 / U1 untouched; one box, one run |
+| 6 | R2-root-provenance — genesis root attested | the genesis root key for `human:merlin95` was minted off-box, and its public key attested out-of-band to a **public immutable transparency log** (Sigstore/Rekor index `2079476377`; a DSSE in-toto statement under a Fulcio cert bound to a real OIDC identity), `Verified OK` — hardening the root PROVENANCE and closing the self-forge surface `registration-provenance.js:70` names (a same-uid host could self-generate + seed + self-sign a root) | does NOT prove `human:merlin95` is a distinct real human (rests on the OIDC provider — the U1 frontier); the attested root is NOT yet wired into a live gate (the sigma-root layer is SHADOW; the live registry has no root schema) — the enabler to close B, gates nothing; root-key custody is same-uid file perms (integrity, not a hardened boundary; HSM deferred); off-box, one run |
 
 Signal 5 was established live on box `rheap` (2026-07-04) — full evidence + honest ceiling in
 [`deployment/live-edge-run-2026-07-04.md`](deployment/live-edge-run-2026-07-04.md). It re-confirms signals 1 and 4
 (at-rest key-custody) and extends them to a live trust-graph edge; it does **not** on its own close the "who
 minted" leg (that needs arming the already-wired `registration-gate` filter + the operator's out-of-band
 root-key attestation — see the run record's follow-up).
+
+Signal 6 delivered exactly that out-of-band root-key attestation (2026-07-05, off-box) — the genesis root
+`human:merlin95` attested to Sigstore/Rekor (index `2079476377`); full evidence in
+[`deployment/root-attestation-run-2026-07-05.md`](deployment/root-attestation-run-2026-07-05.md). It hardens the
+root PROVENANCE (closing the self-forge surface `registration-provenance.js:70` names) but leaves the root
+not-yet-wired-live (the enabler to close B; gates nothing) and does **not** close U1.
 
 **Health metrics** (necessary, not sufficient — NOT trust progress): the test suite green (run `node
 test/run.js` for the live count); the last full-substrate coherence checkpoint COHERENT 4/4; the layering
