@@ -65,16 +65,16 @@ SHADOW/disarmed (byte-identical when disarmed, per the `plans/36`/`39` wired-liv
 HARDEN is the operator's out-of-band root-key attestation and arm-flag set (NS-7), which Claude never performs. It
 informs, it does not gate -- U2 stays open, so `convert.actionable` remains hard-false.
 
-## Prerequisite security fix (folded into Wave 0) -- owner-only broker key vet
+## Prerequisite security check -- owner-only broker key vet (ALREADY APPLIED; verify-only)
 
-A Loom->PACT handoff (`~/Documents/claude-toolkit/docs/handoff-pact-broker-sign-keyperm.md`) surfaced that
-`broker-sign.js:135` masks `& 0o022` (write bits only), so a `0644`/`0640` group/world-**READABLE** private signing
-key PASSES the vet -- a custody-bypass-class hole (a third uid in the broker's group can read the signing key and
-sign directly, no `sudo`, no broker process). Power Loom hit the identical bug (CodeRabbit Major) and hardened to
-`& 0o077` (owner-only). **P2's sigma-root broker installs a NEW private root key -- this vet must be owner-only
-FIRST.** Fix: `broker-sign.js:135` `& 0o022` -> `& 0o077` + the message/comment; **flip** `broker.test.js:198-199`
-(a `0644` key must now be REFUSED; keep a `0600`-passes case so the vet stays non-vacuous). This resolves the
-recon's open question about the handoff doc.
+A Loom->PACT handoff (`~/Documents/claude-toolkit/docs/handoff-pact-broker-sign-keyperm.md`, 2026-06-24) flagged
+that `broker-sign.js` masked `& 0o022` (write bits only), letting a `0644`/`0640` group/world-**READABLE** private
+signing key pass the vet -- a custody-bypass-class hole. **RE-PROBED 2026-07-05: ALREADY FIXED.** PR #19
+(`facf65d`) hardened the vet to owner-only (`broker-sign.js:149`, `& 0o077`), and `v0/test/integration/broker.test.js`
+is non-vacuous (`0644` refused, `0640` refused, `0600` passes). The handoff doc's "not yet applied" status was
+written BEFORE #19 merged and had decayed (status-decay). **So there is NO Wave 0 code fix -- it is a verified
+precondition** for P2's sigma-root broker key install, which reuses the same vet. (The remaining `& 0o022` hits are
+in `custody-verify.js` -- a separate, correct wrapper-WRITABLE check, not the private-key vet.)
 
 ## Runtime Probes (Wave 0 -- repo state decays; re-probe at build time)
 
@@ -82,14 +82,14 @@ recon's open question about the handoff doc.
 - Probe: `grep -rn "signingArmed" v0/src/` -> `admission-gate.js` still the sole reader; nothing SETS it live.
 - Probe: `grep -n "registration-gate\|filterAnchoredRecords" v0/src/trust/convert.js` -> still wired-live-disarmed.
 - Probe: `grep -rn "crossUidBrokerSigner\|signSigmaRoot(" v0/src/` -> NO live sigma-root broker instantiation (expect none).
-- Probe: `sed -n '135p' v0/src/identity/broker-sign.js` -> `& 0o022` still present (the vet to harden).
+- Probe: `grep -n "0o077" v0/src/identity/broker-sign.js` -> owner-only key vet present (ALREADY hardened via #19; no fix needed).
 - Probe: `grep -n "actionable" v0/src/trust/convert.js` -> `convert.actionable` still hard-false (U2 open).
 
-## Plan skeleton (waves -- no code here; the build follows AFTER the VERIFY board)
+## Plan skeleton (waves -- no code here; the build follows the VERIFY board)
 
-- **Wave 0 -- re-probe + scope-lock + the key-vet fix.** Re-run the probes above against HEAD; record each
-  `(claim, probe, result)` inline. Apply the owner-only broker key-vet fix (`& 0o022` -> `& 0o077` + test flip).
-  Lock edge type = VOUCH, freshness-bound (`plans/30 §9` recorded decision). Settle the open questions below.
+- **Wave 0 -- re-probe + scope-lock.** Re-run the probes above against HEAD; record each `(claim, probe, result)`
+  inline. VERIFY the owner-only broker key vet (already applied via #19 -- no code change; the sigma-root broker
+  reuses it). Lock edge type = VOUCH, freshness-bound (`plans/30 §9` recorded decision). Settle the open questions below.
 - **Wave 1 -- the live sigma-root cross-uid broker (the one unbuilt code seam).** NEW `v0/src/identity/sigma-root-broker.js`
   (or extend `broker-sign.js` to sign sigma-root BINDINGS while keeping the CLI/loader custody boundary) composing
   `signSigmaRoot(binding, {signer: crossUidBrokerSigner({brokerUser, wrapperPath})})`. **No new seam** -- reuse the
@@ -136,7 +136,7 @@ recon's open question about the handoff doc.
   KEY-custody only; the same-uid self-`registerRoot`+self-sign co-forge stays OPEN and must be labeled NARROW-not-close.
 - **Key never materializes in the host process:** the sigma-root root key lives under a different OS uid, `0600`,
   loaded ONLY in-process in the separate broker (the `broker-sign.js` pattern: `O_NOFOLLOW` atomic open,
-  fstat-on-fd swap-resistance, owner-only `& 0o077` mode reject [Wave 0 fix], fixed no-echo errors, key bytes /
+  fstat-on-fd swap-resistance, owner-only `& 0o077` mode reject (already applied, #19), fixed no-echo errors, key bytes /
   `err.stack` NEVER printed). `createMinter` structurally rejects any option but `{signer, personaDid, humanUid}` --
   passing raw `privateKeyPem` must throw loudly, never silently degrade to an ambient key.
 - **Exact-set / strict authorization, never subset or truthy:** `armingDecision` strict-coerces BOTH arms
@@ -178,14 +178,13 @@ recon's open question about the handoff doc.
    hard-false). Build the world-anchored signing HARDEN standalone now (OQ-NS-6: only a world-anchored signal
    HARDENS, and this is the first available), or hold until U2 so provenance + gating land together? Recon
    recommends build-now; the USER ratifies given P2 is INFORM-only.
-4. ~~The handoff doc~~ -- **RESOLVED** (read; the owner-only broker-key-vet fix is folded into Wave 0 above).
-5. **Arm-signal shape** -- does the P2 mint producer reuse the `signingArmed` / `admissionArmed` both-or-neither
+4. **Arm-signal shape** -- does the P2 mint producer reuse the `signingArmed` / `admissionArmed` both-or-neither
    pair, or take its OWN distinct deploy-DI opt-in (mirroring `plans/39`'s choice of a distinct `meCtx.regProvenance`
    to keep arms narrow, interface segregation)?
 
 ## Sequencing
 
-W0 (re-probe + key-vet fix + settle open Qs) gates W1. `plans/31` (the precondition `plans/30 §9` named) is DONE,
+W0 (re-probe + scope-lock + settle open Qs) gates W1. `plans/31` (the precondition `plans/30 §9` named) is DONE,
 so the arc can resume. W1 -> W2 -> W3 are code (SHADOW/disarmed, byte-identical when off); W4 is docs; W5 is the
 operator deploy + out-of-band attestation (USER, NS-7) -- the ONLY step that turns the SHADOW composition into a
 world-anchored HARDEN, and the potential 7th signal.
