@@ -391,3 +391,31 @@ The three lens transcripts (architect / code-reviewer / hacker) ran 2026-07-05; 
 into the Wave 1 design above. This section supersedes the earlier "PENDING" note. The next gate is the W1a build
 (extract `broker-core`, behavior-preserving), then W1b (the binding path) -- both SHADOW/disarmed, byte-identical
 when the require-binding flag is off.
+
+## Wave 1 -- build result (as-built; accretion 2026-07-06)
+
+- **W1a MERGED (#65)** -- `broker-core.js` extracted, `broker-sign.js` thinned. Behavior-preserving: the full
+  suite passed UNCHANGED (`broker.test.js` 28/0); VALIDATE (code-reviewer + hacker) PROCEED, zero folds
+  (code-reviewer ran a live 8-scenario byte-identity comparison; hacker 9 probes). CodeRabbit clean.
+- **W1b BUILT** -- `binding-request-auth.js` (the WHAT-gate + `resolveRequireBinding`), `sigma-root-broker.js`
+  (thin entrypoint), `broker-core.js` gained an OPTIONAL `distinctFromKeyFileEnv` same-inode refusal, and
+  `sigma-root.js` threads the binding body (Piece C). Full suite 671/0, eslint clean, darkness-witness extended
+  to prove the new modules stay import-dark.
+- **W1b 3-lens VALIDATE (code-reviewer + hacker + honesty-auditor) on the built diff: all PROCEED.** Hacker ran
+  40+ live probes, 0 K_root bypasses beyond the named residuals; honesty Grade A (no HIGH overclaim; #273
+  named loud; SHADOW witnessed). Folds applied:
+  - **Env rename (hacker M2):** the require-binding flag is **`PACT_ROOT_REQUIRE_BINDING`** as-built (uniform
+    with the broker's other `PACT_ROOT_*` envs), NOT the design sketch's `PACT_BROKER_REQUIRE_BINDING` above
+    (the mixed prefix was an operator footgun; it fails closed either way). The three `PACT_BROKER_REQUIRE_BINDING`
+    mentions in the design sections above are superseded by this line.
+  - **Distinct-inode-copy residual NAMED (honesty MEDIUM-3 + hacker M1):** the same-inode refusal catches an
+    inode ALIAS (same file / symlink / hardlink), NOT a distinct-inode byte-identical COPY of K_root. That copy
+    is a single logical key the guard misses; key-material distinctness is OPERATOR custody, and the LOAD-BEARING
+    separation is the uid / process boundary. Carried loud in the `sigma-root-broker.js` header (NS-9).
+  - Test-name hedge (honesty MEDIUM-1) + "proven live at VERIFY" citation tighten (honesty MEDIUM-2).
+- **Residuals still open (NS-9, LOUD):** R1 raised-stakes #273 (a same-uid WHO-authorized caller mints
+  "K_root authorized MY key as persona P" within the controller -- closes only with a deployed + attested
+  cross-uid signer); the same-inode-not-same-material scope above; R2 replay/revocation -> `.v2` rotation-epoch.
+  All SHADOW: the sigma-root broker is import-dark (darkness-witness), `convert.actionable` stays hard-false.
+- **NEXT:** W2 (the `signingArmed` producer + compose-and-mint call site), then W3 (proof board), W4 (runbook),
+  W5 (USER operator deploy + out-of-band attestation -- the only HARDEN, NS-7).

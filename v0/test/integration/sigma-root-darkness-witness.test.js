@@ -62,8 +62,17 @@ test('(A) CONTAINED-CONSUMERS: the W1 modules have EXACTLY their named importers
     .sort();
   assert.deepEqual(importersOf('registration-provenance'), ['trust/admission-gate.js', 'trust/registration-gate.js'],
     'registration-provenance must be imported by EXACTLY {admission-gate (dormant W2), registration-gate (plans/39 live-disarmed)}');
-  assert.deepEqual(importersOf('sigma-root'), ['identity/registration-provenance.js'],
-    'sigma-root must be imported by EXACTLY {registration-provenance}');
+  assert.deepEqual(importersOf('sigma-root'), ['identity/binding-request-auth.js', 'identity/registration-provenance.js'],
+    'sigma-root must be imported by EXACTLY {registration-provenance, binding-request-auth (plans/42 W1b -- dark)}');
+  // plans/42 W1b: the sigma-root broker WHAT-gate + entrypoint are SHADOW/dark. binding-request-auth (the
+  // WHAT-gate that recompute-binds via computeBindingId) is imported ONLY by the sigma-root-broker CLI, and
+  // that CLI is imported by NO src module (it is spawned as a subprocess, never pulled into the live
+  // convert/admission graph). A THIRD, unnamed consumer of either fires RED (creep) -- the same containment
+  // discipline as the sigma-root / registration-gate witnesses above.
+  assert.deepEqual(importersOf('binding-request-auth'), ['identity/sigma-root-broker.js'],
+    'binding-request-auth must be imported by EXACTLY {sigma-root-broker}');
+  assert.deepEqual(importersOf('sigma-root-broker'), [],
+    'sigma-root-broker is a DARK CLI entrypoint -- imported by NO src module (spawned as a subprocess)');
 });
 
 test('(B) BEHAVIORAL: seeding a root key changes NONE of the fold-read predicates (isKnownRoot / lookupPublicKey / rootOf)', () => {
