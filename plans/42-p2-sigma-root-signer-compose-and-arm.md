@@ -815,6 +815,12 @@ add a one-line cross-link from `sigma-root-deploy.md` B.3 ("for the cross-uid `{
 
 ### §W4.2 The runbook spine (`sigma-root-broker-deploy.md`)
 
+> **DESIGN SPINE -- steps 4 + 7 are CORRECTED by the §W4.5 folds F1/F2 (do NOT read them in isolation):** the same-inode
+> code guard (step 4) is INERT in the separate-wrapper topology + a byte-copy evades an inode check, so the SHIPPED
+> runbook mandates an out-of-band `ls -i` + `cmp` distinctness check (F1); and `PACT_ROOT_REQUIRE_BINDING` (step 7) is
+> set EXPLICITLY `=1` with a MANDATORY wrapper guard refusing both `PACT_ROOT_CONTROLLER`-unset AND `=0` (F2). The
+> built `sigma-root-broker-deploy.md` carries the corrected forms; this spine is the pre-fold design.
+
 1. **Header + honest ceiling** -- SHADOW; Claude never runs it; the custody deploy HARDENS only K_root's KEY-custody
    (the host process cannot `read()` K_root), NOT provenance; the SOLE trust HARDEN is `sigma-root-deploy.md` A.3.
 2. **Prerequisites (link, do NOT duplicate)** -- `sigma-root-deploy.md` Phase A (genesis root minted + seeded +

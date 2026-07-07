@@ -88,9 +88,12 @@ Install a root-owned, not-host-writable wrapper that execs `node .../sigma-root-
   do not retype it.
 - `PACT_ROOT_ALLOWED_UIDS` — the root broker's OWN WHO-allowlist, **NARROWER than the frame broker's** (never reuse
   `PACT_BROKER_ALLOWED_UIDS`; a K_root sig is strictly higher-value than a K_broker sig — W1b F2).
-- `PACT_ROOT_REQUIRE_BINDING` — leave it to the default. **The default is ON only when the box is DEPLOYED** — i.e.
-  `PACT_ROOT_CONTROLLER` is set (or an explicit intent token). A typo fails CLOSED; the ONLY way to disable is a strict
-  `'0'` (`resolveRequireBinding`, `binding-request-auth.js:53-58`).
+- `PACT_ROOT_REQUIRE_BINDING=1` — **set it EXPLICITLY in the wrapper.** Do NOT rely on the code default-ON: making the
+  blind-oracle protection depend on code-default behavior instead of the wrapper CONTRACT is fragile (a future change to
+  the default would silently reopen the oracle). An explicit `=1` makes require-binding ON **unconditionally**; the
+  default IS ON when the box is deployed (`PACT_ROOT_CONTROLLER` set, or an intent token) and a typo fails CLOSED, but
+  the explicit set is the contract and the guard below keeps `=0` as a refused backstop (`resolveRequireBinding`,
+  `binding-request-auth.js:53-58`; the ONLY way to disable is a strict `'0'`).
 
 **MANDATORY startup-guard (the blind K_root oracle).** require-binding goes OFF — and the broker then signs the argv
 64-hex **BLINDLY** with `K_root` (a universal forgery oracle for the trust root) — on TWO paths: (a) `PACT_ROOT_CONTROLLER`
