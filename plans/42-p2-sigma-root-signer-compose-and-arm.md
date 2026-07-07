@@ -115,7 +115,10 @@ in `custody-verify.js` -- a separate, correct wrapper-WRITABLE check, not the pr
   -> ASSERT KEPT-but-not-broker-privileged (SHADOW pass, NARROW not close; the self-seed POSITIVELY passes the
   crypto judge, so KEPT is provably integrity-not-provenance). Every control asserts a machine-checkable field,
   never a bare "hardened".
-- **Wave 4 -- runbook + deploy-readiness attestation (docs only, no deploy).** `docs/deployment/` gains the
+- **Wave 4 -- runbook + deploy-readiness attestation (docs only, no deploy).** [**SUPERSEDED by §W4.0-§W4.5 below**:
+  this skeleton's frame-broker `PACT_BROKER_PERSONA_DID` / `assertBrokerPersona` DID-triple is WRONG for the root broker
+  -- the root broker has NO persona; the check is a CONTROLLER triple and there is no `assertBrokerPersona` analog
+  (recon-completeness). The as-built delta + placement are in §W4.] `docs/deployment/` gains the
   signing-INTO-the-graph procedure (distinct from `plans/32`'s root-key-seed runbook): seed the genesis root in a
   clean registry (root-key-squat ordering invariant), install the sigma-root broker key `0600` under the broker
   uid, set `REQUIRE_FRAME` + `ALLOWED_UIDS` + `PERSONA_DID`, and the MANDATORY DID-consistency triple gate (wrapper
@@ -770,3 +773,145 @@ pre-PR CodeRabbit CLI, and the PR.
   root-key attestation (NS-7).
 - **NEXT:** W4 (runbook + the deploy wire-check `assertBrokerPersona` sigma-root analog), W5 (USER operator deploy +
   out-of-band attestation -- the only HARDEN, NS-7).
+
+## Wave 4 -- design (the cross-uid sigma-root BROKER deploy runbook; DOCS-ONLY; pre-build VERIFY PENDING)
+
+> **HONEST-LABELING HEADER (read first).** W4 is DOCS-ONLY: a NEW operator runbook for deploying the cross-uid
+> sigma-root BROKER (the W1b/W2 compose-and-arm layer). **Claude WRITES it; Claude NEVER runs any step** -- no uid
+> creation, key install, `/etc` write, sudoers edit, arm flag, or attestation (NS-7; those are W5, the operator's).
+> The runbook is SHADOW: the custody deploy only NARROWS (makes K_root non-host-readable = INTEGRITY); the SOLE
+> HARDEN remains `sigma-root-deploy.md` Phase A.3's out-of-band attestation (integrity != provenance).
+
+### §W4.0 Recon-completeness (SCAR-#30 -- the runbook DELTA, not a from-scratch runbook)
+
+The plan skeleton (Wave 4, above) reads W4 as "write the signing-into-the-graph runbook + a deploy wire-check
+`assertBrokerPersona`." Grounding at `38466c0` corrects this:
+- **`docs/deployment/sigma-root-deploy.md` ALREADY EXISTS** and covers Phase A (genesis root: mint
+  OFF-box -> seed CLEAN -> attest `K_root_pub` via cosign/Rekor) -> B (provision persona; the ROOT signs the binding)
+  -> C (arm the admission gate) -> D (grandfather ramp) -> Verify -> safety invariants -> honest status. Its **B.3
+  signs via the ENCLAVE `{ privateKeyPem: K_root_priv }` path** and only NOTES `{ signer }` as "plans/30 forward-compat."
+- **`docs/deployment/cross-uid-broker.md`** is the FRAME broker custody deploy (create broker uid ->
+  keypair 0600 -> root-owned wrapper -> sudoers env-pin -> register pubkey -> wire -> verify+attest -> caller-auth ->
+  per-request auth). W4 MIRRORS this for the ROOT broker.
+- **`docs/deployment/live-edge-provenance.md`** is the FRAME-broker live-edge signing runbook (composes
+  `cross-uid-broker.md`). **W4 is its DIRECT sigma-root ANALOG.**
+- **NO `assertBrokerPersona` sigma-root analog exists in code** (`grep` -> only the frame-broker `broker-client.js:88`).
+  So the "deploy wire-check" is a DOCUMENTED manual verification (sign a test binding through the broker ->
+  `verifySigmaRoot` under the seeded root pubkey -> PASS), NOT a built CLI -- mirroring `sigma-root-deploy.md`'s own
+  "Verify (a library call today; a `custody-verify`-style CLI is a later wave)."
+
+**W4's genuine DELTA:** the cross-uid sigma-root BROKER deploy -- how to make `sigma-root-deploy.md` B.3's `{ signer }`
+seam REAL: install K_root under a SEPARATE uid (0600) the host process cannot `read()`, run it behind the W1b
+`sigma-root-broker.js` entrypoint, and swap B.3 to `signSigmaRoot(binding, { signer: crossUidBrokerSigner(...) })`.
+
+### §W4.1 Placement (arc FORK-D precedent)
+
+A **NEW doc `docs/deployment/sigma-root-broker-deploy.md`** (SRP: distinct from the seed+arm `sigma-root-deploy.md`
+and the frame-broker `cross-uid-broker.md`; DRY -- it COMPOSES both by reference, never duplicates). This mirrors the
+`plans/38` FORK-D decision (a new `live-edge-provenance.md` composing `cross-uid-broker.md`, not an edit of it). Also
+add a one-line cross-link from `sigma-root-deploy.md` B.3 ("for the cross-uid `{ signer }` deploy, see
+`sigma-root-broker-deploy.md`") so the two docs reciprocate. **Fork for the board:** new-doc (rec) vs a new Phase in
+`sigma-root-deploy.md`.
+
+### §W4.2 The runbook spine (`sigma-root-broker-deploy.md`)
+
+1. **Header + honest ceiling** -- SHADOW; Claude never runs it; the custody deploy HARDENS only K_root's KEY-custody
+   (the host process cannot `read()` K_root), NOT provenance; the SOLE trust HARDEN is `sigma-root-deploy.md` A.3.
+2. **Prerequisites (link, do NOT duplicate)** -- `sigma-root-deploy.md` Phase A (genesis root minted + seeded +
+   attested) DONE; `cross-uid-broker.md` read (W4 mirrors its custody pattern for the ROOT broker).
+3. **Create the ROOT broker uid** -- a SEPARATE system user, DISTINCT from the frame broker's uid AND the host uid.
+4. **Install K_root `0600` under that uid.** THE KEY-SEPARATION INVARIANT (W1b HIGH-1, LOUD): `PACT_ROOT_KEY_FILE`
+   MUST be a DISTINCT INODE from `PACT_BROKER_KEY_FILE` -- `sigma-root-broker.js`'s same-inode refusal fails closed on
+   an alias/symlink/hardlink, but a distinct-inode byte-COPY is a single logical key the guard misses -> different key
+   MATERIAL + a different uid is the load-bearing separation (operator custody, W1b honesty MEDIUM-3).
+5. **Root-owned wrapper** (not host-writable) invoking `node .../sigma-root-broker.js`.
+6. **Sudoers** -- host uid may run ONLY the root-broker wrapper as the root-broker user; PIN the env policy
+   (`env_reset`, NO `SETENV`, forbid key-path injection); `SUDO_*` is the caller-auth signal.
+7. **Root-broker envs (literal in the wrapper, never host-interpolated):** `PACT_ROOT_KEY_FILE`,
+   `PACT_ROOT_CONTROLLER` (= the scarce `humanUid` from `sigma-root-deploy.md` A.2), `PACT_ROOT_ALLOWED_UIDS` (the
+   root broker's OWN allowlist, NARROWER than the frame broker's -- W1b F2), `PACT_ROOT_REQUIRE_BINDING` (default-ON;
+   a strict `'0'` is the ONLY disable; a typo fails CLOSED -- W1b HIGH-2 / `resolveRequireBinding`).
+8. **Wire B.3 to the cross-uid signer** -- swap `signSigmaRoot(binding, { privateKeyPem: K_root_priv })` ->
+   `signSigmaRoot(binding, { signer: crossUidBrokerSigner({ brokerUser, wrapperPath }) })`. K_root_priv NEVER
+   materializes in the provisioning process. (`crossUidBrokerSigner` forwards `body` on the child's stdin so the
+   broker's `authorizeBindingRequest` can recompute-bind -- W1b Piece C.)
+9. **The wire-check (the DID/controller-consistency gate -- documented, not a CLI):** sign a TEST binding through the
+   broker -> `verifySigmaRoot({ ...binding, sigmaRoot, rootPublicKeyPem: lookupRootKey(reg, controller) })` -> PASS is
+   the precondition for a real binding to pass `assessRegistrationFromRegistry`. A non-verifying result = a mis-wired
+   custody (wrong key/uid/controller). Name a built `assertRootBinding` wire-check as a FORWARD residual (YAGNI now;
+   mirrors `sigma-root-deploy.md`'s "a CLI is a later wave").
+10. **Verify AS THE HOST UID + the deny controls** (mirror `cross-uid-broker.md` §7-9): the host CANNOT `read()`
+    K_root (EACCES); a foreign uid -> refuse, empty stdout; a FRAME body -> `binding-uncomputable` refuse; a
+    FOREIGN-controller binding (id computed FIRST) -> `controller-mismatch` refuse. Then attest OUT-OF-BAND (A.3 is
+    the sole HARDEN).
+11. **Honest ceiling (LOUD, NS-9):** the cross-uid broker buys K_root KEY-custody (a host compromise cannot forge
+    arbitrary root bindings without the broker uid). It does NOT close: the raised-stakes #273 R1 (a same-uid-as-the-
+    BROKER caller reaching the root broker within the controller still mints "K_root authorized MY key as persona P"
+    -- W1b R1); the W3 apex (a same-uid self-`registerRoot`+self-sign still passes -- integrity != provenance);
+    provenance bottoms out at A.3 attestation + a deployed+attested cross-uid signer.
+
+### §W4.3 What W4 does NOT do (NS-9)
+No code, no deploy, no key, no uid, no `/etc`, no sudoers, no arm flag, no attestation (W5, NS-7). Does not modify the
+built src (W1b/W2 are the mechanism; W4 documents its operation). Does not duplicate `sigma-root-deploy.md` /
+`cross-uid-broker.md` -- composes them by reference.
+
+### §W4.4 Runtime probes (re-run at build -- verify the cited surface against the built code)
+- Probe: `grep -n "keyFileEnv\|allowlistEnv\|distinctFromKeyFileEnv\|requireMode" v0/src/identity/sigma-root-broker.js` -> confirm the PACT_ROOT_* env names + the same-inode arg as-built (`requireMode`, NOT the pre-build sketch's `requireFlagName`).
+- Probe: `grep -n "crossUidBrokerSigner\|crossUidSudoArgs" v0/src/identity/broker-launch.js` -> the signer vehicle + wrapper argv the runbook cites.
+- Probe: `grep -n "controller-mismatch\|binding-uncomputable\|broker-controller-unset" v0/src/identity/binding-request-auth.js` -> the exact deny reasons for the §W4.2-10 verify controls.
+- Probe: `grep -n "signRecordId(bindingId, rootSignerOpts\|signer" v0/src/identity/sigma-root.js` -> B.3's `{ signer }` seam.
+- Probe: `grep -n "typeof signer\|signer(recordId, body)\|opts.signer" v0/src/lib/edge-attestation.js` -> the `{signer}`-path body-forward (the mechanism step 8 rests on; multi-reviewer blessing != runtime verification, arch LOW-9).
+- Probe: `grep -n "distinctFromKeyFileEnv\|UNSET other-env\|process.env\[distinctFromKeyFileEnv\]" v0/src/identity/broker-core.js` -> confirm the same-inode guard is INERT when the other-env is unset (hacker HIGH-1, the F1 fold).
+
+### §W4.5 Pre-build VERIFY -- DONE: PROCEED-WITH-FOLDS (folds baked into the runbook)
+
+A 3-lens board (architect + hacker + honesty-auditor, free-text) ran against the design + the real W1b/W2 modules +
+the three sibling runbooks. **All three PROCEED-WITH-FOLDS -- zero CRITICAL; every cited env / module / call-shape
+verified CORRECT against the built code** (`verifySigmaRoot`/`lookupRootKey`/`signSigmaRoot({signer})` all match).
+The folds are all DOC-level (no code change). Two are load-bearing security corrections, firsthand-probed:
+
+- **F1 (hacker HIGH-1, PROBED) -- the same-inode code guard is INERT in the mandated separate-wrapper topology.**
+  `broker-core.js:145,150-152`: the same-inode refusal fires ONLY when `PACT_BROKER_KEY_FILE` is PRESENT in the
+  broker's process env ("An UNSET other-env skips the check"). The root wrapper sets only `PACT_ROOT_*` and sudoers
+  `env_reset` strips the host's value -> the guard NEVER evaluates. So §W4.2-4's "fails closed on an alias" is FALSE
+  in the recommended deploy. **Fold:** the load-bearing distinctness check is OUT-OF-BAND -- `ls -i <K_root>
+  <K_broker>` (distinct inodes) AND `cmp <K_root> <K_broker>` (distinct BYTES; a byte-copy evades an inode check
+  anyway). Optionally set `PACT_BROKER_KEY_FILE` (read-only, the frame key path) in the root wrapper to ACTIVATE the
+  code guard as defense-in-depth (catches an alias), but the out-of-band `cmp` is the real check. Do NOT claim the
+  code guard protects the trust root in this topology.
+- **F2 (architect HIGH-1, PROBED) -- a MANDATORY wrapper startup-guard against the blind K_root oracle.**
+  `resolveRequireBinding` (`binding-request-auth.js:53-58`) is default-ON only when the box is DEPLOYED (controller
+  set OR an intent token). If the operator installs the key+wrapper but forgets `PACT_ROOT_CONTROLLER` + sets no flag
+  -> require-binding OFF -> `authorizeBindingRequest` `disabled` branch -> `broker-core.js` signs the argv 64-hex
+  BLINDLY with K_root (a universal forgery oracle for the trust root, gated only by a stderr line). **Fold:** the
+  wrapper MUST carry `[ -n "$PACT_ROOT_CONTROLLER" ] || { echo 'refusing: PACT_ROOT_CONTROLLER unset' >&2; exit 78; }`
+  above the exec (mandatory for the root, vs the frame broker's "Recommended"); and §W4.2-7's "default-ON" is
+  CONDITIONAL on the controller/flag.
+- **F3 (architect HIGH-2) -- COMPOSE-by-reference-and-delta, do NOT re-document.** §W4.2 steps 3-7 must defer to
+  `cross-uid-broker.md` §1-4 (create-uid / key-0600 / root-owned-wrapper / sudoers-env-pin) and enumerate ONLY the
+  root deltas (distinct uid, the F1 distinctness check, `PACT_ROOT_*` envs, the narrower allowlist, require-binding,
+  the F2 guard) -- else two hand-maintained sudoers copies diverge (the doc twin of the W1a broker-core extraction).
+- **F4 (architect HIGH-3 + honesty MED-1 must-fold) -- articulate the broker-vs-enclave posture + reconcile the
+  custody VERB.** (a) The enclave path (`sigma-root-deploy.md` A.1, K_root NEVER on the box, one-shot `{privateKeyPem}`
+  signing) is STRONGER for static bindings; the cross-uid broker's value is ON-DEMAND signing at the cost of putting
+  K_root on the box (R-heap-bounded). State when to prefer each. (b) Reconcile the verb: the custody deploy HARDENS
+  the KEY-CUSTODY / non-exfiltration axis (world-anchored, per `cross-uid-broker.md:14` / `live-edge-provenance.md:92-95`)
+  = INTEGRITY, but HARDENS NOTHING about trust/provenance; the SOLE trust HARDEN is A.3. (My header's "only NARROWS"
+  under-claims the key-custody axis -- fix to "HARDENS key-custody, NOT provenance.")
+- **MED cluster (all ADOPT):** end-to-end read-side confirm (`assessRegistrationFromRegistry` PASS +
+  `convert.actionable===false`, arch MED-4); deny-control OBSERVABLE (`broker-core` collapses every deny to a fixed
+  "request not authorized" + empty stdout + exit 1 -- NOT a grep for the internal reason) + the plans/17 §7 exact-body
+  construction (compute `claimedRecordId=computeBindingId(body)` FIRST so controller-bind is the provable denier, not
+  the masking record-id-mismatch) (arch MED-5 + hacker HIGH-2); caller-auth flip-test + the `env_keep.*SUDO_` +
+  code-loading-var (`NODE_OPTIONS`/`LD_*`/`DYLD_*`/`BASH_ENV`) out-of-band scan (arch MED-6 + hacker HIGH-3); the
+  persona-vs-controller asymmetry (the root broker has NO persona / NO `assertBrokerPersona` -- the check is a
+  CONTROLLER triple) (arch MED-7); the R-heap one-box / re-probe caveat in the ceiling (arch MED-8 + hacker MED-1);
+  the key-DIR `0755` so the host's owner-verify is not blind (hacker MED-2); the wire-check test binding's controller
+  MUST equal `PACT_ROOT_CONTROLLER` (hacker LOW-1).
+- **LOW cluster (ADOPT):** the §W4.4 probe token `requireFlagName` -> `requireMode` (as-built; honesty LOW-2); use a
+  live `wc -l` not a frozen line-count (honesty LOW-3); a clause that R1 (#273) survives EVEN A.3 + a cross-uid signer
+  (honesty LOW-4); a §W4.4 probe on `edge-attestation.js`'s `{signer}` body-forward (arch LOW-9); weave the reciprocal
+  cross-link into `sigma-root-deploy.md` B.3's existing `{signer}` note, not a duplicate line (arch LOW-10).
+
+The runbook (`docs/deployment/sigma-root-broker-deploy.md`) bakes ALL of the above; then a light VALIDATE (doc-vs-built
++ honest-ceiling) + the pre-PR CodeRabbit CLI + PR.
