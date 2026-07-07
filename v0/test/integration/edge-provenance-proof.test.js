@@ -26,6 +26,7 @@ const { disjointPaths, convert } = require('../../src/trust/convert');
 const { authorizeRequest } = require('../../src/identity/request-auth');
 const { assertBrokerPersona } = require('../../src/identity/broker-client');
 const { world, FRESH } = require('./_world');
+const { assessControls } = require('./_assess-controls');
 
 let pass = 0; let fail = 0;
 function test(name, fn) {
@@ -36,31 +37,10 @@ function test(name, fn) {
 const BROKER = 'did:key:zBroker';
 const ATTACKER = 'did:key:zAttacker';
 
-// ---- the in-test machine-checkable verdict helper (mirrors custody-verify.js assessCustody; NO `hardened` field).
-// FAIL-CLOSED on an unknown status + empty checks (VERIFY-hacker H2; the security.md "typo fails CLOSED" +
-// arm-flags.js asymmetric-parse): a status not in {PASS,FAIL,NOTE} counts as FAIL AND surfaces in residuals (never
-// swallowed), and an empty checks array is NOT a pass (never a vacuous [].every()===true).
-const READ_CONTROL_STATUSES = new Set(['PASS', 'FAIL', 'NOTE']);
-function assessReadControls(checks) {
-  if (!Array.isArray(checks) || checks.length === 0) {
-    return { inProcessReadControlsPassed: false, checks: checks || [], residuals: ['no checks recorded -- vacuous'] };
-  }
-  // snapshot each element's status ONCE (security.md C1: a toggling/hostile getter must not be read twice across
-  // the .every()/.filter()/.map() passes) + null-ELEMENT guard: a null / non-string status normalizes to a
-  // sentinel that is neither PASS nor NOTE -> fail-CLOSED (VALIDATE-hacker nits 1+2, forward-hardening).
-  const rows = checks.map((c) => ({
-    id: (c && c.id) || '<no-id>',
-    status: (c && typeof c.status === 'string') ? c.status : '__MISSING__',
-    detail: (c && c.detail) || '',
-  }));
-  const passed = rows.every((r) => r.status === 'PASS' || r.status === 'NOTE');
-  // residuals = EVERY non-PASS leg (NOTE deploy-only, a real FAIL, and any unknown status) so the audit trail
-  // NAMES a FAIL, never just counts it (CodeRabbit: a FAIL must not disappear from the fail-closed report).
-  const residuals = rows
-    .filter((r) => r.status !== 'PASS')
-    .map((r) => r.id + ': ' + (READ_CONTROL_STATUSES.has(r.status) ? r.detail : 'UNKNOWN-STATUS(' + r.status + ') -- fail-closed'));
-  return { inProcessReadControlsPassed: passed, checks, residuals };
-}
+// ---- the in-test machine-checkable verdict helper. EXTRACTED to _assess-controls.js at plans/42 W3 (fold F1 --
+// the arc's extract-don't-fork precedent) so the single hardened fail-closed copy is SHARED with the W3 sigma-root
+// proof board. The thin local alias pins THIS board's pass-field name; NO `hardened` field (NS-9).
+const assessReadControls = (checks) => assessControls(checks, 'inProcessReadControlsPassed');
 
 // ============================ (b)-logic: the persona-mismatch DENY (in-process) ============================
 test('(b)-logic: authorizeRequest DENIES a foreign-persona frame as persona-mismatch (NOT record-id-mismatch -- M2 ordering)', () => {

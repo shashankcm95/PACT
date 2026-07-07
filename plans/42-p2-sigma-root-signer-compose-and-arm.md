@@ -476,3 +476,297 @@ NEEDS-REVISION. Decisive folds (baked into the build below):
   per mint; the reader's one-shot consume-store is a future wave. Tolerable only because SHADOW + `actionable:false`.
 - **R5 -- custody wire-check is a DEPLOY step** (W4); `signingArmedMint` assumes a pre-verified signer.
 - **NEXT:** W3 (proof board), W4 (runbook + the deploy wire-check), W5 (USER operator deploy + attestation -- NS-7).
+
+## Wave 3 -- design (the sigma-root PROVENANCE PROOF BOARD; pre-build 3-lens VERIFY PENDING)
+
+> **HONEST-LABELING HEADER (read first).** W3 is the SIGMA-ROOT analog of the broker-signing arc's `plans/38` W4
+> proof board -- it PROVES the composed registration-provenance read-side properties + the custody-boundary deny,
+> WITHOUT deploying. **Everything is SHADOW.** W3 adds NO `src/` module, arms NO live flag, and does NOT deploy,
+> seed a genesis root, install a key, write `/etc`, or set an arm flag (NS-7 -- the operator's act). It is a
+> TEST-ONLY proof board (a new sibling to `edge-provenance-proof.test.js`) + a machine-checkable in-test verdict.
+
+### §W3.0 Recon-completeness correction (SCAR-#30 -- the positive control is ALREADY BUILT)
+
+The plan skeleton (Wave 3, above) reads W3 as "positive control SPLIT + negative controls." Grounding at `e4a3c07`
+shows the **positive control + the armed-filter mechanics are ALREADY PROVEN** in
+`v0/test/integration/registration-gate-convert.test.js`: a legit own-persona sigma-root-anchored VOUCH PASSES
+`filterAnchoredRecords` and weighs nonzero (item 11b `dpArmed=1`), disarmed is byte-identical (item 10), armed
+STRICTLY narrows unmapped personas (item 11b), and a committed 120-trial fuzz proves monotonic non-increase (item
+11). That test already `registerRoot`s, `signSigmaRoot`s, arms `regProvenance`, and drops unanchored records.
+
+So W3 REFERENCES that (does NOT re-prove the narrows fuzz). W3's genuine NET-NEW -- exactly as `plans/38 §0`
+reused its positive control and made its net-new the read-side apex -- is:
+1. **the APEX integrity-not-provenance SPLIT** (the one genuinely-new property, `plans/30 §5` W1 control e);
+2. **the sigma-root broker custody-boundary DENY** (`authorizeBindingRequest`, control b -- the binding analog of
+   `plans/38`'s frame-broker persona-mismatch deny);
+3. **the composed proof board** -- a machine-checkable verdict helper (NO `hardened` field) that assembles the
+   in-process controls as PASS + the deploy-only + disclosed-open legs as NOTE/residual.
+
+### §W3.1 What W3 PROVES that is new -- the apex (NS-9, the one genuinely-new property)
+
+A same-uid host attacker that SELF-`registerRoot`s its OWN human_uid + self-signs a valid `sigma_root` over its own
+binding is **KEPT** by the armed `filterAnchoredRecords` (`assessRegistrationFromRegistry` verifies the ed25519
+against the attacker's OWN seeded root key -- INTEGRITY holds), BUT it **cannot** anchor a binding to a DISTINCT
+GENUINE root's controller without that root's key. "broker/root-privileged standing" is defined operationally as
+"a record `filterAnchoredRecords` KEEPS whose `sigma_root` verifies under a GENUINE seeded root key the attacker
+does not hold." The apex SPLITS:
+
+- **(d1) KEPT -- EXPECTED SHADOW pass (the OPEN 5th leg).** The self-`registerRoot`+self-sign binding PASSES
+  `assessRegistrationFromRegistry(...).sigmaRootChecksPassed === true` AND SURVIVES the armed filter. Proven by
+  EXECUTING the forge (the `plans/38` honesty move -- disclose-an-open-leg by executing it, not by comment).
+  Labeled EXPECTED-SHADOW-pass: KEPT is provably **integrity, not provenance** -- the crypto proves the root KEY
+  authorized the binding, NEVER that the key belongs to a distinct real human root
+  (`registration-provenance.js:64-66`; `registration-gate.js:17-20` already carries this exact language).
+- **(d2) CLOSED -- cannot anchor to a GENUINE root (two in-process sub-facts).**
+  - **(d2a)** `assert.throws(() => registerRoot(reg, {humanUid: GENUINE, rootPublicKeyPem: attackerRootPub}))` --
+    cannot squat the genuine root key (first-writer immutability, `registry.js:105-106`).
+  - **(d2b)** a persona registered under the GENUINE controller whose `sigma_root` is signed by the ATTACKER root
+    key -> `assessRegistrationFromRegistry(...).sigmaRootChecksPassed === false` (`verifySigmaRoot` fails against the
+    GENUINE seeded root key sourced by `lookupRootKey(reg, controller)`) -> DROPPED at the armed filter. TRACK the
+    dropped `record_id` explicitly (5d -- falsifiable, not inferred).
+- **(d-mutation) DISCLOSED OPEN (the H1-analog boundary -- NAME it, do NOT claim closed).** A same-uid attacker
+  HOLDING the `reg` handle bypasses the first-writer guard via a direct `reg.rootKeys.set(GENUINE, attackerRootPub)`
+  (`registry.js:38-41` discloses the persona analog; the same host-writable-registry leg applies to `rootKeys`).
+  Demonstrated LIVE as an EXPECTED-OPEN leg (mirrors the edge board's (e2) `reg.personas.set` H1-boundary bypass,
+  `edge-provenance-proof.test.js:143-145`), carried as the
+  `apex-inprocess-rootkey-mutation-OPEN` NOTE/residual so the verdict NEVER reads as "the apex is closed
+  in-process." Closes ONLY with a deployed + attested cross-uid signer (the #273 authenticated-minter direction),
+  NOT this arc.
+
+### §W3.2 The leg split (in-process asserted vs deploy-only NOTE)
+
+| Leg | In-process (asserted PASS/FAIL) | Deploy-only (NOTE/residual) |
+|---|---|---|
+| (a) host `cat` the ROOT key -> EACCES | -- | NOTE (`custody-verify.js` at the cross-uid deploy) |
+| (b)-logic-1 controller-mismatch deny | PASS -- `authorizeBindingRequest` deny `controller-mismatch` (id computed FIRST -- M2 ordering) | -- |
+| (b)-logic-2 domain-sep: a FRAME body deny | PASS -- deny `binding-uncomputable` (`computeBindingId` THROWS on a frame -- the non-vacuous domain-separation proof) | -- |
+| (b)-live wrapper deny + empty stdout | -- | NOTE (the real `sudo -n -u` round-trip at deploy) |
+| (c) in-process `signRecordId` no-key -> null | PASS -- `signRecordId(id, {}) === null` (`edge-attestation.js:95-101`) | -- |
+| (d-heap) gcore / `/proc/pid/mem` extract denied | -- | NOTE (R-heap re-run, Linux `ptrace_scope=2`) |
+| (d1) self-`registerRoot` -> KEPT (crypto PASSES) | PASS -- EXPECTED SHADOW pass (the OPEN 5th leg; integrity-not-provenance) | -- |
+| (d2) cannot anchor to a GENUINE root | PASS -- `registerRoot` squat THROWS + wrong-root-key binding DROPS | -- |
+| (d-mutation) `reg.rootKeys.set` bypass | -- | NOTE (DISCLOSED OPEN -- closes with an authenticated minter, NOT this arc) |
+
+### §W3.3 The in-test verdict helper (machine-checkable, never `hardened`)
+
+> **DESIGN DRAFT -- SUPERSEDED by fold F1 (§W3.10):** the helper was EXTRACTED to a shared
+> `v0/test/integration/_assess-controls.js` (parameterized on the pass-field), NOT kept as a local unexported
+> closure. Read F1 + the build-result for the as-built shape; the paragraph below is the pre-fold design.
+
+A LOCAL helper `assessProvenanceControls(checks)` in the W3 test (NOT an export -- FORK-A test-only, mirroring
+`edge-provenance-proof.test.js:44` `assessReadControls` VERBATIM in shape). Returns
+`{ inProcessProvenanceControlsPassed, checks, residuals }` -- **NO `hardened`/`provenanceReal` field** (NS-9; mirrors
+`registration-provenance.js`'s deliberate omission of `sigmaRootWorldAnchored`). Fail-CLOSED: an unknown status
+counts as FAIL and SURFACES in residuals; an empty/null checks array is NOT a pass; a null element / status-less
+check normalizes to a fail-closed sentinel (the `security.md` "typo fails CLOSED" + the VALIDATE-hacker nits 1+2 from
+`plans/38`). Every non-PASS leg (NOTE, FAIL, unknown) is named in residuals so a real FAIL cannot vanish.
+
+### §W3.4 NS-9 framing (mis-reads, each PREVENTED)
+
+1. If (d1) were labeled a "control the deploy closes" -> a false HARDEN. PREVENTED: (d1) is asserted as an EXPECTED
+   SHADOW pass; the field is `inProcessProvenanceControlsPassed`, never `hardened`; the residual names the open leg.
+2. If any deploy-only leg (a / b-live / d-heap) were asserted PASS in-process -> a false provenance claim. PREVENTED:
+   NOTE/residual only.
+3. If the apex were claimed CLOSED in-process -> a false close. PREVENTED: the `reg.rootKeys.set` bypass is
+   demonstrated LIVE + carried as `apex-inprocess-rootkey-mutation-OPEN`.
+4. If any assertion gated on `actionable` -> a gate. PREVENTED: the proof only READS `actionable` to assert it stays
+   `false` (`convert.js:149`).
+
+### §W3.5 Fixture factoring (FORK -- for the VERIFY board)
+
+> **DESIGN DRAFT -- the muddled "mirrors `anchoredWorld`" rationale below is SUPERSEDED by fold F6 (§W3.10):** the
+> as-built fixture is a thin LOCAL cap over `world()` (`seedRoot` / `signBindingUnderRoot` / `vrec`), NOT a mirror of
+> `anchoredWorld`; `_world.js` is untouched. Read F6 for the corrected rationale.
+
+W3 needs sigma-root anchoring helpers `world()` does not provide (`seedRoot(humanUid)` -> generate a root keypair +
+`registerRoot` the pubkey + stash the root privkey; `signBinding(personaDid, humanUid)` -> `signSigmaRoot` the
+persona's frozen binding under its controller's root key; an armed `regProvenance` ctx). Two options:
+- **Option B (DRAFT REC) -- local helpers in the W3 file over `world()`** (mirrors `registration-gate-convert.test.js`'s
+  OWN local `anchoredWorld`; FORK-A test-only precedent). Touches NO shared fixture -> zero blast radius on the two
+  existing `_world.js` consumers; YAGNI (no third consumer yet).
+- **Option A -- extend `_world.js` with additive sigma-root helpers** (honors "extend not fork"; keeps existing
+  exports byte-identical; re-run the 2 consumers as the gate). Higher blast radius for a single new consumer.
+
+DRAFT REC = Option B; flagged for the board (architect Q).
+
+### §W3.6 Darkness cascade + layering -- DO NOT EXTEND
+
+W3 adds NO dormant `src/` module. `sigma-root-darkness-witness.test.js` scans `src/` only (line 33 `SRC=...`) and
+asserts EXACT importer sets (`sigma-root` <- `{binding-request-auth, registration-provenance}`; `registration-provenance`
+<- `{admission-gate, registration-gate}`), so the W3 TEST importing `signSigmaRoot`/`assessRegistrationFromRegistry`
+does NOT trip it. The build MUST re-run the sigma-root + registration-gate + admission-gate darkness witnesses +
+`layering.test.js` to confirm they stay green (unchanged).
+
+### §W3.7 TDD plan (RED first)
+
+**File: NEW `v0/test/integration/sigma-root-provenance-proof.test.js`** (auto-discovered by `test/run.js` --
+`**/*.test.js`; `_world.js` stays non-`.test.js`, not auto-run). The assertions:
+
+1. **(b)-logic-1 controller-mismatch DENY (in-process).** Build a foreign-controller binding `{personaDid, publicKeyPem,
+   controller: 'human:foreign'}`; compute `claimedRecordId = computeBindingId(binding)` FIRST (the M2 ordering trap --
+   `recomputeBindingId` runs before `controllerBinds`, `binding-request-auth.js:134-136`); assert
+   `authorizeBindingRequest({requireBinding:true, brokerController:'human:me', presentedBodyRaw, claimedRecordId}).reason
+   === 'controller-mismatch'` (the RIGHT gate, NOT the masking `record-id-mismatch`). Non-vacuity: a matching-controller
+   binding is ALLOWED.
+2. **(b)-logic-2 domain separation (in-process).** Feed a FRAME-shaped body (a real VOUCH frame preimage, no
+   `controller`/`publicKeyPem`) to `authorizeBindingRequest` -> deny `binding-uncomputable` AND assert
+   `computeBindingId(frameBody)` THROWS (the non-vacuous proof that the binding gate is closed against a frame; the
+   key-separation invariant's defense-in-depth companion).
+3. **(c) in-process no-key sign -> null.** `signRecordId('a'.repeat(64), {}) === null` + garbage key -> null; non-vacuity
+   with a real key -> a string.
+4. **(d1) self-`registerRoot` -> KEPT (EXPECTED SHADOW pass, the OPEN leg).** Register an ATTACKER persona under
+   `human:attacker`; `seedRoot('human:attacker')`; `signBinding(ATTACKER, 'human:attacker')` under the attacker's OWN
+   root key; put the sigma_root in the armed map; assert `assessRegistrationFromRegistry(reg, {personaDid:ATTACKER,
+   sigmaRoot}).sigmaRootChecksPassed === true` AND the ATTACKER's VOUCH SURVIVES `filterAnchoredRecords(armed)`. Labeled
+   EXPECTED-SHADOW-pass (integrity-not-provenance).
+5. **(d2) cannot anchor to a GENUINE root (CLOSED, API + key paths).** (d2a) `assert.throws(() => registerRoot(reg,
+   {humanUid:'human:me', rootPublicKeyPem: attackerRootPub}))` -- cannot squat the genuine root key. (d2b) register a
+   persona under `human:me`, sign its binding under the ATTACKER root key, map it -> assert
+   `assessRegistrationFromRegistry(reg,{personaDid, sigmaRoot}).sigmaRootChecksPassed === false` AND the record DROPS from
+   the armed `filterAnchoredRecords` (track the dropped `record_id`).
+6. **(d-mutation) DISCLOSED OPEN.** `reg.rootKeys.set('human:me', attackerRootPub)` directly -> assert the (d2b) binding
+   now PASSES `assessRegistrationFromRegistry` (the bypass admits) -- demonstrated LIVE as EXPECTED-OPEN, carried as the
+   `apex-inprocess-rootkey-mutation-OPEN` residual.
+7. **(apex non-vacuity).** EMPTY: before anchoring, the ATTACKER's VOUCH is DROPPED by the armed filter (so d1's KEPT is
+   load-bearing, not vacuous). EXACT: the KEEP keys on `sigmaRootChecksPassed === true` (a boolean, exact), never a
+   subset. The d2b DROP is a genuine crypto FAIL (re-seeding the genuine root with the attacker key THROWS; only the
+   `rootKeys.set` bypass flips it) -- not a store miss.
+8. **SHADOW invariant (NS-9).** `convert(armed, ME, <any>).actionable === false` throughout (READ-only).
+9. **the verdict.** Assemble the in-process controls (b-logic-1, b-logic-2, c, d1, d2) as PASS + the deploy-only (a,
+   b-live, d-heap) + `apex-inprocess-rootkey-mutation-OPEN` as NOTE; assert `inProcessProvenanceControlsPassed === true`,
+   assert each NOTE/open leg is NAMED in `residuals`, assert NO `hardened` field.
+10. **(H2) the verdict helper fails CLOSED.** A distinct RED test: empty -> false; unknown status -> false AND surfaces;
+    a real FAIL -> false AND surfaces; a null element / status-less check -> fail-closed; all PASS/NOTE -> pass.
+
+### §W3.8 What W3 does NOT do (NS-9)
+
+- Does NOT close the apex (d1 is EXPECTED-open); does NOT close the `reg.rootKeys.set` in-process leg (d-mutation,
+  disclosed); does NOT establish PROVENANCE in-process (a/b-live/d-heap are deploy-only NOTE); does NOT gate / flip
+  `actionable`; does NOT add a `src/` module, a darkness witness, or a CLI; does NOT deploy / seed a genesis root /
+  install a key / set an arm flag (NS-7). The only HARDEN is the operator's out-of-band root-key attestation.
+
+### §W3.9 Runtime probes (re-run at build -- repo state decays)
+
+- Probe: `grep -n "sigmaRootChecksPassed\|lookupRootKey" v0/src/identity/registration-provenance.js` -> the judge sources
+  the root key from `lookupRootKey(reg, controller)` (the d1/d2 premise).
+- Probe: `grep -n "reason: 'controller-mismatch'\|recomputeBindingId\|controllerBinds" v0/src/identity/binding-request-auth.js` -> the (b)-logic deny reasons + the M2 ordering.
+- Probe: `grep -n "first-writer\|IMMUTABLE\|rootKeys.set" v0/src/identity/registry.js` -> the d2a squat-throw + the d-mutation bypass surface.
+- Probe: `grep -n "actionable" v0/src/trust/convert.js` -> still hard-false (the SHADOW invariant).
+
+### §W3.10 Pre-build VERIFY -- DONE: PROCEED-WITH-FOLDS (folds baked into the build)
+
+A 3-lens board (architect + code-reviewer + hacker, free-text per SCAR-#31) ran against this design + the real
+files. **All three PROCEED-WITH-FOLDS -- zero CRITICAL, zero NEEDS-REVISION.** The hacker ran 10 LIVE probes
+against the real `v0/src` (0 exploitable bypasses beyond the design's own disclosed-open legs); every premise
+reproduced. Convergent must-folds (baked into the build below):
+
+- **F1 (architect HIGH + reviewer MED-1 + hacker M2) -- EXTRACT the verdict helper, do NOT copy-paste.** Copying the
+  ~20-line fail-closed `assessReadControls` into a second file recapitulates the exact F1 "a forked hardened copy
+  WILL diverge" anti-pattern this arc codified at W1a (`broker-core.js`), AND risks transcribing the STALE `plans/38
+  §2a` pre-fold sketch (which still has the read-twice + null-element nits VALIDATE later fixed) instead of the BUILT
+  `edge-provenance-proof.test.js:44-63`. **Fold:** lift the BUILT helper to a shared `v0/test/integration/_assess-controls.js`
+  parameterized on the pass-field name (`assessControls(checks, passField) -> {[passField]:passed, checks, residuals}`,
+  NEVER a `hardened` field -- NS-9 preserved); re-point `edge-provenance-proof.test.js` to it (a thin local alias so
+  its call sites + field accesses stay byte-identical) and RE-RUN it (the behavioral-equivalence gate, like W1a
+  re-ran `broker.test.js`); the W3 file uses `passField='inProcessProvenanceControlsPassed'`. This is the arc's OWN
+  precedent: `plans/38 §0` lifted `world()` to `_world.js` the moment it got a second consumer -- W3 is the verdict
+  helper's second consumer, so the YAGNI justification for FORK-A "keep it local" has expired.
+- **F2 (reviewer HIGH-1 + hacker H1, LIVE-PROVEN) -- d2b MUST assert the EXACT `[R3_VERIFIES]` failed-set, not just
+  `=== false`.** The hacker proved live that a store-miss (unseeded root) and a genuine forgery (seeded root, wrong-key
+  sig) BOTH read `sigmaRootChecksPassed === false` -- but with DIFFERENT failed-sets (`['R-registry-source']` vs
+  `['R3-verifies']`). A bare `=== false` would pass even if the persona/root were never set up, proving nothing about
+  the CRYPTO. **Fold:** seed the genuine root FIRST (so R0/R1/R2 PASS), then
+  `assert.deepEqual(prov.checks.filter(c => c.status==='FAIL').map(c => c.id), [R3_VERIFIES])` (import `R3_VERIFIES`
+  from `registration-provenance.js`) -- mirroring the forgery whitelist at `registration-gate.js:108-109`. THE most
+  load-bearing fold.
+- **F3 (architect MED + reviewer LOW-1) -- d2a: seed the genuine `human:me` root FIRST, assert the throw MESSAGE**
+  (`/already seeded with a DIFFERENT root key|IMMUTABLE/`), and prove non-vacuity (WITHOUT the pre-seed, `registerRoot`
+  succeeds -- so the throw is genuinely the first-writer guard, not a malformed-arg `TypeError`). Mirrors the edge
+  board's (e2) `registerPersona` first-writer squat-throw, `edge-provenance-proof.test.js:126-128`.
+- **F4 (architect MED) -- d2b needs its POSITIVE complement:** the SAME persona's binding signed by the GENUINE root
+  -> `sigmaRootChecksPassed === true` + KEPT, alongside the attacker-signed DROP -> so the DROP is provably KEY-caused
+  (the non-vacuous-guard pair), not a construction miss.
+- **F5 (architect MED + reviewer LOW-2) -- test `filterAnchoredRecords(recs, registry, {sigmaRoots})` DIRECTLY** for
+  the KEEP/DROP controls (that path has NO freshness filter -- `convert.js:89-90`), and **arm ONLY `regProvenance`,
+  DISARM freshness** (a both-armed ctx makes a drop ambiguous freshness-vs-anchoring, vacuating d1/d2). Reserve
+  `convert(...)` ONLY for the item-8 `actionable === false` SHADOW invariant (with an explicit `meCtx` shape).
+- **F6 (architect MED) -- fixture = a LOCAL cap over `world()`** (reuse its store/persona plumbing; add ~10 lines of
+  root-seed + a `signBindingUnderRoot(personaDid, controller, rootPrivPem)` helper -- neither `world()` nor
+  `anchoredWorld` can sign a persona's binding under an ARBITRARY (attacker) root privkey, which d2b requires). Do NOT
+  extend `_world.js` (Option A over-generalizes root-seeding onto its 2 non-anchoring consumers -- ISP/YAGNI); do NOT
+  lift `anchoredWorld` (no third consumer). The corrected §W3.5 rationale: "over `world()`" is a thin sigma-root cap,
+  NOT "mirroring anchoredWorld" (two different fixtures were conflated in the draft).
+- **F7 (hacker M1) -- strict `assert-DROP -> reg.rootKeys.set(...) -> assert-ADMIT` ordering** on a single `reg`
+  handle for d2b/d-mutation (or a FRESH registry for d-mutation) -- else the mutation silently flips the d2b FAIL
+  assertion to true (proven live). Mirrors the edge board's (e2) H1-boundary assert-DROP -> mutate -> assert-ADMIT
+  block, `edge-provenance-proof.test.js:143-145`.
+- **F8 (hacker M3) -- d1's verdict-check `detail` MUST carry the OPEN-leg language** ("EXPECTED SHADOW pass -- the
+  crypto proves the root KEY authorized the binding, NEVER that the key is a distinct real human root; the 5th leg is
+  OPEN"), mirroring `edge-provenance-proof.test.js:203`. A bare `PASS` lets `inProcessProvenanceControlsPassed===true`
+  be skimmed as "provenance established in-process."
+- **Framing sharpenings (architect LOW-MED + hacker L1/L2, plan-text only):** (a) d1's KEEP MECHANISM is REUSED
+  (`registration-gate-convert.test.js` item 11b already keeps self-seeded-root personas); d1's genuine net-new is the
+  ADVERSARIAL FRAMING + EXPECTED-SHADOW-pass label + the empty-before-anchor non-vacuity, NOT the keep itself. (b) d2
+  closes CROSS-CONTROLLER impersonation but buys NO readout-visible privilege over d1 (the persona-blind
+  indistinguishability IS the integrity-not-provenance disclosure). (c) label (b)-logic-1/2 + (c) as board-ASSEMBLY
+  re-exercises (already unit-covered by W1b + W4), not new coverage. (d) the `apex-inprocess-rootkey-mutation-OPEN`
+  residual text names BOTH host-writable Maps (`reg.rootKeys.set` AND `reg.personas.set`; `registry.js:38-41` discloses
+  the persona analog, `rootKeys` by extension -- `registerRoot` has only the SQUAT residual at `:94-97`, no threat-
+  boundary comment). (e) the "exact-set" discipline points at the R3-only failed-set (F2), not the boolean KEEP.
+
+The build (below) bakes all of F1-F8 + the framing sharpenings, then runs the 3-lens VALIDATE on the built diff, the
+pre-PR CodeRabbit CLI, and the PR.
+
+## Wave 3 -- build result (as-built; 3-lens VALIDATE + folds applied)
+
+### Built (all SHADOW / test-only -- NO src/ module changed)
+- **NEW `v0/test/integration/_assess-controls.js`** -- the EXTRACTED shared fail-closed verdict helper (fold F1),
+  `assessControls(checks, passField) -> {[passField]:passed, checks, residuals}` (NEVER a `hardened` field, NS-9).
+- **NEW `v0/test/integration/sigma-root-provenance-proof.test.js`** -- the W3 proof board (9 controls: b-logic-1/2,
+  c, d1 KEPT, d2 CLOSED, d-mutation OPEN, SHADOW, the verdict, H2). All F2-F8 baked in.
+- **MODIFIED `v0/test/integration/edge-provenance-proof.test.js`** -- re-pointed to the shared helper via a thin
+  local `assessReadControls` alias (F1). Behavioral-equivalence GATE: re-ran 9/9 UNCHANGED (the W1a-style proof).
+- **GATE:** full suite 54 files / 697 / 0; eslint clean; the sigma-root / registration-gate / admission-gate
+  darkness witnesses + `layering.test.js` all green (the proof board adds NO src importer -> the cascade does NOT
+  extend, mirroring plans/38 W4).
+
+### 3-lens VALIDATE on the built diff (code-reviewer + hacker + honesty-auditor): all PROCEED / PROCEED-WITH-FOLDS
+- **code-reviewer: PROCEED (0 findings).** Verified firsthand: the extract is byte-behavior-identical (diffed the
+  removed inline body vs `_assess-controls.js`; only the literal key + Set name parameterized); every control
+  falsifiable-not-vacuous; resource hygiene clean (the 4 `world()` calls share `_world.js`'s per-process
+  exit-cleanup, no leak); the plan §W3 matches the built code.
+- **hacker (Rule 2a, LIVE re-probe of the BUILT code): PROCEED-WITH-FOLDS.** 10 probes, 0 exploitable bypasses
+  beyond the disclosed-open legs; every load-bearing property HELD (exact-set immunity, non-vacuous negatives, honest
+  EXPECTED-OPEN apex, live-executed bypass). Found + FOLDED 3 latent defense-in-depth defects in the shared helper
+  (inherited verbatim from the pre-existing edge helper, unreachable by the current dense-literal callers, but they
+  FALSIFY the helper's own header contract -- so the "one hardened copy" must actually be hardened):
+  - **M1 (holey-array vacuous PASS):** `assessControls(new Array(3))` passed vacuously (`.map`/`.every` SKIP holes).
+    FOLD: `Array.from(checks)` densifies holes -> `__MISSING__` fail-closed. Firsthand-proven before + after.
+  - **L1 (throws on a hostile getter, breaking "never throws")** + **L2 (`c.status` read twice, breaking "snapshot
+    ONCE"):** FOLD: read the status ONCE into a local inside a per-element try/catch. Both proven firsthand.
+  - **L3 (F8 prose-only):** the d1 OPEN-leg disclosure is now MACHINE-asserted (`assert.match` on the d1 detail).
+  - Locked with holey-array + throwing-getter cases added to the H2 suite.
+- **honesty-auditor: Grade A, PROCEED-WITH-FOLDS (all advisory).** No CRITICAL/HIGH/MED; the board is exemplary on
+  its honesty axes (apex integrity-not-provenance correctly labeled in all 3 places, disclose-by-execution genuinely
+  executed, `hardened` provably absent, deploy-only legs demoted to NOTE, SCAR-#30 recon correctly deferred). 8/8
+  folds F1-F8 confirmed applied. Two LOW folds APPLIED: **LOW-1** the strict-ordering mirror mis-cited
+  `edge-provenance-proof.test.js:163-165` (stale post-extract) -> corrected to descriptive anchors (the (e2)
+  `reg.personas.set` bypass `:143-145` + the `registerPersona` squat-throw `:126-128`); **LOW-2** the d-mutation test
+  name used filter vocabulary ("DROP to admit") while asserting at the judge layer -> now demonstrates the flip at
+  BOTH layers (judge `sigmaRootChecksPassed` AND the read-side `filterAnchoredRecords` pipeline). (The filter-level
+  assertion caught a real opts-shape bug in the fold -- I passed the raw map instead of `{sigmaRoots:...}`, so the
+  filter disarmed; fixed -- a non-vacuity dividend of Rule-2a re-probing the BUILT code.)
+
+### Residuals (NS-9, LOUD)
+- **The APEX is EXPECTED-OPEN** (d1) -- a same-uid self-`registerRoot`+self-sign is KEPT: integrity holds, provenance
+  does NOT. The readout treats a self-anchored KEEP and a genuine-anchored KEEP IDENTICALLY (persona-blind) -- that
+  indistinguishability IS the integrity-not-provenance disclosure. d2 closes CROSS-CONTROLLER impersonation only, with
+  NO readout-visible privilege over d1.
+- **The in-process `reg.rootKeys.set` / `reg.personas.set` leg is DISCLOSED OPEN** (d-mutation) -- the host-writable
+  registry; closes ONLY with a deployed + attested cross-uid minter (the #273 direction), NOT this arc.
+- **The cross-uid HARDEN legs (a key-cat-EACCES / b-live wrapper deny / d-heap extract) are DEPLOY-ONLY NOTE** -- run
+  at the operator deploy, never asserted PASS in-process. The verdict field is `inProcessProvenanceControlsPassed`,
+  never `hardened`. All SHADOW: `convert.actionable` stays hard-false; the only HARDEN is the operator's out-of-band
+  root-key attestation (NS-7).
+- **NEXT:** W4 (runbook + the deploy wire-check `assertBrokerPersona` sigma-root analog), W5 (USER operator deploy +
+  out-of-band attestation -- the only HARDEN, NS-7).
