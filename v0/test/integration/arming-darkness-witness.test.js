@@ -65,17 +65,17 @@ test('ARMED == DARK (convert.actionable): full arming does NOT flip actionable',
   assert.equal(out.actionable, false, 'convert.actionable stays false under full arming (INV-16, U2 open)');
 });
 
-test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dormant admission-gate (its first + only consumer)', () => {
+test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dormant {admission-gate, signing-armed-mint} consumers', () => {
   // COMPUTED whole-tree scan, not a hardcoded pair (VALIDATE-hacker LOW: 5 other decision-shaped trust
   // modules exist; a future edit wiring arming into read-gate/issuance-policy/... must go RED too). Anchored to
   // a require() call so a prose mention cannot false-fail.
   //
-  // W2 UPDATE (plans/33): admission-gate.js is arming-coherence's FIRST consumer -- it is the DELIBERATE
-  // allowlist entry the original comment anticipated ("when a future wave legitimately wires arming into a gate,
-  // THIS going RED is the intended deliberate-update signal; never silently broaden the allowlist"). The
-  // allowlist has EXACTLY one entry, and admission-gate is ITSELF DARK (wired to nothing -- proven by
-  // admission-gate-darkness-witness), so the "arms nothing" guarantee holds transitively. ANY OTHER importer,
-  // or admission-gate being wired into a live gate, goes RED.
+  // W2 UPDATE (plans/42): arming-coherence now has TWO consumers, BOTH deliberate + BOTH dark -- admission-gate
+  // (the admission arm's consumer, plans/33) and signing-armed-mint (the SIGNING arm's producer-consumer, this
+  // wave). Each is ITSELF wired to nothing (proven by admission-gate-darkness-witness /
+  // signing-armed-mint-darkness-witness), so the "arms nothing" guarantee holds transitively through both. The
+  // allowlist is EXACTLY these two (deepEqual, never a subset). ANY OTHER importer, or either consumer being
+  // wired into a live gate, goes RED (the intended deliberate-update signal; never silently broaden it).
   const importers = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {
@@ -87,7 +87,7 @@ test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dor
     }
   };
   walk(SRC);
-  assert.deepEqual(importers.sort(), ['trust/admission-gate.js'], 'arming-coherence must be imported ONLY by the dormant admission-gate; found: ' + importers.join(', '));
+  assert.deepEqual(importers.sort(), ['trust/admission-gate.js', 'trust/signing-armed-mint.js'], 'arming-coherence must be imported ONLY by the dormant {admission-gate, signing-armed-mint}; found: ' + importers.join(', '));
 });
 
 console.log(`\n[arming-darkness-witness] ${pass} passed, ${fail} failed`);
