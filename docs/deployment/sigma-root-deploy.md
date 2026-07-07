@@ -160,7 +160,7 @@ registerPersona(reg, { personaDid: P, humanUid: '<your-scarce-human-uid>', publi
 //        controller MUST equal the humanUid — assessRegistrationFromRegistry sources it via rootOf(reg, P).
 const sigmaRoot = signSigmaRoot(
   { personaDid: P, publicKeyPem: K_pub, controller: '<your-scarce-human-uid>' },
-  { privateKeyPem: K_root_priv } // OR { signer } for a custody-boundary root signer (plans/30 forward-compat)
+  { privateKeyPem: K_root_priv } // OR { signer } for a custody-boundary root signer (BUILT: sigma-root-broker-deploy.md)
 );
 // signSigmaRoot returns null (never throws) on a bad/unsignable binding -- GUARD it: a null must halt
 // provisioning, never be persisted (a persona with a null sigmaRoot fails admission and masks the real error).
@@ -169,8 +169,10 @@ if (!sigmaRoot) throw new Error('signSigmaRoot returned null: bad binding field 
 ```
 
 `signSigmaRoot` returns `null` (never throws) on a bad field or an unsignable binding — check for it. The
-`{ privateKeyPem }` path is the provisioning/custody path (sigma-root.js:53); prefer the enclave `{ signer }`
-seam once plans/30 lands so `K_root_priv` never materializes in a provisioning process either.
+`{ privateKeyPem }` path (enclave, `sigma-root.js:53`) keeps `K_root_priv` OFF the box entirely — the strongest
+custody for static bindings. For ON-DEMAND signing without an enclave round-trip, the `{ signer }` custody-boundary
+is now BUILT (the cross-uid sigma-root broker, plans/42 W1b/W2) — see **`sigma-root-broker-deploy.md`** (it puts
+`K_root` on the box under a separate uid, an R-heap-bounded custody, not the enclave's never-on-box posture).
 
 ---
 
