@@ -419,3 +419,60 @@ when the require-binding flag is off.
   All SHADOW: the sigma-root broker is import-dark (darkness-witness), `convert.actionable` stays hard-false.
 - **NEXT:** W2 (the `signingArmed` producer + compose-and-mint call site), then W3 (proof board), W4 (runbook),
   W5 (USER operator deploy + out-of-band attestation -- the only HARDEN, NS-7).
+
+## Wave 2 -- design + build result (as-built; 3-lens pre-build VERIFY + build, accretion 2026-07-06)
+
+### Recon-completeness correction (the SCAR-#30 probe -- VERIFIED by all 3 lenses)
+The plan skeleton read W2 as "NEW `signing-armed-mint.js` that ... mints a freshness-bound VOUCH ... leaves it
+for `verifiedRecords` -> `registration-gate` -> `convert`." Grounding at `951fda2` showed **two of the three are
+ALREADY BUILT**: the mint (`identity/mint-fresh-vouch.js`, SHADOW/dormant) and the read-side
+(`convert.disjointPaths` -> `vouch-freshness.filterFreshVouches`, wired-live-DISARMED = identity pass-through).
+So W2's genuine net-new is ONLY the thin **arming-gated composition** + its darkness witnesses + the input-contract
+split -- NOT a from-scratch mint or a read-side wiring.
+
+### Pre-build 3-lens VERIFY -- all PROCEED-WITH-FOLDS (2026-07-06)
+Free-text parallel agents (architect + code-reviewer + hacker), against the draft + the real files. Zero
+NEEDS-REVISION. Decisive folds (baked into the build below):
+- **[architect BLOCKING] Q2 -- gate the mint on the SIGNING arm ALONE**, not both-or-neither. Grounded firsthand
+  in `arming-coherence.js:35-37`: the sign-then-admit STAGING contract (arm signing -> accumulate signed edges ->
+  later arm admission) is the intended future contract, and `signingArmedMint` IS the edge-producer that makes it
+  real; gating on both would foreclose the staging (and deadlock against admission-gate, which also gates on both).
+  Coherence enforcement is the ADMISSION decision's job. (This OVERRODE the draft's + the code-reviewer's
+  "gate on both" -- resolved by premise-probing the primitive.)
+- **[architect BLOCKING] Placement -- `trust/`, not `identity/`** (NS-11: `identity/` may not import `trust/`; grep
+  confirmed zero `identity->trust` edges). `signing-armed-mint.js` imports `trust/arming-coherence`.
+- **[architect + code-reviewer] TOTAL contract (never-throws):** `mintFreshVouch` THROWS (not just `{ok:false}`);
+  wrap it -> `{minted:false} + emit`. Map `{ok}`->`{minted}`.
+- **[architect fold 6 + code-reviewer fold 6] `assertBrokerPersona` -> DEPLOY wiring (W4), not per-mint.** The
+  signer is DI-injected pre-verified; the load-bearing custody check is the read-side sig-verify.
+- **[architect fold 3/4 + hacker MED-1] input-contract split:** `deps` (static custody: signer/personaDid/humanUid/
+  keyId) vs `request` (per-MINT: targetPersona/approvedAt/freshnessNonce/seq/nonce -- a fresh nonce EVERY mint).
+- **[hacker MED-2] read the arms ONCE into locals inside the (a) try; pass LOCALS to `armingDecision`** (its
+  destructure has no try/catch -- raw hostile input would escape uncaught = fail-SILENT).
+- **[hacker HIGH-1] amend the EXISTING `mint-fresh-vouch-darkness-witness`** to a one-entry allowlist
+  `[signing-armed-mint]` (else it snaps RED); + a new witness proves `signing-armed-mint` import-dark.
+- **[hacker LOW-1] alert details** carry only `{class,cause}` -- never spread `deps`/`signer`/`input` (key-path leak).
+- **[hacker MED-1 / R4] replay-within-TTL is UNBUILT** (`checkFreshnessWindow` is a `<=TTL` window, no
+  consume-store): the deploy-DI MUST supply fresh high-entropy nonces per mint (`MIN_NONCE_LEN` is a floor).
+
+### Built (all SHADOW / import-dark)
+- **NEW `v0/src/trust/signing-armed-mint.js`** -- `signingArmedMint(input, deps, request)`, TOTAL. Arm read
+  once-into-locals -> `armingDecision(locals)` for the incoherence EMIT only -> gate on `signingArmed === true`
+  (disarmed -> no-mint, byte-identical) -> `mintFreshVouch(...)` in try/catch -> `{minted, frame?}`. Imports EXACTLY
+  `{arming-coherence, mint-fresh-vouch, refuse-alert}`.
+- **Amended** `mint-fresh-vouch-darkness-witness` (one-entry allowlist) + **amended** `arming-darkness-witness`
+  (two-entry: `{admission-gate, signing-armed-mint}` -- the suite caught this THIRD containment witness) + **NEW**
+  `signing-armed-mint-darkness-witness` (import-dark + exact-import-set).
+- **NEW** `signing-armed-mint.test.js` (11 cases: disarmed/incoherent/arm-throw -> no-mint with a SPY signer
+  proving the mint is never reached; staging + coherent -> mint; end-to-end round-trip through the real read path;
+  mint-throw + `{ok:false}` -> `{minted:false}`+emit; two-nonce distinction; per-mint uniqueness).
+- **GATE:** full suite 53 files / 688 passed / 0 failed; eslint clean.
+
+### Residuals (NS-9, LOUD)
+- **R1 #273 UNCHANGED** -- a same-uid holder mints an AUTHENTIC fresh VOUCH under its OWN key; the arming gate adds
+  arm-coherence + a deploy wire-check, NOT provenance (verbatim from `mint-fresh-vouch.js:12-17`).
+- **R4 (new) -- replay-within-TTL UNBUILT** -- `checkFreshnessWindow` is a `<=TTL` window, NO consume-store /
+  nonce-burn; a minted VOUCH is replayable in-window by re-append. Deploy-DI supplies fresh high-entropy nonces
+  per mint; the reader's one-shot consume-store is a future wave. Tolerable only because SHADOW + `actionable:false`.
+- **R5 -- custody wire-check is a DEPLOY step** (W4); `signingArmedMint` assumes a pre-verified signer.
+- **NEXT:** W3 (proof board), W4 (runbook + the deploy wire-check), W5 (USER operator deploy + attestation -- NS-7).
