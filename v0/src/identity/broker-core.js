@@ -65,9 +65,17 @@ function makeFail(progName) {
  * -> swap-resistant key vet -> sign -> emit ONLY the sig. Behavior-identical to the pre-extraction
  * broker-sign.js main() when invoked with the frame params (the W1a behavioral-equivalence gate).
  * @param {{progName:string, keyFileEnv:string, allowlistEnv:string, requireMode:boolean,
- *          authorize:function, disabledNotice:{who:string, what:string}}} opts
+ *          authorize:function, disabledNotice:{who:string, what:string},
+ *          distinctFromKeyFileEnv?:string}} opts
+ *   distinctFromKeyFileEnv (optional) -- the name of ANOTHER broker's key-file env this broker's key MUST
+ *   NOT alias. The sigma-root broker (plans/42 W1b) passes 'PACT_BROKER_KEY_FILE': if K_root and K_broker
+ *   resolve to the SAME inode, a single key signs both sigma-root bindings AND frame record_ids, and (since
+ *   computeRecordId is field-agnostic) a binding sig verifies as a frame sig -- a cross-protocol signing
+ *   oracle for the trust root (VERIFY hacker HIGH-1, proven live). Absent/unset -> the check is skipped
+ *   (the frame broker passes nothing -> W1a behavior is byte-unchanged). Custody isolation is otherwise a
+ *   process/uid/env property; this guard closes only the same-FILE mis-deploy.
  */
-async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, authorize, disabledNotice }) {
+async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, authorize, disabledNotice, distinctFromKeyFileEnv }) {
   const fail = makeFail(progName);
 
   // In require mode the caller presents the PREIMAGE body on stdin. DRAIN it FIRST -- before any gate that
@@ -132,6 +140,28 @@ async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, auth
     const st = fs.fstatSync(fd);                                  // the OPEN fd's inode — swap-immune
     if (!st.isFile()) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be a regular file'); }
     if (st.mode & 0o077) { try { fs.closeSync(fd); } catch { /* */ } return fail('key file must be owner-only -- not group/world accessible (e.g. 0600)'); }
+    // (2a) same-inode refusal (HIGH-1): this broker's key MUST be a DISTINCT physical key from the OTHER
+    // broker's (distinctFromKeyFileEnv). Compared against the ALREADY-OPEN fd's swap-immune (dev, ino) --
+    // fs.statSync FOLLOWS symlinks so an aliasing symlink to the same key is also caught. An UNSET other-env
+    // skips the check (the operator did not opt in). A statSync error is ASYMMETRIC: ENOENT -> the other key
+    // is genuinely ABSENT (nothing to collide with) -> skip; ANY OTHER error (EACCES on a parent-dir traversal,
+    // ELOOP, ENOTDIR) means we CANNOT prove distinctness -> fail CLOSED, never silently leave the
+    // cross-protocol oracle open (a fail-open inside a fail-closed guard is a contract violation; CodeRabbit).
+    if (distinctFromKeyFileEnv) {
+      const otherPath = process.env[distinctFromKeyFileEnv];
+      if (typeof otherPath === 'string' && otherPath.length > 0) {
+        let otherStat = null;
+        try { otherStat = fs.statSync(otherPath); }
+        catch (e) {
+          if (!e || e.code !== 'ENOENT') { try { fs.closeSync(fd); } catch { /* */ } return fail(distinctFromKeyFileEnv + ' unstattable -- cannot prove key separation from ' + keyFileEnv); }
+          otherStat = null; // ENOENT: the other key is absent -> nothing to collide with -> skip
+        }
+        if (otherStat && otherStat.dev === st.dev && otherStat.ino === st.ino) {
+          try { fs.closeSync(fd); } catch { /* */ }
+          return fail(keyFileEnv + ' must be a DISTINCT key from ' + distinctFromKeyFileEnv + ' (same inode -- a cross-protocol signing oracle for the trust root)');
+        }
+      }
+    }
   } catch { try { fs.closeSync(fd); } catch { /* */ } return fail('key file unstattable'); }
   try { pem = fs.readFileSync(fd, 'utf8'); } finally { try { fs.closeSync(fd); } catch { /* */ } }
 

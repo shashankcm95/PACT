@@ -51,13 +51,19 @@ function computeBindingId({ personaDid, publicKeyPem, controller } = {}) {
 
 /**
  * Sign a binding as its root: base64 ed25519 sigma_root, or null. rootSignerOpts = { privateKeyPem } (test /
- * provisioning) OR { signer } (a custody-boundary root signer, forward-compat with plans/30).
+ * provisioning) OR { signer } (a custody-boundary root signer -- the cross-uid sigma-root broker, plans/42 W1b).
  * Fail-soft -> null (NEVER throws): computeBindingId can throw on a bad field, so it is WRAPPED (VERIFY hacker C1).
+ *
+ * The ALREADY-VALIDATED `binding` object is threaded as signRecordId's 3rd `body` arg (plans/42 W1b Piece C):
+ * a custody-boundary { signer } forwards it on the broker child's stdin so the sigma-root broker can
+ * recompute-bind (computeBindingId(body) === the signed id) -- the binding analogue of R2-WHAT. Back-compat
+ * (Open/Closed): the in-process { privateKeyPem } path's resolveSigner closure is single-arg and IGNORES the
+ * body, so every existing { privateKeyPem } caller is unaffected (proven: all 11 call sites pass privateKeyPem).
  */
 function signSigmaRoot(binding, rootSignerOpts) {
   let bindingId;
   try { bindingId = computeBindingId(binding); } catch { return null; }
-  return signRecordId(bindingId, rootSignerOpts || {});
+  return signRecordId(bindingId, rootSignerOpts || {}, binding);
 }
 
 /**
