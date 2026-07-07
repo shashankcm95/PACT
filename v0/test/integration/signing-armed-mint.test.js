@@ -70,7 +70,9 @@ test('admission-armed + signing-OFF -> {minted:false}, NO mint, XOR emit (signin
   assert.equal(r.minted, false);
   assert.equal(r.reason, 'admission-armed-without-signing');
   assert.equal(signer.calls(), 0, 'admission alone does NOT mint');
-  assert.match(stderr, /"reason":"arming-incoherent".*"cause":"admission-armed-without-signing"|"cause":"admission-armed-without-signing"/, 'the incoherence is observable');
+  // cause-BEFORE-reason: refuse-alert serializes {...detail, reason} so `reason` is LAST (CodeRabbit: an
+  // A.*B|B alternation made the reason-check a no-op; assert BOTH fields, in the real serialization order).
+  assert.match(stderr, /"cause":"admission-armed-without-signing".*"reason":"arming-incoherent"/, 'the incoherence is observable (reason + cause both present)');
 });
 
 test('a truthy-non-boolean signingArmed (===true strict) does NOT arm -> {minted:false}, no mint', () => {
@@ -87,7 +89,7 @@ test('arm-getter THROWS -> {minted:false, arm-read-failed}, NO mint, emitted (NO
   assert.equal(r.minted, false);
   assert.equal(r.reason, 'arm-read-failed');
   assert.equal(signer.calls(), 0, 'an indeterminate arm never reaches the mint');
-  assert.match(stderr, /"reason":"signing-arm-unreadable".*"cause":"arm-getter-threw"|"cause":"arm-getter-threw"/, 'fail-closed AND observable');
+  assert.match(stderr, /"cause":"arm-getter-threw".*"reason":"signing-arm-unreadable"/, 'fail-closed AND observable (reason + cause both present)');
 });
 
 // ============================== signing armed -> MINT (staging + coherent) ==============================
@@ -98,7 +100,7 @@ test('signing-armed + admission-OFF (STAGING) -> MINTS (Q2: sign-then-admit stag
   assert.equal(r.minted, true, 'signing armed alone MINTS -- the staging the primitive is designed for');
   assert.equal(r.frame.type, 'VOUCH');
   assert.ok(signer.calls() > 0, 'the mint was reached');
-  assert.match(stderr, /"cause":"signing-armed-without-admission"/, 'staging is an incoherent-but-intended state -> observable emit');
+  assert.match(stderr, /"cause":"signing-armed-without-admission".*"reason":"arming-incoherent"/, 'staging is an incoherent-but-intended state -> observable emit (reason + cause both present)');
   w.append(r.frame); // the caller appends only on {minted:true}
 });
 
@@ -136,7 +138,7 @@ test('mint THROWS (freshnessNonce below MIN_NONCE_LEN) -> {minted:false, mint-fa
   assert.equal(r.minted, false);
   assert.equal(r.reason, 'mint-failed');
   assert.ok(!('frame' in r));
-  assert.match(stderr, /"reason":"signing-mint-failed".*"cause":"mint-threw"|"cause":"mint-threw"/, 'a mint-boundary throw is observable (misconfig)');
+  assert.match(stderr, /"cause":"mint-threw".*"reason":"signing-mint-failed"/, 'a mint-boundary throw is observable (misconfig; reason + cause both present)');
 });
 
 test('mint returns {ok:false} (signer yields no sig) -> {minted:false} + integrity emit', () => {
@@ -145,7 +147,7 @@ test('mint returns {ok:false} (signer yields no sig) -> {minted:false} + integri
   const { r, stderr } = withStderr(() => signingArmedMint({ admissionArmed: true, signingArmed: true }, { ...deps, signer: nullSigner }, request));
   assert.equal(r.minted, false);
   assert.ok(!('frame' in r));
-  assert.match(stderr, /"reason":"signing-mint-failed".*"cause":"mint-signer-failed"|"cause":"mint-signer-failed"/, 'a broken signer is observable (integrity)');
+  assert.match(stderr, /"cause":"mint-signer-failed".*"reason":"signing-mint-failed"/, 'a broken signer is observable (integrity; reason + cause both present)');
 });
 
 // ============================== per-mint uniqueness + the two-nonce distinction ==============================
