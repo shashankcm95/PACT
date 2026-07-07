@@ -11,6 +11,7 @@
 const assert = require('node:assert/strict');
 const { authorizeBindingRequest, resolveRequireBinding } = require('../../src/identity/binding-request-auth');
 const { computeBindingId } = require('../../src/identity/sigma-root');
+const { MAX_FRAME_BYTES } = require('../../src/identity/request-auth');
 
 let pass = 0; let fail = 0;
 function test(name, fn) {
@@ -112,6 +113,7 @@ test('a body whose controller is PADDED (untrusted side) does NOT match an unpad
   const r = authorizeBindingRequest({ requireBinding: true, claimedRecordId: computeBindingId(padded), presentedBodyRaw: rawOf(padded), brokerController: CONTROLLER });
   assert.equal(r.decision, 'deny', 'the untrusted body controller is compared byte-exact');
   assert.equal(r.reason, 'controller-mismatch');
+  assert.equal(r.recordIdToSign, null);
 });
 test('no body presented (empty stdin) in require-binding -> DENY no-binding-presented', () => {
   const r = authorizeBindingRequest({ requireBinding: true, claimedRecordId: BINDING_ID, presentedBodyRaw: '', brokerController: CONTROLLER });
@@ -120,10 +122,11 @@ test('no body presented (empty stdin) in require-binding -> DENY no-binding-pres
   assert.equal(r.recordIdToSign, null);
 });
 test('an oversized body -> DENY binding-too-large (before parse)', () => {
-  const huge = '{"x":"' + 'a'.repeat(300 * 1024) + '"}';
+  const huge = '{"x":"' + 'a'.repeat(MAX_FRAME_BYTES + 1) + '"}'; // aligned to the source cap, never a magic number
   const r = authorizeBindingRequest({ requireBinding: true, claimedRecordId: BINDING_ID, presentedBodyRaw: huge, brokerController: CONTROLLER });
   assert.equal(r.decision, 'deny');
   assert.equal(r.reason, 'binding-too-large');
+  assert.equal(r.recordIdToSign, null);
 });
 test('an unparseable body -> DENY binding-unparseable', () => {
   const r = authorizeBindingRequest({ requireBinding: true, claimedRecordId: BINDING_ID, presentedBodyRaw: '{not json', brokerController: CONTROLLER });
