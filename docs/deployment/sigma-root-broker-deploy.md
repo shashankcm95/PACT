@@ -63,9 +63,11 @@ Follow `cross-uid-broker.md` §1–2, with these root-specific deltas:
   deploy:
 
   ```sh
-  # distinct INODES (catches an alias / symlink / hardlink) AND distinct BYTES (catches a copy the inode check misses):
-  ls -i /path/to/K_root.pem /path/to/K_broker.pem     # the two inode numbers MUST differ
-  cmp /path/to/K_root.pem /path/to/K_broker.pem        # MUST print "differ"; identical bytes = the oracle, ABORT
+  # distinct INODES (catches an alias / symlink / hardlink) AND distinct BYTES (catches a copy the inode check misses).
+  # Run AS ROOT: both keys are 0600 under different system uids, so a plain-uid cmp gets Permission denied (exit 2)
+  # and never compares -- the sudo is load-bearing, else the ABORT gate is vacuous:
+  sudo ls -i /path/to/K_root.pem /path/to/K_broker.pem     # the two inode numbers MUST differ
+  sudo cmp /path/to/K_root.pem /path/to/K_broker.pem        # MUST print "differ"; identical bytes = the oracle, ABORT
   ```
 
   Optional defense-in-depth: set `PACT_BROKER_KEY_FILE=<frame key path>` (read-only) in the root wrapper too, which
@@ -97,14 +99,15 @@ Install a root-owned, not-host-writable wrapper that execs `node .../sigma-root-
 
 **MANDATORY startup-guard (the blind K_root oracle).** require-binding goes OFF — and the broker then signs the argv
 64-hex **BLINDLY** with `K_root` (a universal forgery oracle for the trust root) — on TWO paths: (a) `PACT_ROOT_CONTROLLER`
-unset with no intent token; and (b) an explicit `PACT_ROOT_REQUIRE_BINDING=0` (strict `'0'`) **EVEN with the controller
-set** (`resolveRequireBinding`, `binding-request-auth.js:53-58` — proven live). The frame broker normalizes `=0` as a
+unset **or whitespace-only** (the code trims it, `binding-request-auth.js:56`, so a `' '` value is "unset" to the gate —
+the `tr -d` in the guard mirrors that) with no intent token; and (b) an explicit `PACT_ROOT_REQUIRE_BINDING=0` (strict
+`'0'`) **EVEN with the controller set** (`resolveRequireBinding`, `binding-request-auth.js:53-58` — proven live). The frame broker normalizes `=0` as a
 legacy mode (`cross-uid-broker.md:239-240`), so a copy-paste from a frame wrapper is a realistic trigger. Unlike the
 frame broker's "Recommended" guard, for the trust root the guard is **MANDATORY** and must close BOTH paths. Put both
 lines ABOVE the exec:
 
 ```sh
-[ -n "$PACT_ROOT_CONTROLLER" ] || { echo 'refusing: PACT_ROOT_CONTROLLER unset -- require-binding would be the BLIND K_root ORACLE' >&2; exit 78; }
+case "$(printf %s "$PACT_ROOT_CONTROLLER" | tr -d ' \t')" in '') echo 'refusing: PACT_ROOT_CONTROLLER empty/whitespace -- require-binding would be the BLIND K_root ORACLE' >&2; exit 78 ;; esac
 case "$(printf %s "$PACT_ROOT_REQUIRE_BINDING" | tr -d ' \t')" in 0) echo 'refusing: PACT_ROOT_REQUIRE_BINDING=0 disables the K_root bind gate (the BLIND ORACLE)' >&2; exit 78 ;; esac
 ```
 
