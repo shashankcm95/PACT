@@ -27,10 +27,9 @@ round-trip per binding). The cost is explicit and real:
 > That is the exact material the enclave path (signal 6) deliberately kept on the Mac. Moving it **downgrades the
 > root's custody from air-gapped / never-on-box to R-heap-bounded / on-box** (`r-heap-runbook.md`: host-root /
 > `ptrace` / `/proc/pid/mem` can still read it on a mis-hardened box). **And the transfer itself transits the host
-> uid at deploy** (step 1c): unless you use the streaming form, `K_root_priv` briefly lands on the box as
-> host-uid-owned plaintext before it is installed under the broker uid -- a real, if brief, additional exposure
-> beyond the steady-state R-heap bound. If you do not need on-demand signing, **STOP here and keep provisioning
-> through the Mac enclave** -- this sheet buys you nothing but exposure.
+> uid at deploy** (step 1c): `K_root_priv` leaves the Mac and is written under the broker uid on the box -- a real
+> additional exposure beyond the steady-state R-heap bound. If you do not need on-demand signing, **STOP here and
+> keep provisioning through the Mac enclave** -- this sheet buys you nothing but exposure.
 
 If you proceed, what you get is the **custody axis only** (integrity: a host compromise cannot `read()` `K_root`
 without the broker uid) -- the potential **7th** world-anchored signal, the root-custody analog of signal 5's
@@ -61,6 +60,21 @@ path + P2, else NS-9 theater); it is NOT in this sheet.
 | 5 verify AS the host uid | **the box** | the host proves it cannot read `K_root`, the wire-check verifies, the deny controls fire |
 | 6 attestation | -- | **already done** (signal 6); this sheet does not repeat A.3 |
 
+## Access -- if `rheap` is a Multipass VM
+
+`rheap` here is a **Multipass VM** (Ubuntu on the Mac). Multipass does not expose plain `ssh`/`scp` by default --
+reach the guest with `multipass shell / exec / transfer`. The box-side steps (1-5) run inside `multipass shell
+rheap` verbatim (`ubuntu` has passwordless `sudo`); only the two Mac->box transfers differ:
+
+| Purpose | Multipass (this VM) | Plain SSH host |
+|---|---|---|
+| interactive shell on the box | `multipass shell rheap` | `ssh you@rheap` |
+| stream `K_root_priv` in (step 1c) | `multipass exec rheap -- sudo sh -c '...' < <keyfile>` | `ssh you@rheap "sudo sh -c '...'" < <keyfile>` |
+| copy a file in (step 4) | `multipass transfer <local> rheap:/home/ubuntu/<name>` | `scp <local> you@rheap:~/<name>` |
+
+The concrete Multipass forms (with the SSH form beside them) are inlined in steps 1c and 4 below. Everything else is
+run **inside `multipass shell rheap`** as user `ubuntu`.
+
 ## Decide first (values reused everywhere -- confirm each against your box)
 
 - `BOX` -- the deployed host. This sheet templates `rheap`. **Caveat:** `rheap` already holds the frame broker +
@@ -68,15 +82,17 @@ path + P2, else NS-9 theater); it is NOT in this sheet.
   Prefer a more isolated host if you can; if you reuse `rheap`, accept the concentration consciously.
 - `HOST_UID` -- the host uid that will call the broker: `1000` on `rheap` (`ubuntu`).
 - `ROOT_BROKER_USER` -- a NEW system user, e.g. `pact-root-broker`, **distinct from BOTH** `ubuntu` (1000) **and**
-  the frame broker `pactbroker` (999). Pick an unused uid (e.g. `998`).
+  the frame broker `pactbroker` (999). Step 1a lets `useradd --system` **auto-pick** a free uid -- do NOT hardcode
+  one (`998` is `systemd-network` on Ubuntu 24.04; a hardcoded `--uid` collides, and a `getent`-by-uid guard then
+  silently SKIPS the create).
 - `CONTROLLER` -- `human:merlin95` (the byte-identical `humanUid` seeded in A.2 / signal 6; copy it, do NOT retype).
 - `K_root` source -- the attested private key on the Mac at `~/.pact-root/K_root_priv.pem` (`0600`); its public
   half at `~/Documents/PACT/K_root_pub.pem` (the attested A.1 key -- the Rekor subject; NOT in `~/.pact-root/`).
 - Tree -- `/opt/pact` (the `v0/` tree). **MUST be root-owned (or a non-host uid) and NOT host-writable** -- the
   broker execs this code as its own uid, so a host-writable tree is a full custody bypass (see step 1's prereq).
   Bring it current with a **root-run** `git pull`, never as the host uid.
-- `K_root_pub.pem` on the box -- the PUBLIC half (safe to copy freely); step 4 reads it. `scp` it to the host
-  home (`~/K_root_pub.pem`), a path the host uid can read.
+- `PERSONA_DID` -- the persona you are provisioning (step 4). Set it before running `provision-verify.js`; it
+  defaults to a demo DID if unset.
 
 ## 1. Create `pact-root-broker` + install `K_root` (deltas over `cross-uid-broker.md` §1-2)
 
@@ -86,43 +102,70 @@ path + P2, else NS-9 theater); it is NOT in this sheet.
 boundary this deploy exists to build. `/opt/pact/v0` MUST be root-owned (or a non-host uid) and not host-writable;
 bring it current with a **root-run** `git pull`, never as the host uid. Audit it in step 5.1.
 
+**ON THE BOX** (`multipass shell rheap`, as `ubuntu`):
+
 ```sh
-# 1a. a DISTINCT system user (no login), separate from ubuntu(1000) AND pactbroker(999); confirm 998 is unused first:
-getent passwd 998 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin --uid 998 pact-root-broker
+# 1a. a DISTINCT system user (no login). Guard on the USERNAME (not a uid), and let useradd AUTO-PICK a free system
+#     uid -- hardcoding --uid collides (998 = systemd-network on Ubuntu 24.04) and the guard would then skip. Idempotent:
+id -u pact-root-broker >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin pact-root-broker
+id pact-root-broker   # confirm; the auto-assigned uid is distinct from 1000 and 999 by construction
 
 # 1b. the key DIR 0755 (traversable so the host owner-verify in step 5 works), owned by the broker uid:
 sudo install -d -o pact-root-broker -g "$(id -gn pact-root-broker)" -m 0755 /etc/pact-root
-
-# 1c. transfer the ATTESTED K_root_priv from the Mac (the §0 downgrade -- do this ONLY if on-demand is required).
-#     PREFERRED (no on-disk stage, never host-uid-owned, never world-readable): stream it straight into a
-#     root-created 0600 file. Run FROM the Mac; needs the box's sudo non-interactive (NOPASSWD or a warm sudo):
-ssh you@rheap "sudo sh -c 'set -e; umask 077; tee /etc/pact-root/K_root.pem >/dev/null && chown pact-root-broker /etc/pact-root/K_root.pem'" < ~/.pact-root/K_root_priv.pem
-#     (set -e + && => a failed tee never leaves a partial key that then gets chowned to the broker; fails CLOSED.)
-
-#     FALLBACK (sudo needs a password): stage 0600 in your OWN 0700 home via mktemp -- an unpredictable name (NOT a
-#     fixed /tmp path a local attacker can pre-create/symlink), scp -p (preserves 0600, NOT the default 0644),
-#     install, shred. K_root still transits host-uid-owned plaintext here -- accept the §0 caveat. The `trap` shreds
-#     the stage even if scp/install ABORTS midway (never leave a lingering plaintext root key):
-#       ON THE BOX:  umask 077; S=$(mktemp "$HOME/.kroot-stage.XXXXXX"); trap 'shred -u "$S" 2>/dev/null || rm -f "$S"' EXIT INT HUP TERM
-#       FROM MAC:    scp -p ~/.pact-root/K_root_priv.pem you@rheap:"<the $S path>"
-#       ON THE BOX:  sudo install -o pact-root-broker -g "$(id -gn pact-root-broker)" -m 0600 "$S" /etc/pact-root/K_root.pem
-#                    shred -u "$S" 2>/dev/null || rm -f "$S"   # explicit cleanup on the happy path; the trap is the abort backstop
 ```
 
-- The key DIR is **`0755`** (the key itself `0600`) on purpose -- the host uid must be able to `ls -l` the key in
-  step 5 to confirm a **different** owner. A `0700` dir blinds that check (`cross-uid-broker.md` §2).
-- **`K_root` MUST be a physically distinct key from the frame broker's `K_broker`** (`/etc/pact/broker.key`). The
-  in-code same-inode guard is **inert** in this topology (it fires only when `PACT_BROKER_KEY_FILE` is set in the
-  broker env, and sudoers `env_reset` strips it), so run the distinctness check **out-of-band, once, AS ROOT** --
-  both keys are `0600` under two different system uids, so a plain-uid `cmp` gets `Permission denied` and never
-  compares; the `sudo` is load-bearing (without it the ABORT gate is vacuous):
+**1c. transfer the ATTESTED `K_root_priv` from the Mac** (the §0 downgrade -- do this ONLY if on-demand is
+required). Stream it straight into a root-created `0600` file (no on-disk stage, never host-uid-owned or
+world-readable). **RUN THIS FROM THE MAC** (not inside the shell); `ubuntu` has passwordless sudo, so it needs no
+password:
+
+```sh
+# Multipass VM (this box):
+multipass exec rheap -- sudo sh -c 'set -e; umask 077; tee /etc/pact-root/K_root.pem >/dev/null && chown pact-root-broker /etc/pact-root/K_root.pem' < ~/.pact-root/K_root_priv.pem
+
+# plain SSH host instead:
+# ssh you@rheap "sudo sh -c 'set -e; umask 077; tee /etc/pact-root/K_root.pem >/dev/null && chown pact-root-broker /etc/pact-root/K_root.pem'" < ~/.pact-root/K_root_priv.pem
+```
+
+> `set -e` + `&&` => a failed `tee` never leaves a partial key that then gets chowned to the broker; the transfer
+> fails CLOSED.
+
+**Then, ON THE BOX**, first confirm the key actually landed -- an empty stream (multipass not forwarding stdin, or
+an empty source) would `tee` a 0-byte key that the distinctness `cmp` below still reports as "differ", so it would
+fail only much later at step 4:
+
+```sh
+sudo test -s /etc/pact-root/K_root.pem && sudo head -1 /etc/pact-root/K_root.pem | grep -q 'BEGIN.*PRIVATE KEY' \
+  && echo 'K_root present + PEM-shaped' \
+  || echo 'ABORT: K_root missing/empty/not-a-PEM -- re-run the step-1c transfer'
+```
+
+Then the key-distinctness check (AS ROOT -- both keys are `0600` under different system uids, so a
+plain-uid `cmp` gets `Permission denied` and never compares; the `sudo` is load-bearing, else the ABORT gate is
+vacuous). The in-code same-inode guard is **inert** in this topology (it fires only when `PACT_BROKER_KEY_FILE` is
+set in the broker env, which sudoers `env_reset` strips):
 
 ```sh
 sudo ls -i /etc/pact-root/K_root.pem /etc/pact/broker.key    # the two inode numbers MUST differ
-sudo cmp    /etc/pact-root/K_root.pem /etc/pact/broker.key    # MUST print "differ"; identical bytes = a signing oracle, ABORT
+sudo cmp   /etc/pact-root/K_root.pem /etc/pact/broker.key    # MUST print "differ"; identical bytes = a signing oracle, ABORT
 ```
 
+The key DIR is `0755` (the key itself `0600`) on purpose -- the host uid must be able to `ls -l` the key in step 5
+to confirm a **different** owner. A `0700` dir blinds that check.
+
 ## 2. The wrapper -- with the two MANDATORY guards (delta over `cross-uid-broker.md` §3)
+
+**ON THE BOX**, as `ubuntu`. First confirm `node` is the ROOT-owned system binary the wrapper will `exec` -- a
+nvm/snap node at a host-writable path would break the exec (a confusing `signSigmaRoot returned null` at step 4),
+and repointing the wrapper to a host-writable node would let the host uid inject code that runs as the broker uid:
+
+```sh
+[ "$(command -v node)" = /usr/bin/node ] && [ "$(stat -c '%U' /usr/bin/node)" = root ] \
+  && echo 'node OK (/usr/bin/node, root-owned)' \
+  || echo 'ABORT: node is not root-owned /usr/bin/node -- fix before deploying; do NOT repoint the wrapper to a host-writable node'
+```
+
+Then write the wrapper:
 
 ```sh
 sudo tee /usr/local/bin/pact-root-broker-sign >/dev/null <<'EOF'
@@ -152,17 +195,24 @@ mode).
 
 ## 3. Sudoers -- the env-pin + the two audits (defer to `cross-uid-broker.md` §4)
 
-```sh
-sudo visudo -f /etc/sudoers.d/pact-root-broker
-```
+**ON THE BOX**, as `ubuntu`. Write to a `.tmp` (sudo ignores dotted filenames, so it stays inert), **validate**, then
+activate under the real name -- a bad sudoers file never goes live:
 
-```sudoers
+```sh
+sudo tee /etc/sudoers.d/pact-root-broker.tmp >/dev/null <<'EOF'
 # ubuntu(1000) may run ONLY the root-broker wrapper, as pact-root-broker, no password.
 ubuntu ALL=(pact-root-broker) NOPASSWD: /usr/local/bin/pact-root-broker-sign
 
 # PIN env policy explicitly; forbid SETENV so neither host nor command line can inject code-loading / key-path vars.
 Defaults:ubuntu env_reset, !setenv
 Defaults!/usr/local/bin/pact-root-broker-sign env_reset, !setenv
+EOF
+sudo visudo -cf /etc/sudoers.d/pact-root-broker.tmp \
+  && sudo install -m 0440 -o root -g root /etc/sudoers.d/pact-root-broker.tmp /etc/sudoers.d/pact-root-broker.staged \
+  && sudo mv /etc/sudoers.d/pact-root-broker.staged /etc/sudoers.d/pact-root-broker \
+  && sudo rm -f /etc/sudoers.d/pact-root-broker.tmp \
+  && echo 'sudoers installed + validated' \
+  || { echo 'SUDOERS INVALID -- NOT installed'; sudo rm -f /etc/sudoers.d/pact-root-broker.tmp /etc/sudoers.d/pact-root-broker.staged; }
 ```
 
 Then run BOTH audits (each MUST print nothing) -- they gate `K_root` exfiltration and are strictly more important
@@ -177,108 +227,102 @@ sudo -l -U ubuntu | grep -iE 'env_keep.*SUDO_'                                # 
 
 ## 4. Provision a persona through the cross-uid signer (delta over `sigma-root-deploy.md` Phase B)
 
-Run AS THE HOST UID on the box. Build the in-memory registry (the box's live `/etc/pact/registry.json` is
-persona-rows-only -- no root schema -- so this is a **construction**, not a live-read-path write; persisting to the
-live gate is the deferred Phase C, and it is SHADOW regardless).
+Copy the **attested** public key to the box -- the byte-identical Rekor subject (`logIndex 2079476377`); copying
+any other public key validates the WRONG root. **FROM THE MAC:**
 
-First copy the PUBLIC key to the box (safe to copy freely). Use the **attested** `K_root_pub.pem` from A.1 -- the
-byte-identical Rekor subject (`logIndex 2079476377`), written by the A.1 mint to `~/Documents/PACT/K_root_pub.pem`
-(its priv half is `~/.pact-root/K_root_priv.pem`; the pub was NOT written there). Copying any other public key
-validates the WRONG root: `scp ~/Documents/PACT/K_root_pub.pem you@rheap:~/K_root_pub.pem`.
-Then run **step 4 and step 5's JS in ONE node session** (a single `provision-verify.js`, or one REPL): `reg` / `P` /
-`K_pub` / `sigmaRoot` carry from step 4 into the step-5 verify. Running them as separate `node` processes throws a
-`ReferenceError`, and "helpfully" re-running `generateEdgeKeypair()` in a fresh process yields a DIFFERENT `K_pub`
-than the broker signed, so the wire-check falsely reads `ok === false` (a confusing false-negative on the trust
-root). The shell blocks 5.1 and 5.3 run separately, as the host uid.
+```sh
+# Multipass VM (this box):
+multipass transfer ~/Documents/PACT/K_root_pub.pem rheap:/home/ubuntu/K_root_pub.pem
+# plain SSH host instead:  scp ~/Documents/PACT/K_root_pub.pem you@rheap:~/K_root_pub.pem
+```
 
-```js
-const { createRegistry, registerRoot, registerPersona } = require('/opt/pact/v0/src/identity/registry');
+Then, **ON THE BOX as `ubuntu`**, write and run `provision-verify.js`. It builds an in-memory registry (the box's
+live `/etc/pact/registry.json` is persona-rows-only -- so this is a SHADOW **construction**, not a live-read-path
+write; persisting is the deferred Phase C), provisions the persona through the cross-uid broker, and runs the
+step-5.2 + 5.4 checks **in the SAME process** (splitting them re-mints a different `K_pub` and false-fails the
+wire-check):
+
+```sh
+cat > /home/ubuntu/provision-verify.js <<'EOF'
+const { createRegistry, registerRoot, registerPersona, lookupRootKey } = require('/opt/pact/v0/src/identity/registry');
 const { generateEdgeKeypair } = require('/opt/pact/v0/src/lib/edge-attestation');
 const { crossUidBrokerSigner } = require('/opt/pact/v0/src/identity/broker-launch');
-const { signSigmaRoot } = require('/opt/pact/v0/src/identity/sigma-root');
+const { signSigmaRoot, verifySigmaRoot } = require('/opt/pact/v0/src/identity/sigma-root');
+const { assessRegistrationFromRegistry } = require('/opt/pact/v0/src/identity/registration-provenance');
 const fs = require('fs');
 
-const reg = createRegistry();
-registerRoot(reg, { humanUid: 'human:merlin95', rootPublicKeyPem: fs.readFileSync(process.env.HOME + '/K_root_pub.pem', 'utf8') });
+const CONTROLLER = 'human:merlin95';                              // == PACT_ROOT_CONTROLLER
+const P = process.env.PERSONA_DID || 'did:key:zRootBrokerDemo1';  // set PERSONA_DID for a real provision
+if (!process.env.PERSONA_DID) console.warn('WARNING: PERSONA_DID unset -- using a DEMO DID (nothing persists either way; SHADOW verify)');
 
-const P = 'did:key:<new-persona>';
-const { publicKeyPem: K_pub, privateKeyPem: K_priv } = generateEdgeKeypair();   // guard K_priv; it is the persona's key
-registerPersona(reg, { personaDid: P, humanUid: 'human:merlin95', publicKeyPem: K_pub });
+const reg = createRegistry();                                    // SHADOW in-memory construction (NOT rheap's live registry)
+registerRoot(reg, { humanUid: CONTROLLER, rootPublicKeyPem: fs.readFileSync(process.env.HOME + '/K_root_pub.pem', 'utf8') });
+const { publicKeyPem: K_pub } = generateEdgeKeypair();          // this SHADOW verify DISCARDS the persona priv key; a real Phase-C provision would capture + persist privateKeyPem
+registerPersona(reg, { personaDid: P, humanUid: CONTROLLER, publicKeyPem: K_pub });
 
-// B.3 -- the ROOT signs the binding via the CROSS-UID broker; K_root_priv never materializes in THIS process:
+// the ROOT signs the binding via the CROSS-UID broker; K_root_priv never materializes in THIS process:
 const sigmaRoot = signSigmaRoot(
-  { personaDid: P, publicKeyPem: K_pub, controller: 'human:merlin95' },   // controller MUST equal PACT_ROOT_CONTROLLER
+  { personaDid: P, publicKeyPem: K_pub, controller: CONTROLLER },   // controller MUST equal PACT_ROOT_CONTROLLER
   { signer: crossUidBrokerSigner({ brokerUser: 'pact-root-broker', wrapperPath: '/usr/local/bin/pact-root-broker-sign' }) },
 );
 if (!sigmaRoot) throw new Error('signSigmaRoot returned null -- broker refused or bad binding; do NOT persist a null');
-// signSigmaRoot threads the binding as the body; crossUidBrokerSigner forwards it on the broker child's stdin, so
-// the broker recompute-binds (computeBindingId(body) === the signed id) + controller-binds before it signs.
+
+const ok = verifySigmaRoot({ personaDid: P, publicKeyPem: K_pub, controller: CONTROLLER,      // 5.2 wire-check
+  sigmaRoot, rootPublicKeyPem: lookupRootKey(reg, CONTROLLER) });
+const v = assessRegistrationFromRegistry(reg, { personaDid: P, sigmaRoot });                   // 5.4 read-side (SHADOW)
+
+console.log('persona         :', P);
+console.log('wire-check ok   :', ok);                       // MUST be true
+console.log('sigmaRootChecks :', v.sigmaRootChecksPassed);  // MUST be true  (convert(...).actionable stays false -- SHADOW)
+EOF
+node /home/ubuntu/provision-verify.js
 ```
 
 ## 5. Verify -- AS THE HOST UID -- (attestation is already done: step 6)
 
-**5.1 -- the host cannot read `K_root`** (use the LITERAL path; `$PACT_ROOT_KEY_FILE` is stripped from the host
-shell by `env_reset` and would test nothing):
+`provision-verify.js` (step 4) already ran **5.2** (the wire-check `ok`) and **5.4** (the read-side
+`sigmaRootChecks`) in one process -- both must print `true`. The remaining checks are shell-only; run them **ON THE
+BOX** as `ubuntu`:
+
+**5.1 -- the host cannot read `K_root`** + the code tree is not host-writable (the C1 boundary). Use the LITERAL key
+path (`$PACT_ROOT_KEY_FILE` is stripped from the host shell by `env_reset` and would test nothing):
 
 ```sh
 cat /etc/pact-root/K_root.pem     # MUST print: Permission denied  (the custody EACCES)
 ls -l /etc/pact-root/K_root.pem   # OWNER must be pact-root-broker, NOT you (the 0755 dir makes this visible)
-
-# the C1 boundary: the code the broker execs must NOT be host-writable (else the host uid injects code that runs
-# as the broker uid and reads K_root). As the host uid, BOTH must hold:
-find /opt/pact/v0 -writable        # MUST print nothing
+find /opt/pact/v0 -writable        # MUST print nothing  (else the host uid can inject code that runs as the broker uid)
 stat -c '%U' /usr/bin/node         # MUST print: root
 ```
 
-**5.2 -- the wire-check** (custody consistency): verify the broker-produced `sigmaRoot` under the SEEDED root pubkey:
-
-```js
-const { verifySigmaRoot } = require('/opt/pact/v0/src/identity/sigma-root');
-const { lookupRootKey } = require('/opt/pact/v0/src/identity/registry');
-const ok = verifySigmaRoot({
-  personaDid: P, publicKeyPem: K_pub, controller: 'human:merlin95',
-  sigmaRoot,                                             // from step 4, produced by the broker
-  rootPublicKeyPem: lookupRootKey(reg, 'human:merlin95'),  // the seeded K_root_pub
-});
-// ok === true is the PRECONDITION for a real binding to pass the read-side judge. false => mis-wired custody.
-```
-
 **5.3 -- the deny controls** (each: **empty stdout + exit 1**; the broker writes the sig to stdout ONLY on success).
-Present the crafted binding preimage on stdin and the claimed id as argv, mirroring `cross-uid-broker.md` §9's
-pattern (`printf '<body>' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "<id>"`), constructing
-each input so the intended gate is the denier:
+The foreign-uid control is self-contained (flip the allowlist to a NON-member, deny, restore); the shipped allowlist
+is your own uid (`1000`), so without the flip the call would SUCCEED. You **must pipe a stdin body** -- require-mode
+drains stdin BEFORE the caller-auth gate (`broker-core.js:86` before `:95`), so an UNPIPED call hangs 2s ->
+`read-timeout`, never reaching the WHO gate:
 
-- **Foreign uid** (not in `PACT_ROOT_ALLOWED_UIDS`) -> `caller not authorized`. As shipped the allowlist is your
-  OWN uid (`1000`), so the check only exercises the refuse path once you flip it to a NON-member; and you **MUST
-  pipe a stdin body** -- require-mode drains stdin BEFORE the caller-auth gate (`broker-core.js:86` before `:95`),
-  so an UNPIPED call hangs `READ_DEADLINE_MS` (2s) -> `read-timeout`, never reaching the WHO gate. Self-contained
-  (Linux `sed`; on macOS use `sed -i ''`):
-
-  ```sh
-  HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
-  sudo sed -i 's/ALLOWED_UIDS=1000/ALLOWED_UIDS=999/' /usr/local/bin/pact-root-broker-sign  # flip to a NON-member
-  printf '{}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$HEX"      # -> "caller not authorized", empty stdout, exit 1
-  sudo sed -i 's/ALLOWED_UIDS=999/ALLOWED_UIDS=1000/' /usr/local/bin/pact-root-broker-sign  # RESTORE
-  ```
-
-  (The single-uid flip is the LESS-rigorous form -- it cannot rule out a malformed-allowlist deny, since the broker
-  collapses every deny to one fixed message; the two-real-uid test in `plans/16` is stronger -- prefer it for the
-  trust root.)
-- **A FRAME body** (no `controller` / `publicKeyPem` / `personaDid`) -> `request not authorized`: `computeBindingId`
-  throws, the binding is uncomputable (domain separation). Use a real frame preimage so the throw is genuine.
-- **A FOREIGN-controller binding** -> `request not authorized`: compute `computeBindingId(foreignBinding)` from the
-  EXACT body FIRST (recompute-bind runs BEFORE controller-bind), else it denies as `record-id-mismatch` and you
-  tested the WRONG gate. With the id computed, the controller-bind is the provable denier.
-
-**5.4 -- end-to-end read-side** (the composed property; stays SHADOW):
-
-```js
-const { assessRegistrationFromRegistry } = require('/opt/pact/v0/src/identity/registration-provenance');
-const v = assessRegistrationFromRegistry(reg, { personaDid: P, sigmaRoot });
-// v.sigmaRootChecksPassed === true   (branch on THIS, never on !requiresOutOfBandRootAttestation)
-const { convert } = require('/opt/pact/v0/src/trust/convert');
-// convert(meCtx, ME, P).actionable === false   -- SHADOW: nothing gates (NS-9)
+```sh
+HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
+sudo sed -i 's/ALLOWED_UIDS=1000/ALLOWED_UIDS=999/' /usr/local/bin/pact-root-broker-sign  # flip to a NON-member
+printf '{}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$HEX"      # -> "caller not authorized", empty stdout, exit 1
+sudo sed -i 's/ALLOWED_UIDS=999/ALLOWED_UIDS=1000/' /usr/local/bin/pact-root-broker-sign  # RESTORE
 ```
+
+The two further deny controls (optional -- the full deny set):
+
+```sh
+# FRAME body (missing controller/publicKeyPem/personaDid) -> computeBindingId THROWS -> uncomputable -> deny:
+printf '{"nonce":"x"}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+#   -> "request not authorized", empty stdout, exit 1
+
+# FOREIGN-controller binding -> compute the id FIRST (so recompute-bind PASSES and controller-bind is the denier):
+BODY='{"personaDid":"did:key:zAttacker","publicKeyPem":"x","controller":"human:not-merlin95"}'
+FID=$(node -e 'process.stdout.write(require("/opt/pact/v0/src/identity/sigma-root").computeBindingId(JSON.parse(process.argv[1])))' "$BODY")
+printf '%s' "$BODY" | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$FID"
+#   -> "request not authorized", empty stdout, exit 1   (recompute-bind passes; controller mismatch is the provable denier)
+```
+
+(The single-uid flip is the LESS-rigorous form; the two-real-uid test in `plans/16` is stronger -- prefer it for the
+trust root.)
 
 ## 6. Attestation -- already done (do NOT repeat)
 
@@ -315,7 +359,7 @@ from `cross-uid-broker.md` §5.
 
 ## Hand back when done
 
-The step-5 `ok === true` wire-check result + `sigmaRootChecksPassed: true` + the step-5.1 `Permission denied`
-transcript (owner = `pact-root-broker`, a different uid) + the `ptrace_scope` / `swapon` / `core_pattern` re-probe.
-Then a human calls whether it lands as the **7th** world-anchored signal (custody axis) or is skipped in favor of
-the enclave path. Arming (Phase C) stays deferred.
+The step-4 `wire-check ok: true` + `sigmaRootChecks: true` output + the step-5.1 `Permission denied` transcript
+(owner = `pact-root-broker`, a different uid) + the `ptrace_scope` / `swapon` / `core_pattern` re-probe. Then a
+human calls whether it lands as the **7th** world-anchored signal (custody axis) or is skipped in favor of the
+enclave path. Arming (Phase C) stays deferred.
