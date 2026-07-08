@@ -1,10 +1,10 @@
 ---
 lifecycle: persistent
-audience: the world-anchored HARDEN evidence record (candidate §8 signal 7)
+audience: the world-anchored HARDEN evidence record (§8 signal 7)
 created: 2026-07-08
 ---
 
-# Cross-uid sigma-root BROKER custody run -- box `rheap`, 2026-07-08 (candidate 7th world-anchored signal)
+# Cross-uid sigma-root BROKER custody run -- box `rheap`, 2026-07-08 (the 7th world-anchored signal)
 
 The plan-42 W5 operator deploy: the cross-uid **sigma-root broker** was stood up on a genuinely separate OS uid, so
 `K_root` lives on-box under a uid the host login provably cannot `read()`, and a persona binding was signed **through
@@ -108,9 +108,11 @@ provenance(root), and custody(root); each one run with a loud ceiling.
 
 ## Ratification (the operator's call -- NS-7)
 
-Recorded as the **candidate 7th world-anchored signal** (root key-custody axis). Whether it moves the PRD §8
-scoreboard **6 -> 7** is the operator's ratification (as signals 5 and 6 were ratified in their records) -- the
-evidence is the `wire-check ok: true` + the `Permission denied` custody transcript above.
+**RATIFIED as the 7th world-anchored HARDEN signal** (operator, 2026-07-08 -- as signals 5 and 6 were ratified in
+their own records). The axis is root KEY-CUSTODY; the evidence is the `wire-check ok: true` + the `Permission denied`
+custody transcript above. The PRD §8 scoreboard now reads **7** ([`../PRD.md`](../PRD.md) §8). The honest ceiling
+above stands unchanged: this HARDENS custody/integrity ONLY -- A.3 (signal 6) remains the sole PROVENANCE harden, it
+gates nothing (SHADOW), and it does not close R1/#273.
 
 ## Next (operator, deferred -- NS-7)
 

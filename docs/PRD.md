@@ -9,7 +9,7 @@
 |---|---|
 | Current phase | Era 5 — the provenance arc (SHADOW mechanism); next = a fresh fork (operator deploy / U2) |
 | Mode | **SHADOW** — every weight is advisory; nothing gates an irreversible action |
-| Trust-hardening signals | **4 world-anchored** (R1 · R2-WHO · R2-WHAT · R-heap) — see §8 |
+| Trust-hardening signals | **world-anchored HARDENs — the live count is §8's scoreboard** (deliberately not re-frozen here; §8 is the one place the integer lives) |
 | Anchor of record | this PRD (PM view) defers to [`PACT-NORTH-STAR.md`](../PACT-NORTH-STAR.md) for the deep, amend-deliberately invariants |
 | Build state | single-node substrate built + coherent (`node test/run.js` for the live suite count) |
 
@@ -146,10 +146,10 @@ gates nothing; it is not a trust claim (see §8 for what actually hardened).
 
 ## 8. Success metrics
 
-**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **6**. Only this number
+**The one true north-star metric: the count of world-anchored HARDEN signals.** Today: **7**. Only this number
 reflects trust *advancing*; it is deliberately hard to move — it requires a real out-of-band cost, not code.
 
-**ACHIEVED — the 6 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
+**ACHIEVED — the 7 world-anchored HARDEN signals** (each hardened *one axis, on one box, in one run*, with a
 loud honest ceiling — NS-9):
 
 | # | Signal | What it proved (world-anchored) | Honest ceiling — still OPEN |
@@ -160,6 +160,7 @@ loud honest ceiling — NS-9):
 | 4 | R-heap non-exfiltration | on Linux `ptrace_scope=2`, the signing key is non-exfiltrable from the running broker's memory (cross-uid AND same-uid); 24/24 PASS, non-vacuous | does NOT close the same-uid oracle, hypervisor/root, R3, or the apex; config-conditional; one box, one run |
 | 5 | R2-provenance — live-edge key-custody | on box `rheap`, the cross-uid-custodied key (owner uid 999; host uid 1000 `EACCES`; `ptrace_scope=2`; attested) signed a **freshness-bound** VOUCH edge that verifies under the registered broker key; a host-only attacker cannot forge a broker-attributed edge (containment proven, `edge-provenance-proof.test.js`) | does NOT prove "who minted" in general (host-writable registry: a same-uid self-register weighs equally, the 5th co-forge leg OPEN); gates nothing (`actionable` hard-false; the read-path sigma-root filter `registration-gate` is wired but disarmed, and even armed only narrows the advisory count); R3 / U1 untouched; one box, one run |
 | 6 | R2-root-provenance — genesis root attested | the genesis root key for `human:merlin95` was minted off-box, and its public key attested out-of-band to a **public immutable transparency log** (Sigstore/Rekor index `2079476377`; a DSSE in-toto statement under a Fulcio cert bound to a real OIDC identity), `Verified OK` — hardening the root PROVENANCE and closing the self-forge surface `registration-provenance.js:70` names (a same-uid host could self-generate + seed + self-sign a root) | does NOT prove `human:merlin95` is a distinct real human (rests on the OIDC provider — the U1 frontier); the attested root is NOT yet wired into a live gate (the sigma-root layer is SHADOW; the live registry has no root schema) — the enabler to close B, gates nothing; root-key custody is same-uid file perms (integrity, not a hardened boundary; HSM deferred); off-box, one run |
+| 7 | R2-root-custody — cross-uid sigma-root broker | on box `rheap` (2026-07-08), `K_root` lives `0600` under a separate OS uid (`pact-root-broker` 997) the host login provably cannot `read()` (host `cat` -> `Permission denied`); a persona binding signed *through* the broker (`K_root_priv` never materialized in the provisioning process) verifies under the attested root (`wire-check ok: true`; `sigmaRootChecksPassed: true`), and the WHO/WHAT deny gates fired — world-anchoring the root key's KEY-CUSTODY / non-exfiltration axis (the root-key analog of signal 5's frame-broker custody) | HARDENS custody/integrity ONLY — nothing about provenance (A.3 / signal 6 stays the sole provenance harden); does NOT close R1/#273 (an allowlisted same-uid caller reaching the broker via sudo still mints for any persona) or the W3 same-uid self-register apex; gates nothing (`actionable` hard-false; the sigma-root layer is SHADOW); root-custody is bounded by the box's memory-extract posture and decays (re-probe `ptrace_scope` each deploy); one box, one run |
 
 Signal 5 was established live on box `rheap` (2026-07-04) — full evidence + honest ceiling in
 [`deployment/live-edge-run-2026-07-04.md`](deployment/live-edge-run-2026-07-04.md). It re-confirms signals 1 and 4
@@ -172,6 +173,17 @@ Signal 6 delivered exactly that out-of-band root-key attestation (2026-07-05, of
 [`deployment/root-attestation-run-2026-07-05.md`](deployment/root-attestation-run-2026-07-05.md). It hardens the
 root PROVENANCE (closing the self-forge surface `registration-provenance.js:70` names) but leaves the root
 not-yet-wired-live (the enabler to close B; gates nothing) and does **not** close U1.
+
+Signal 7 world-anchored the root key's CUSTODY on-box (2026-07-08, box `rheap`) — the custody face of the root,
+complementing signal 6's provenance face: `K_root` `0600` under a separate uid the host login cannot read
+(`EACCES`), signing a persona binding *through* the broker that verifies under the attested root; the full
+evidence and honest ceiling are in
+[`deployment/root-broker-run-2026-07-08.md`](deployment/root-broker-run-2026-07-08.md). It
+**HARDENS custody/integrity only** — A.3 (signal 6) remains the sole *provenance* harden; it does not close R1
+(#273) or the same-uid self-register apex, and it **gates nothing** (`actionable` stays hard-false; the sigma-root
+layer is SHADOW). The three deployed signals now cover custody(frame) = 5, provenance(root) = 6, custody(root)
+= 7 — each one run, one box, one axis, with a loud ceiling. The apex-advancing move (a deployed signer wired into
+a *live gate*) is still Option A in §9 — signal 7 is custody-only and does not perform it.
 
 **Health metrics** (necessary, not sufficient — NOT trust progress): the test suite green (run `node
 test/run.js` for the live count); the last full-substrate coherence checkpoint COHERENT 4/4; the layering
