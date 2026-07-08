@@ -248,14 +248,22 @@ Present the crafted binding preimage on stdin and the claimed id as argv, mirror
 pattern (`printf '<body>' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "<id>"`), constructing
 each input so the intended gate is the denier:
 
-- **Foreign uid** (not in `PACT_ROOT_ALLOWED_UIDS`) -> `caller not authorized`. **You MUST pipe a stdin body**
-  (`printf '{}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$HEX"`): require-mode drains
-  stdin BEFORE the caller-auth gate (`broker-core.js:86` before `:95`), so an UNPIPED call (the frame-broker
-  `cross-uid-broker.md` §8 form) hangs `READ_DEADLINE_MS` (2s) then fails `read-timeout`, never reaching the WHO
-  gate. Flip the allowlist to a uid that is NOT yours, confirm the refuse, then **RESTORE** (`cross-uid-broker.md`
-  §8). (The single-uid flip is the LESS-rigorous form -- it cannot rule out a malformed-allowlist deny, since the
-  broker collapses every deny to one fixed message; the two-real-uid test in `plans/16` is stronger -- prefer it
-  for the trust root.)
+- **Foreign uid** (not in `PACT_ROOT_ALLOWED_UIDS`) -> `caller not authorized`. As shipped the allowlist is your
+  OWN uid (`1000`), so the check only exercises the refuse path once you flip it to a NON-member; and you **MUST
+  pipe a stdin body** -- require-mode drains stdin BEFORE the caller-auth gate (`broker-core.js:86` before `:95`),
+  so an UNPIPED call hangs `READ_DEADLINE_MS` (2s) -> `read-timeout`, never reaching the WHO gate. Self-contained
+  (Linux `sed`; on macOS use `sed -i ''`):
+
+  ```sh
+  HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
+  sudo sed -i 's/ALLOWED_UIDS=1000/ALLOWED_UIDS=999/' /usr/local/bin/pact-root-broker-sign  # flip to a NON-member
+  printf '{}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$HEX"      # -> "caller not authorized", empty stdout, exit 1
+  sudo sed -i 's/ALLOWED_UIDS=999/ALLOWED_UIDS=1000/' /usr/local/bin/pact-root-broker-sign  # RESTORE
+  ```
+
+  (The single-uid flip is the LESS-rigorous form -- it cannot rule out a malformed-allowlist deny, since the broker
+  collapses every deny to one fixed message; the two-real-uid test in `plans/16` is stronger -- prefer it for the
+  trust root.)
 - **A FRAME body** (no `controller` / `publicKeyPem` / `personaDid`) -> `request not authorized`: `computeBindingId`
   throws, the binding is uncomputable (domain separation). Use a real frame preimage so the throw is genuine.
 - **A FOREIGN-controller binding** -> `request not authorized`: compute `computeBindingId(foreignBinding)` from the
