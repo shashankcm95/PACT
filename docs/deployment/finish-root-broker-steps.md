@@ -88,9 +88,14 @@ run **inside `multipass shell rheap`** as user `ubuntu`.
 - `CONTROLLER` -- `human:merlin95` (the byte-identical `humanUid` seeded in A.2 / signal 6; copy it, do NOT retype).
 - `K_root` source -- the attested private key on the Mac at `~/.pact-root/K_root_priv.pem` (`0600`); its public
   half at `~/Documents/PACT/K_root_pub.pem` (the attested A.1 key -- the Rekor subject; NOT in `~/.pact-root/`).
-- Tree -- `/opt/pact` (the `v0/` tree). **MUST be root-owned (or a non-host uid) and NOT host-writable** -- the
-  broker execs this code as its own uid, so a host-writable tree is a full custody bypass (see step 1's prereq).
-  Bring it current with a **root-run** `git pull`, never as the host uid.
+- Tree -- `/opt/pact` (the `v0/` tree). **MUST be root-owned (or a non-host uid), NOT host-writable, and CURRENT**
+  -- it must contain the plan-42 broker code (`sigma-root-broker.js` etc.); a tree synced BEFORE that merged fails
+  with `MODULE_NOT_FOUND` at step 4. The broker execs this code as its own uid, so a host-writable tree is a full
+  custody bypass (step 1's prereq). Bring it current AS ROOT: if `/opt/pact` is a git checkout, a root-run
+  `git pull`; if it is a plain copied tree (NOT a repo -- check `git -C /opt/pact rev-parse` ), re-sync from the Mac
+  straight into a root-owned tree (no host-uid-owned transit):
+  `COPYFILE_DISABLE=1 tar -C ~/Documents/PACT -cf - v0/src | multipass exec rheap -- sudo tar --no-same-owner -C /opt/pact -xf -`.
+  Never sync as the host uid.
 - `PERSONA_DID` -- the PACT identity (a `did:key:...`) you are wire-checking in step 4. **This is a NEW PACT
   cryptographic identity, unrelated to HETS agent personas** (`provision-verify.js` mints a fresh keypair for it).
   `provision-verify.js` **fails closed** if it is unset -- pass a real `did:key:...`, or `did:key:zRootBrokerDemo1`
@@ -165,6 +170,12 @@ and repointing the wrapper to a host-writable node would let the host uid inject
 [ "$(command -v node)" = /usr/bin/node ] && [ "$(stat -c '%U' /usr/bin/node)" = root ] \
   && echo 'node OK (/usr/bin/node, root-owned)' \
   || echo 'ABORT: node is not root-owned /usr/bin/node -- fix before deploying; do NOT repoint the wrapper to a host-writable node'
+
+# the broker code the wrapper will exec MUST be present + root-owned -- a STALE /opt/pact tree fails only later,
+# as MODULE_NOT_FOUND at step 4 (re-sync it via Decide-first "Tree"):
+[ "$(stat -c '%U' /opt/pact/v0/src/identity/sigma-root-broker.js 2>/dev/null)" = root ] \
+  && echo 'broker code OK (sigma-root-broker.js present, root-owned)' \
+  || echo 'ABORT: /opt/pact/v0/src/identity/sigma-root-broker.js missing or not root-owned -- re-sync the v0/src tree first'
 ```
 
 Then write the wrapper:
