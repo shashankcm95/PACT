@@ -279,7 +279,14 @@ const P = process.env.PERSONA_DID;   // fail closed -- no silent demo; you name 
 if (!P) { console.error('set PERSONA_DID -- a real did:key:... , OR did:key:zRootBrokerDemo1 for a throwaway wire-check (nothing persists either way; SHADOW)'); process.exit(2); }
 
 const reg = createRegistry();                                    // SHADOW in-memory construction (NOT rheap's live registry)
-registerRoot(reg, { humanUid: CONTROLLER, rootPublicKeyPem: fs.readFileSync(process.env.HOME + '/K_root_pub.pem', 'utf8') });
+const rootPub = fs.readFileSync(process.env.HOME + '/K_root_pub.pem', 'utf8');
+// verify the pubkey IS the attested root (the Rekor subject) BEFORE it roots the construction -- a wrong/stale
+// key would otherwise give a green wire-check against the WRONG root. Default = THIS deployment's digest; another
+// deployment passes ROOT_PUB_SHA256=<their attested sha256>:
+const EXPECTED_ROOT_SHA = process.env.ROOT_PUB_SHA256 || '47844a455f7ae9066f318f12b8ab60a583c10be8ae5126a81434dbc4ee2342cf';
+const actualRootSha = require('crypto').createHash('sha256').update(rootPub).digest('hex');
+if (actualRootSha !== EXPECTED_ROOT_SHA) { console.error('K_root_pub.pem sha256 ' + actualRootSha + ' != attested ' + EXPECTED_ROOT_SHA + ' -- WRONG root; aborting'); process.exit(3); }
+registerRoot(reg, { humanUid: CONTROLLER, rootPublicKeyPem: rootPub });
 const { publicKeyPem: K_pub } = generateEdgeKeypair();          // this SHADOW verify DISCARDS the persona priv key; a real Phase-C provision would capture + persist privateKeyPem
 registerPersona(reg, { personaDid: P, humanUid: CONTROLLER, publicKeyPem: K_pub });
 
