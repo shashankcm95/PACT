@@ -91,8 +91,10 @@ run **inside `multipass shell rheap`** as user `ubuntu`.
 - Tree -- `/opt/pact` (the `v0/` tree). **MUST be root-owned (or a non-host uid) and NOT host-writable** -- the
   broker execs this code as its own uid, so a host-writable tree is a full custody bypass (see step 1's prereq).
   Bring it current with a **root-run** `git pull`, never as the host uid.
-- `PERSONA_DID` -- the persona you are provisioning (step 4). Set it before running `provision-verify.js`; it
-  defaults to a demo DID if unset.
+- `PERSONA_DID` -- the PACT identity (a `did:key:...`) you are wire-checking in step 4. **This is a NEW PACT
+  cryptographic identity, unrelated to HETS agent personas** (`provision-verify.js` mints a fresh keypair for it).
+  `provision-verify.js` **fails closed** if it is unset -- pass a real `did:key:...`, or `did:key:zRootBrokerDemo1`
+  for a throwaway wire-check (nothing persists either way; SHADOW).
 
 ## 1. Create `pact-root-broker` + install `K_root` (deltas over `cross-uid-broker.md` §1-2)
 
@@ -236,6 +238,16 @@ multipass transfer ~/Documents/PACT/K_root_pub.pem rheap:/home/ubuntu/K_root_pub
 # plain SSH host instead:  scp ~/Documents/PACT/K_root_pub.pem you@rheap:~/K_root_pub.pem
 ```
 
+**ON THE BOX**, confirm the copy is the ATTESTED root (the Rekor subject, `logIndex 2079476377`) -- not a stale or
+swapped key. `provision-verify.js` roots the whole construction on this pubkey, so a wrong one gives a green
+wire-check against the WRONG root:
+
+```sh
+echo '47844a455f7ae9066f318f12b8ab60a583c10be8ae5126a81434dbc4ee2342cf  /home/ubuntu/K_root_pub.pem' | sha256sum -c -
+#   MUST print "... OK". (This digest is THIS deployment's attested K_root_pub == the Rekor subject; another
+#   deployment substitutes its own -- `shasum -a 256 ~/Documents/PACT/K_root_pub.pem` on the Mac.) A FAIL => stop.
+```
+
 Then, **ON THE BOX as `ubuntu`**, write and run `provision-verify.js`. It builds an in-memory registry (the box's
 live `/etc/pact/registry.json` is persona-rows-only -- so this is a SHADOW **construction**, not a live-read-path
 write; persisting is the deferred Phase C), provisions the persona through the cross-uid broker, and runs the
@@ -252,8 +264,8 @@ const { assessRegistrationFromRegistry } = require('/opt/pact/v0/src/identity/re
 const fs = require('fs');
 
 const CONTROLLER = 'human:merlin95';                              // == PACT_ROOT_CONTROLLER
-const P = process.env.PERSONA_DID || 'did:key:zRootBrokerDemo1';  // set PERSONA_DID for a real provision
-if (!process.env.PERSONA_DID) console.warn('WARNING: PERSONA_DID unset -- using a DEMO DID (nothing persists either way; SHADOW verify)');
+const P = process.env.PERSONA_DID;   // fail closed -- no silent demo; you name the identity being wire-checked
+if (!P) { console.error('set PERSONA_DID -- a real did:key:... , OR did:key:zRootBrokerDemo1 for a throwaway wire-check (nothing persists either way; SHADOW)'); process.exit(2); }
 
 const reg = createRegistry();                                    // SHADOW in-memory construction (NOT rheap's live registry)
 registerRoot(reg, { humanUid: CONTROLLER, rootPublicKeyPem: fs.readFileSync(process.env.HOME + '/K_root_pub.pem', 'utf8') });
@@ -302,9 +314,9 @@ drains stdin BEFORE the caller-auth gate (`broker-core.js:86` before `:95`), so 
 
 ```sh
 HEX=$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')
-sudo sed -i 's/ALLOWED_UIDS=1000/ALLOWED_UIDS=999/' /usr/local/bin/pact-root-broker-sign  # flip to a NON-member
+sudo sed -i 's/PACT_ROOT_ALLOWED_UIDS=1000/PACT_ROOT_ALLOWED_UIDS=999/' /usr/local/bin/pact-root-broker-sign  # flip to a NON-member
 printf '{}' | sudo -n -u pact-root-broker /usr/local/bin/pact-root-broker-sign "$HEX"      # -> "caller not authorized", empty stdout, exit 1
-sudo sed -i 's/ALLOWED_UIDS=999/ALLOWED_UIDS=1000/' /usr/local/bin/pact-root-broker-sign  # RESTORE
+sudo sed -i 's/PACT_ROOT_ALLOWED_UIDS=999/PACT_ROOT_ALLOWED_UIDS=1000/' /usr/local/bin/pact-root-broker-sign  # RESTORE
 ```
 
 The two further deny controls (optional -- the full deny set):
