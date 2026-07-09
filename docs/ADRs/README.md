@@ -23,7 +23,7 @@ a phase doc says the *steps*, and an ADR records the *decisions* made while doin
 
 | ADR | Title | Status | Supersedes |
 |---|---|---|---|
-| *(first go-forward ADR lands here)* | — | — | — |
+| [0001](0001-fail-closed-arming-manifest.md) | Fail-closed arming manifest for the SHADOW→armed transition | proposed | — |
 
 **Existing decision records (pre-convention, bridged):** [`docs/FORKS.md`](../FORKS.md) — FORK-1 (next frontier
 after R2-WHAT), FORK-2 (which trust-hardening sub-direction first), FORK-3 (post-U2-seam deferred branch), + the
