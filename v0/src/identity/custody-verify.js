@@ -234,28 +234,38 @@ function parseArgv(argv, onError) {
 function main() {
   // lazy requires (only the CLI needs them) — keep the library import surface minimal.
   const { crossUidBrokerSigner } = require('./broker-launch');
-  const { createRegistry, registerPersona } = require('./registry');
+  const { loadRegistryFile } = require('./registry-store');
   const usage = 'usage: custody-verify --key <broker-key> --persona <did> --broker-user <user> --wrapper <abs-path> --registry <personas.json> [--sudo <abs-path>] [--attested-cross-uid]\n'
-    + '  registry json: [{ "personaDid": "...", "humanUid": "...", "publicKeyPem": "..." }, ...]\n';
+    + '  registry json: [{ "personaDid": "...", "humanUid": "...", "publicKeyPem": "..." }, ...]  OR  { "personas": [...], "rootKeys": [{ "humanUid": "...", "rootPublicKeyPem": "..." }, ...] }\n';
   const o = parseArgv(process.argv.slice(2), (m) => { process.stderr.write('custody-verify: ' + m + '\n' + usage); process.exit(2); });
   if (!o.keyFile || !o.personaDid || !o.brokerUser || !o.wrapperPath || !o.registryFile) {
     process.stderr.write(usage);
     process.exit(2);
   }
+  // plans/43: the ONE trusted-load path -- ownership/mode/symlink/size guard -> parse -> deserialize (personas
+  // AND rootKeys). Classify the failure so the exit-2 diagnostic tells the operator WHICH fault it is.
   let registry;
-  let entries;
   try {
-    entries = JSON.parse(fs.readFileSync(o.registryFile, 'utf8'));
-  } catch (e) { process.stderr.write('custody-verify: cannot load registry (unreadable / malformed JSON): ' + (e && e.message) + '\n'); process.exit(2); }
-  registry = createRegistry();
-  try {
-    for (const e of entries) registerPersona(registry, e);
+    registry = loadRegistryFile(o.registryFile);
   } catch (e) {
-    // DISTINCT from the malformed-JSON class above (plans/31 W0, code-reviewer HIGH): first-writer immutability
-    // now rejects a registry.json with two CONFLICTING rows for the same personaDid (a stale/merged/hand-edited
-    // duplicate). Name it so an operator debugging exit 2 can tell 'your JSON is broken' from 'you have two
-    // rows for one DID -- dedup them'. Same exit 2 (a config error, not a failed custody check = exit 1).
-    process.stderr.write('custody-verify: registry-immutability-violation (a personaDid appears twice with a different binding -- dedup the registry.json): ' + (e && e.message) + '\n');
+    // Sanitize control chars (VALIDATE hacker M3): a hostile registry can embed ANSI/CR bytes in a persona DID /
+    // humanUid that the registrar interpolates into its throw message; unsanitized, they reach the operator's
+    // terminal and can spoof/hide the fault on a TRUST tool. Strip C0 + DEL before any stderr write.
+    const msg = String((e && e.message) || '').replace(/[^\x20-\x7e]/g, '?');
+    if (e && e.code === 'ERR_REGISTRY_UNTRUSTED') {
+      // the file itself is not a trustworthy anchor (foreign owner / others-writable / symlink / oversized).
+      process.stderr.write('custody-verify: registry-file-untrusted (' + msg + ')\n');
+    } else if (e instanceof SyntaxError) {
+      process.stderr.write('custody-verify: cannot load registry (unreadable / malformed JSON): ' + msg + '\n');
+    } else if (e instanceof TypeError) {
+      // DISTINCT from the malformed-JSON class: first-writer immutability (a CONFLICTING persona OR root row) or
+      // an invalid registry shape. Name it so an operator debugging exit 2 can tell 'your JSON is broken' from
+      // 'you have a conflicting row'. Same exit 2 (a config error, not a failed custody check = exit 1).
+      process.stderr.write('custody-verify: registry-immutability-violation (a persona or root row conflicts with an established binding, or the registry shape is invalid -- dedup / fix the registry.json): ' + msg + '\n');
+    } else {
+      // fs errors (ENOENT / EACCES reading / ...) -- a load failure, not a trust or integrity verdict.
+      process.stderr.write('custody-verify: cannot load registry (' + msg + ')\n');
+    }
     process.exit(2);
   }
 
