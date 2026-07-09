@@ -226,3 +226,9 @@ hacker's LIVE re-probe of the BUILT `loadRegistryFile` found the `lstat`-then-re
 structurally cannot see. Fixed to atomic open+fstat; re-verified live (the symlink-refusal test exercises the
 real `O_NOFOLLOW` -> `ELOOP` -> untrusted path). NS-9 CONFIRMED (no field/prose reads as a HARDEN or trust
 advance; the metric does not move). INV-16/INV-18 preserved (no `actionable` flip, no `registerPersona` oracle).
+
+**Pre-PR CodeRabbit CLI: 0 findings.** The PR-level bot (initially rate-limited by the org usage cap; the CLI
+covered the same bytes) then re-reviewed and surfaced ONE Minor: `assertTrustedFileStat` checked `'selfUid' in
+opts` (key presence) but not the VALUE, so `{ selfUid: undefined }` would slip past into a silent uid-check skip
+-- the bypass the fail-closed guard exists to prevent. Not reachable from today's call site, but the EXPORTED
+primitive's contract must hold. **FOLDED**: rejects a non-number/non-null `selfUid`; +1 non-vacuous test (727/0).

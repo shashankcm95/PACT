@@ -244,6 +244,12 @@ test('assertTrustedFileStat: opts.selfUid is REQUIRED (fail-closed, not a silent
   assert.throws(() => store.assertTrustedFileStat(statLike({})), /selfUid|required/i);
 });
 
+test('assertTrustedFileStat: a present-but-`undefined`/non-number selfUid VALUE is REFUSED (pre-PR CodeRabbit)', () => {
+  // `{selfUid: undefined}` satisfies `'selfUid' in opts` but would else silently skip the uid check -- must throw.
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 99999 }), { selfUid: undefined }), /number or explicit null|selfUid/i);
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 99999 }), { selfUid: 'not-a-number' }), /number or explicit null|selfUid/i);
+});
+
 test('deserializeRegistry: a null/scalar ROW fails CLOSED with a clear message (code-reviewer LOW)', () => {
   assert.throws(() => store.deserializeRegistry({ personas: [null] }), /row must be an object|invalid registry shape/i);
   assert.throws(() => store.deserializeRegistry({ rootKeys: [42] }), /row must be an object|invalid registry shape/i);

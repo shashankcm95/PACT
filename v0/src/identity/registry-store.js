@@ -131,6 +131,12 @@ function assertTrustedFileStat(st, opts) {
     throw new TypeError('assertTrustedFileStat: opts.selfUid is REQUIRED (pass null explicitly on a platform with no uid) -- refusing to default-skip the owner check');
   }
   const selfUid = opts.selfUid;
+  // Validate the VALUE, not just the key's presence (pre-PR CodeRabbit): `{ selfUid: undefined }` satisfies the
+  // `in` check above but would fall through the `typeof === 'number'` branch below and SILENTLY skip the uid check
+  // -- the exact bypass this guard exists to prevent. Only a number or an EXPLICIT null is a valid selfUid.
+  if (selfUid !== null && typeof selfUid !== 'number') {
+    throw new TypeError('assertTrustedFileStat: opts.selfUid must be a number or explicit null (an `undefined` value would silently skip the owner check)');
+  }
   if (st.isSymbolicLink()) {
     throw untrusted('registry file refused: it is a SYMLINK (redirection guard) -- a trust anchor must be a real regular file');
   }
