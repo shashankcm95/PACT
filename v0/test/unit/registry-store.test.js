@@ -255,5 +255,104 @@ test('deserializeRegistry: a null/scalar ROW fails CLOSED with a clear message (
   assert.throws(() => store.deserializeRegistry({ rootKeys: [42] }), /row must be an object|invalid registry shape/i);
 });
 
+// ---------- plans/44: the DARK ARMED loader tightening (root-owned-only + a root-owned parent) ----------
+// RED-first. These describe the OPT-IN strict mode (`requireRootOwned:true`); the disarmed default is unchanged.
+
+function dirStatLike(over) { return Object.assign({ uid: 0, mode: 0o40755, isDirectory: () => true }, over); }
+
+// assertTrustedDirStat (pure parent-dir policy -- armed mode; synthetic stats, no root needed)
+test('plan44 dir policy: a root-owned 0755 directory -> ACCEPTED', () => {
+  assert.doesNotThrow(() => store.assertTrustedDirStat(dirStatLike({})));
+});
+test('plan44 dir policy: a NON-directory is REFUSED', () => {
+  assert.throws(() => store.assertTrustedDirStat(dirStatLike({ isDirectory: () => false })), /director|refus/i);
+});
+test('plan44 dir policy: a group- OR world-writable parent dir is REFUSED', () => {
+  assert.throws(() => store.assertTrustedDirStat(dirStatLike({ mode: 0o40777 })), /writable|refus/i);
+  assert.throws(() => store.assertTrustedDirStat(dirStatLike({ mode: 0o40775 })), /writable|refus/i); // group-write (0o020)
+});
+test('plan44 dir policy: a NON-root-owned parent dir is REFUSED (armed requires uid 0)', () => {
+  assert.throws(() => store.assertTrustedDirStat(dirStatLike({ uid: OWN + 7 })), /root|owned|uid|refus/i);
+});
+test('plan44 L1: a parent-dir refusal is CLASSED ERR_REGISTRY_UNTRUSTED (not a bare Error)', () => {
+  try { store.assertTrustedDirStat(dirStatLike({ uid: 12345 })); assert.fail('should throw'); }
+  catch (e) { assert.equal(e.code, store.ERR_REGISTRY_UNTRUSTED, 'a dir refusal must carry the untrusted class'); }
+});
+
+// assertTrustedFileStat armed mode (root-owned-ONLY narrowing)
+test('plan44 armed: requireRootOwned + a root-owned file -> ACCEPTED', () => {
+  assert.doesNotThrow(() => store.assertTrustedFileStat(statLike({ uid: 0 }), { selfUid: OWN, requireRootOwned: true }));
+});
+test('plan44 armed: requireRootOwned REFUSES a SELF-owned file (the same-uid self-seed the disarmed mode tolerates)', () => {
+  assert.doesNotThrow(() => store.assertTrustedFileStat(statLike({ uid: OWN }), { selfUid: OWN }), 'disarmed accepts self-owned');
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: OWN }), { selfUid: OWN, requireRootOwned: true }), /root|uid|refus/i, 'armed refuses self-owned');
+});
+test('plan44 armed: the mode + symlink checks STILL fire under requireRootOwned', () => {
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 0, mode: 0o100666 }), { selfUid: OWN, requireRootOwned: true }), /writable|refus/i);
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 0, isSymbolicLink: () => true }), { selfUid: OWN, requireRootOwned: true }), /symlink|refus/i);
+});
+test('plan44 H1: a present-but-NON-boolean requireRootOwned is REFUSED (no split; fail-closed)', () => {
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 0 }), { selfUid: OWN, requireRootOwned: 1 }), /boolean|requireRootOwned/i);
+  assert.throws(() => store.assertTrustedFileStat(statLike({ uid: 0 }), { selfUid: OWN, requireRootOwned: 'true' }), /boolean|requireRootOwned/i);
+});
+
+// loadRegistryFile armed mode (real temp files; tests run non-root, so a temp parent is self-owned -> refused)
+test('plan44 armed load: a self-owned-PARENT deployment is REFUSED (armed requires a root-owned parent)', () => {
+  const p = tmpWrite({ personas: [] }, 0o600);
+  try {
+    assert.throws(() => store.loadRegistryFile(p, { requireRootOwned: true }), /parent|root|owned|refus/i);
+  } finally { cleanup(p); }
+});
+test('plan44 armed load L2: the DISARMED default still accepts a self-owned 0600 file (no-opts + explicit-false)', () => {
+  const p = tmpWrite({ rootKeys: [{ humanUid: 'human:merlin', rootPublicKeyPem: R_KEY_M }] }, 0o600);
+  try {
+    assert.equal(reg.lookupRootKey(store.loadRegistryFile(p), 'human:merlin'), R_KEY_M, 'no-opts default is unchanged');
+    assert.equal(reg.lookupRootKey(store.loadRegistryFile(p, { requireRootOwned: false }), 'human:merlin'), R_KEY_M, 'explicit disarm too');
+  } finally { cleanup(p); }
+});
+
+test('plan44 armed load: a root-owned file under a root-owned parent LOADS armed (root-gated; skipped non-root)', () => {
+  if (!(typeof process.getuid === 'function' && process.getuid() === 0)) {
+    console.log('       skip - armed ACCEPT needs a root-owned fixture (non-root runner)'); return;
+  }
+  // As root, tmpWrite's mkdtemp dir is root-owned 0700 (not others-writable) and the file is root-owned; both gates pass.
+  const p = tmpWrite({ rootKeys: [{ humanUid: 'human:merlin', rootPublicKeyPem: R_KEY_M }] }, 0o600);
+  try {
+    assert.equal(reg.lookupRootKey(store.loadRegistryFile(p, { requireRootOwned: true }), 'human:merlin'), R_KEY_M, 'armed ACCEPT: root-owned file + root-owned parent');
+  } finally { cleanup(p); }
+});
+test('plan44 armed load H1: a garbage-truthy requireRootOwned is REFUSED, never a split (TypeError)', () => {
+  const p = tmpWrite({ personas: [] }, 0o600);
+  try {
+    assert.throws(() => store.loadRegistryFile(p, { requireRootOwned: 1 }), /boolean|requireRootOwned/i);
+    assert.throws(() => store.loadRegistryFile(p, { requireRootOwned: 'true' }), /boolean|requireRootOwned/i);
+  } finally { cleanup(p); }
+});
+test('plan44 armed load M2: a SYMLINKED parent dir is REFUSED, classed untrusted (ELOOP/ENOTDIR)', () => {
+  const p = tmpWrite({ personas: [] }, 0o600);
+  const linkDir = path.dirname(p) + '-link';
+  fs.symlinkSync(path.dirname(p), linkDir);
+  try {
+    store.loadRegistryFile(path.join(linkDir, 'registry.json'), { requireRootOwned: true });
+    assert.fail('a symlinked parent must be refused');
+  } catch (e) {
+    assert.equal(e.code, store.ERR_REGISTRY_UNTRUSTED, 'a symlinked parent is a classed trust refusal');
+  } finally { fs.rmSync(linkDir, { force: true }); cleanup(p); }
+});
+test('plan44 armed load M1: the parent-open finally releases the fd on each refusal (no leak)', () => {
+  const p = tmpWrite({ personas: [] }, 0o600);
+  const fdDir = fs.existsSync('/dev/fd') ? '/dev/fd' : (fs.existsSync('/proc/self/fd') ? '/proc/self/fd' : null);
+  try {
+    const before = fdDir ? fs.readdirSync(fdDir).length : null;
+    for (let i = 0; i < 24; i++) {
+      assert.throws(() => store.loadRegistryFile(p, { requireRootOwned: true }), /parent|root|owned|refus/i);
+    }
+    if (before !== null) {
+      const grew = fs.readdirSync(fdDir).length - before;
+      assert.ok(grew < 12, 'the parent-open fd must be released on each refusal (finally); saw fd growth ' + grew);
+    }
+  } finally { cleanup(p); }
+});
+
 console.log(`\n[registry-store] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

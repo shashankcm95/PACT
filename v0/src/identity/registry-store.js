@@ -17,12 +17,16 @@
 // the loader's trust domain and can seed a self-owned 0600 root; that is the pre-existing integrity != provenance
 // residual (`registration-provenance.js:70`), NOT a new surface. A symlinked PARENT dir is still followed
 // (`O_NOFOLLOW` guards only the final component). `process.getuid() === undefined` (Windows) skips the uid check.
-// FORWARD NOTE (the arming wave): the eventual ARMED on-box loader should tighten to root-owned-only (`uid===0`)
-// + a root-owned parent dir; the self-or-root allowance here fits the DARK dev/test + the reusable primitive.
+// ARMED MODE (plans/44 -- DARK, no live consumer yet): the ARMED on-box loader tightening (root-owned-ONLY
+// `uid===0` + a root-owned parent dir) is now the OPT-IN `loadRegistryFile(path, { requireRootOwned:true })`
+// mode. The self-or-root DEFAULT (byte-identical to #74) fits the DARK dev/test + custody-verify's arbitrary
+// `--registry` path; the armed mode is what a future on-box armed read-path will hard-code. Named residual: no
+// `openat` in Node sync, so the parent guard refuses the static misconfig, not a parent-swap racer (see below).
 
 'use strict';
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { createRegistry, registerPersona, registerRoot } = require('./registry');
 const { canonicalJsonSerialize } = require('../lib/canonical-json');
 
@@ -137,15 +141,33 @@ function assertTrustedFileStat(st, opts) {
   if (selfUid !== null && typeof selfUid !== 'number') {
     throw new TypeError('assertTrustedFileStat: opts.selfUid must be a number or explicit null (an `undefined` value would silently skip the owner check)');
   }
+  // requireRootOwned (plans/44 -- the DARK ARMED mode; no live consumer, the armed on-box read-path is future).
+  // Read the opt ONCE into a local (VALIDATE hacker Note A): a hostile TOGGLING getter handed directly to this
+  // exported pure checker must not be read twice (typeof-then-===true) or it could pass validation as `true` and
+  // then re-read `false` to disarm the file branch. Capture, then validate + branch on the SAME value. A present
+  // non-boolean is a MALFORMED opt -> throw (fail-closed; undefined == absent == disarmed, matching the loader).
+  const rroRaw = opts.requireRootOwned;
+  if (rroRaw !== undefined && typeof rroRaw !== 'boolean') {
+    throw new TypeError('assertTrustedFileStat: opts.requireRootOwned must be a boolean when present');
+  }
+  const requireRootOwned = rroRaw === true;
   if (st.isSymbolicLink()) {
     throw untrusted('registry file refused: it is a SYMLINK (redirection guard) -- a trust anchor must be a real regular file');
   }
   if (!st.isFile()) {
     throw untrusted('registry file refused: not a regular file');
   }
-  // 0o020 = group-write, 0o002 = other-write. A trust anchor others could rewrite is not trustworthy.
+  // 0o020 = group-write, 0o002 = other-write. A trust anchor others could rewrite is not trustworthy. (Both modes.)
   if ((st.mode & 0o022) !== 0) {
     throw untrusted('registry file refused: it is group- or world-writable (mode ' + (st.mode & 0o777).toString(8) + ') -- refusing an others-writable trust anchor');
+  }
+  // ARMED: root-owned ONLY -- refuse a self-owned root (the same-uid self-seed the DISARMED mode tolerates for
+  // dev/test). selfUid is irrelevant here, so the check can never silently skip (H1). DISARMED: self-OR-root (#74).
+  if (requireRootOwned) {
+    if (st.uid !== 0) {
+      throw untrusted('registry file refused: armed mode requires root ownership (uid 0), got uid ' + st.uid);
+    }
+    return;
   }
   if (typeof selfUid === 'number') {
     if (st.uid !== 0 && st.uid !== selfUid) {
@@ -155,17 +177,75 @@ function assertTrustedFileStat(st, opts) {
 }
 
 /**
+ * PURE trust policy for a registry file's PARENT DIRECTORY (plans/44 -- the DARK ARMED mode ONLY). THROW (via
+ * `untrusted`, so a parent refusal carries ERR_REGISTRY_UNTRUSTED exactly like a file refusal) unless the stat is
+ * a real directory, root-owned (`uid === 0`), and NOT group/world-writable. Closes #74's disclosed
+ * symlinked-parent residual AND the net-new (previously-undisclosed) others-writable-parent vector for the strict
+ * path -- the parent-swap TOCTOU racer stays a disclosed residual. Exported + pure so it is unit-testable with a
+ * synthetic stat -- no root required.
+ * @param {{uid:number, mode:number, isDirectory:Function}} dirSt an fs.fstat result for the parent directory
+ */
+function assertTrustedDirStat(dirSt) {
+  if (!dirSt.isDirectory()) {
+    throw untrusted('registry file refused: parent is not a directory');
+  }
+  if ((dirSt.mode & 0o022) !== 0) {
+    throw untrusted('registry file refused: parent dir is group- or world-writable (mode ' + (dirSt.mode & 0o777).toString(8) + ') -- refusing an others-writable parent');
+  }
+  if (dirSt.uid !== 0) {
+    throw untrusted('registry file refused: parent dir not root-owned (uid ' + dirSt.uid + ') -- armed mode requires a root-owned parent');
+  }
+}
+
+/**
  * The ONE trusted-load path (both custody-verify and the future armed-gate loader use it). Impure shell:
- * lstat -> ownership/mode/symlink guard (assertTrustedFileStat) -> size cap -> read -> JSON.parse ->
- * deserializeRegistry. Every refusal THROWS with an observable reason (the caller logs + exits).
+ * [ARMED: parent-dir guard ->] atomic file open -> ownership/mode/symlink guard (assertTrustedFileStat) ->
+ * size cap -> read -> JSON.parse -> deserializeRegistry. Every refusal THROWS with an observable reason.
+ * DISARMED (default) is byte-identical to #74; ARMED (`requireRootOwned:true`, plans/44 -- DARK) narrows the file
+ * owner to root-only AND requires a root-owned parent dir.
  * @param {string} filePath
- * @param {{maxBytes?:number}} [opts]
+ * @param {{maxBytes?:number, requireRootOwned?:boolean}} [opts]
  * @returns {object} a fresh registry
  */
 function loadRegistryFile(filePath, opts) {
   const maxBytes = opts && typeof opts.maxBytes === 'number' ? opts.maxBytes : MAX_REGISTRY_BYTES;
+  // Normalize the arm predicate ONCE (VERIFY H1): requireRootOwned must be a boolean or absent; a present
+  // non-boolean THROWS (fail-closed on a malformed opt) so a truthy-non-true value can NEVER split the gates
+  // (parent armed + file left self-or-root). `armed` then gates BOTH the parent check and the file narrowing,
+  // and the NORMALIZED boolean (never the raw opt) is what reaches assertTrustedFileStat.
+  const rro = opts ? opts.requireRootOwned : undefined;
+  if (rro !== undefined && typeof rro !== 'boolean') {
+    throw new TypeError('loadRegistryFile: opts.requireRootOwned must be a boolean or absent');
+  }
+  const armed = rro === true;
   const selfUid = typeof process.getuid === 'function' ? process.getuid() : null;
   const O_NOFOLLOW = fs.constants.O_NOFOLLOW || 0; // 0 on a platform without it (disclosed Windows residual)
+
+  // ARMED (plans/44 -- DARK; no live consumer, the armed on-box read-path is future): the parent dir must be a
+  // root-owned, non-others-writable REAL directory before we trust the file. `O_DIRECTORY | O_NOFOLLOW` rejects a
+  // symlinked parent-final-component; the fd is fstat'd + released in a finally (no leak on the refusal path, M1).
+  // DISCLOSED residual (M2/#74): no `openat` in Node sync, so the file is re-opened by full path below -- a parent
+  // swap BETWEEN this check and the file open is unclosable here (refuses the static misconfig, not a racer).
+  if (armed) {
+    const O_DIRECTORY = fs.constants.O_DIRECTORY || 0;
+    let dfd;
+    try {
+      dfd = fs.openSync(path.dirname(filePath), fs.constants.O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    } catch (e) {
+      // A symlinked (ELOOP, Linux) or non-directory (ENOTDIR, macOS) parent is a TRUST refusal -- classed +
+      // observable on both. ENOENT/EACCES propagate (still fail-closed; never a silent pass to the file open).
+      if (e && (e.code === 'ELOOP' || e.code === 'ENOTDIR')) {
+        throw untrusted('registry file refused: parent dir is a symlink or not a directory (' + e.code + ')');
+      }
+      throw e;
+    }
+    try {
+      assertTrustedDirStat(fs.fstatSync(dfd));
+    } finally {
+      fs.closeSync(dfd);
+    }
+  }
+
   let fd;
   try {
     // Atomic check-and-use (VALIDATE H1): open ONCE (O_NOFOLLOW rejects a final-component symlink), then stat +
@@ -177,7 +257,7 @@ function loadRegistryFile(filePath, opts) {
   }
   try {
     const st = fs.fstatSync(fd);               // stat the OPEN fd, not the path -- same inode as the read below
-    assertTrustedFileStat(st, { selfUid });
+    assertTrustedFileStat(st, { selfUid, requireRootOwned: armed }); // NORMALIZED boolean, never the raw opt (H1)
     if (st.size > maxBytes) {
       throw untrusted('registry file refused: size ' + st.size + ' exceeds the ' + maxBytes + '-byte cap');
     }
@@ -193,6 +273,7 @@ module.exports = {
   deserializeRegistry,
   loadRegistryFile,
   assertTrustedFileStat,
+  assertTrustedDirStat,
   MAX_REGISTRY_BYTES,
   MAX_REGISTRY_ROWS,
   ERR_REGISTRY_UNTRUSTED,
