@@ -29,6 +29,20 @@
 const MAX_CANONICAL_DEPTH = 100;
 const MAX_CANONICAL_NODES = 10000;
 
+// F1 (#77) -- the JSON-ABSENT scalar class. Native JSON.stringify produces NO token for `undefined`, a function, or
+// a symbol: in an OBJECT the key is OMITTED, in an ARRAY the element becomes `null`. The record WRITE path uses
+// native JSON.stringify, so canonical MUST match that or the build-time content-address hash disagrees with the
+// read-back hash (a false `content-address-mismatch` / class:attack + a null read -- the F1 bug). NO-OP for any
+// value with none of these (a value already free of them is byte-stable -- the deductive proof: every on-disk body
+// was written via native JSON.stringify, so every parsed-back body is already JSON-absent-free, so the fix is
+// identity for it; every existing READABLE content-address is unchanged).
+// DEFERRED SIBLING -- `toJSON`: a distinct value-TRANSFORM mechanism (native calls `toJSON()` first, e.g. Date ->
+// ISO string). NOT handled here, and it reproduces the SAME mint-then-reject + false class:attack for a toJSON/Date
+// value, REACHABLE via the lenient `validateRecord` payload path. Tracked as its own issue (a real bug, not cosmetic).
+function isJsonAbsent(x) {
+  return x === undefined || typeof x === 'function' || typeof x === 'symbol';
+}
+
 /**
  * Canonical JSON serialization (sorted keys, no whitespace).
  * Required for stable content hashing per §4.2 transaction_id derivation.
@@ -47,10 +61,32 @@ function canonicalJsonSerialize(value) {
     }
     if (v === null || typeof v !== 'object') return JSON.stringify(v);
     if (Array.isArray(v)) {
-      return '[' + v.map((x) => walk(x, depth + 1)).join(',') + ']';
+      // native serializes arrays BY INDEX (0..length-1): a JSON-absent element (incl. a SPARSE HOLE, read as
+      // `undefined` via v[i]) becomes `null`, and any overridden `Symbol.iterator` is IGNORED. Use an index loop --
+      // NOT `.map` (skips holes -> invalid `[1,,2]`, VALIDATE) and NOT `Array.from` (honors a custom iterator -> a
+      // hash divergence from the native write path, e.g. a poisoned array field: pre-PR CodeRabbit).
+      const parts = [];
+      for (let i = 0; i < v.length; i += 1) {
+        const x = v[i];
+        parts.push(walk(isJsonAbsent(x) ? null : x, depth + 1));
+      }
+      return '[' + parts.join(',') + ']';
     }
-    const sortedKeys = Object.keys(v).sort();
-    return '{' + sortedKeys.map((k) => JSON.stringify(k) + ':' + walk(v[k], depth + 1)).join(',') + '}';
+    // native: a JSON-absent object VALUE omits the key. Read each value ONCE into an entry tuple (a hash primitive
+    // must be deterministic -- re-reading a getter that flips defined<->undefined would re-introduce a bareword).
+    // A DROPPED key is counted toward the node budget IN the filter (survivors are counted by their walk() call
+    // below), so a wide all-absent object still trips MAX_CANONICAL_NODES -- the DoS guard is not bypassed (VALIDATE).
+    const entries = Object.keys(v)
+      .map((k) => [k, v[k]])
+      .filter((entry) => {
+        if (!isJsonAbsent(entry[1])) return true;
+        if (++nodeCount > MAX_CANONICAL_NODES) {
+          throw new TypeError('canonicalJsonSerialize: max node budget exceeded (' + MAX_CANONICAL_NODES + ')');
+        }
+        return false;
+      })
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    return '{' + entries.map((entry) => JSON.stringify(entry[0]) + ':' + walk(entry[1], depth + 1)).join(',') + '}';
   }
   return walk(value, 0);
 }
