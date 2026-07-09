@@ -61,6 +61,22 @@ test('append + readById round-trip', () => {
   assert.equal(back.payload.content, 'the sky is blue');
 });
 
+test('#77 (F1): a nested-undefined payload field mints, reads back, and fires NO false attack alert', () => {
+  // the ordinary optional-field idiom `payload.target_claim_id = opts.value` with opts.value === undefined.
+  // Pre-fix: computeRecordId hashed a bareword `undefined`, the native-JSON.stringify write dropped the key,
+  // and the read-back recompute mismatched -> a FALSE `content-address-mismatch` (class:attack) + a null read.
+  const rec = buildRecord({ payload: { content: 'x', target_claim_id: undefined } });
+  let res; let back;
+  const stderr = captureStderr(() => {
+    res = S.appendRecord(rec, { receiverId: RX, stateDir: STATE });
+    back = S.readById(rec.record_id, { receiverId: RX, stateDir: STATE });
+  });
+  assert.ok(res.ok, 'append: ' + (res && res.reason));
+  assert.ok(back, 'read-back must NOT be null (pre-fix this was null via a false content-address-mismatch)');
+  assert.equal(back.payload.content, 'x');
+  assert.doesNotMatch(stderr, /content-address-mismatch|attack/i, 'an undefined optional field is legit, not an attack');
+});
+
 test('S5: a forged record_id is rejected on write (record-id-mismatch)', () => {
   const rec = buildRecord();
   const forged = { ...rec, record_id: 'a'.repeat(64) }; // valid hex shape, wrong content hash
