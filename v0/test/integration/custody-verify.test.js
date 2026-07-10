@@ -102,7 +102,9 @@ test('crossUidBrokerSigner end-to-end through a stub sudo + stub wrapper + the R
 
 const SIGN_OK = { signed: true, personaMatches: true };
 const STAT_DIFF = { ok: true, isFile: true, size: 120, ownerUid: 990 }; // key owned by a DIFFERENT uid
-const WRAP_OK = { ok: true, isFile: true, worldOrGroupWritable: false };
+// F3 (#79): a clean wrapper is now a root-OWNED file + a root-owned, non-others-writable ancestor chain to /.
+const CLEAN_CHAIN = [{ path: '/', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false }];
+const WRAP_OK = { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false, ancestors: CLEAN_CHAIN };
 
 test('assessCustody — the cross-uid TRUE branch (synthetic; unreachable same-uid)', () => {
   const r = V.assessCustody({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: 501, sign: SIGN_OK, wrapper: WRAP_OK });
@@ -147,9 +149,110 @@ test('assessCustody — running as root -> FALSE (root bypasses file perms)', ()
 });
 
 test('assessCustody — a group/world-writable wrapper -> FALSE (privesc: host runs code as the broker uid)', () => {
-  const r = V.assessCustody({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: 501, sign: SIGN_OK, wrapper: { ok: true, isFile: true, worldOrGroupWritable: true } });
+  const r = V.assessCustody({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: 501, sign: SIGN_OK, wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: true, ancestors: CLEAN_CHAIN } });
   assert.equal(r.hostObservableChecksPassed, false);
   assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /writable|privesc|hijack/i.test(c.detail)));
+});
+
+// ------------------- F3 (#79): wrapper FILE owner + parent-dir/ancestor-chain attestation -------------------
+
+const wrapFacts = (extra) => ({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: 501, sign: SIGN_OK, ...extra });
+
+test('C2.5 F3 — a host-OWNED wrapper file (in a root-owned dir) -> FALSE (owner rewrites the sudo script; no rename needed)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 501, worldOrGroupWritable: false, ancestors: CLEAN_CHAIN } }));
+  assert.equal(r.hostObservableChecksPassed, false, JSON.stringify(r.checks));
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /root-owned|chown/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a THIRD-uid wrapper file (not the running uid) -> FALSE (root-owned-only allowlist, not a host-uid denylist)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 1234, worldOrGroupWritable: false, ancestors: CLEAN_CHAIN } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /root-owned|chown/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a NON-ROOT ancestor dir -> FALSE (grandparent-rename privesc)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/opt/pact/bin', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+      { path: '/opt/pact', ok: true, isDir: true, ownerUid: 1234, worldOrGroupWritable: false },
+      { path: '/opt', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+      { path: '/', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /ancestor|grandparent|not root-owned/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a group/world-writable ancestor dir -> FALSE', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/opt/w', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: true },
+      { path: '/', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /writable/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a symlink/non-dir ancestor -> FALSE', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/opt/w', ok: true, isDir: false, ownerUid: 0, worldOrGroupWritable: false },
+      { path: '/', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /not a directory|symlink/i.test(c.detail)));
+});
+
+test('C2.5 F3 — an unstattable ancestor -> FALSE (fail-closed)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/opt/w', ok: false, errno: 'EACCES' },
+      { path: '/', ok: true, isDir: true, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /not statable|cannot attest/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a ROOT-owned symlink ancestor is OK (cannot be repointed); the chain still PASSes', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/var', ok: true, isDir: false, isSymlink: true, ownerUid: 0, worldOrGroupWritable: false },
+      { path: '/', ok: true, isDir: true, isSymlink: false, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'PASS'), JSON.stringify(r.checks));
+});
+
+test('C2.5 F3 — a NON-root-owned symlink ancestor -> FALSE (the host repoints it; sudo re-resolves)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: true, isFile: true, ownerUid: 0, worldOrGroupWritable: false,
+    ancestors: [
+      { path: '/opt/link', ok: true, isDir: false, isSymlink: true, ownerUid: 501, worldOrGroupWritable: false },
+      { path: '/', ok: true, isDir: true, isSymlink: false, ownerUid: 0, worldOrGroupWritable: false },
+    ] } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /symlink|repoint/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a non-absolute / ".."-bearing wrapperPath -> FALSE (pathInvalid)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: false, pathInvalid: true, reason: 'contains-..' } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /absolute|\.\./i.test(c.detail)));
+});
+
+test('C2.5 F3 — an ABSENT/unstattable wrapper (explicitly provided) -> FAIL, not a soft NOTE', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: { ok: false, errno: 'ENOENT', ancestors: CLEAN_CHAIN } }));
+  assert.equal(r.hostObservableChecksPassed, false);
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /not statable|absent|unreachable/i.test(c.detail)));
+});
+
+test('C2.5 F3 — a clean wrapper (root file + root chain) -> PASS + a snapshot residual', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: WRAP_OK }));
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'PASS'), JSON.stringify(r.checks));
+  assert.ok(r.residuals.some((s) => /snapshot|openat|swap|this instant/i.test(s)), 'a snapshot/TOCTOU residual must ride the wrapper PASS');
+});
+
+test('C2.6 F3 — a host-writable key dir is a NOTE, never flips the verdict (C3 backstops substitution)', () => {
+  const r = V.assessCustody(wrapFacts({ wrapper: WRAP_OK, keyDir: { ok: true, isDir: true, ownerUid: 990, worldOrGroupWritable: true } }));
+  assert.equal(r.hostObservableChecksPassed, true, 'the key-dir NOTE must not gate the verdict');
+  assert.ok(r.checks.some((c) => c.id === 'C2.6-keydir' && c.status === 'NOTE' && /C3|substitut|writable/i.test(c.detail)));
 });
 
 test('assessCustody — an empty key file -> FALSE (vacuous: no key to protect)', () => {
@@ -221,6 +324,82 @@ test('gatherCustodyFacts — a group/world-writable wrapper is detected (real ls
   fs.chmodSync(w, 0o662); // group-writable (0o020) + world-writable (0o002) — the 0o022 mask must catch it
   const facts = V.gatherCustodyFacts({ keyFile: path.join(dir, 'broker.key'), signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: w });
   assert.equal(facts.wrapper.worldOrGroupWritable, true);
+});
+
+test('gatherCustodyFacts F3 — the wrapper file ownerUid + the ancestor chain to / are captured (real lstat)', () => {
+  const { dir } = freshKey();
+  const w = path.join(dir, 'wrapper'); fs.writeFileSync(w, '#!/bin/sh\n'); fs.chmodSync(w, 0o755);
+  const facts = V.gatherCustodyFacts({ keyFile: path.join(dir, 'broker.key'), signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: w });
+  assert.equal(typeof facts.wrapper.ownerUid, 'number');
+  assert.equal(facts.wrapper.ownerUid, facts.runningUid, 'a wrapper we created is owned by us');
+  assert.ok(Array.isArray(facts.wrapper.ancestors) && facts.wrapper.ancestors.length >= 1, 'ancestors walked');
+  assert.ok(facts.wrapper.ancestors.some((a) => a.path === path.parse(dir).root), 'the chain reaches the filesystem root');
+  assert.equal(facts.wrapper.ancestors[0].ownerUid, facts.runningUid, 'the immediate parent (our temp dir) is owned by us, not root');
+});
+
+test('gatherCustodyFacts F3 — a SYMLINKED wrapperPath is realpath-resolved before the walk (no /var-style false positive)', () => {
+  const { dir } = freshKey();
+  const real = path.join(dir, 'wrapper'); fs.writeFileSync(real, '#!/bin/sh\n'); fs.chmodSync(real, 0o755);
+  const link = path.join(dir, 'wrapper-link'); fs.symlinkSync(real, link);
+  const facts = V.gatherCustodyFacts({ keyFile: path.join(dir, 'broker.key'), signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: link });
+  assert.equal(facts.wrapper.isFile, true, 'realpath resolves the symlink to the real regular file (isFile, not a symlink)');
+  assert.ok(facts.wrapper.resolvedPath && facts.wrapper.resolvedPath.endsWith('wrapper'), 'resolvedPath is the realpath of the link target');
+});
+
+test('gatherCustodyFacts F3 — a non-absolute wrapperPath is refused (pathInvalid) without an fs op', () => {
+  const facts = V.gatherCustodyFacts({ keyFile: '/x', signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: 'relative/w' });
+  assert.equal(facts.wrapper.ok, false);
+  assert.equal(facts.wrapper.pathInvalid, true);
+});
+
+test('gatherCustodyFacts F3 — a ".."-bearing wrapperPath is refused (pathInvalid)', () => {
+  const facts = V.gatherCustodyFacts({ keyFile: '/x', signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: '/opt/../etc/w' });
+  assert.equal(facts.wrapper.ok, false);
+  assert.equal(facts.wrapper.pathInvalid, true);
+});
+
+test('gatherCustodyFacts F3 — the key dir fact is captured for the C2.6 NOTE', () => {
+  const { keyFile } = freshKey(0o600);
+  const facts = V.gatherCustodyFacts({ keyFile, signer: () => null, registry: reg.createRegistry(), personaDid: 'x' });
+  assert.ok(facts.keyDir && typeof facts.keyDir.ownerUid === 'number', 'keyDir fact present with an owner');
+  assert.equal(facts.keyDir.ownerUid, facts.runningUid, 'the temp key dir is owned by us');
+});
+
+test('gatherCustodyFacts F3 — a cross-directory symlink: the symlink\'s OWN dir is in the walked chain (VALIDATE HIGH regression)', () => {
+  // DIR-A holds `wrapper` -> DIR-B/real-wrapper. sudo re-resolves the RAW path at exec, so DIR-A (where the
+  // host could repoint the link) MUST appear in the ancestors — not ONLY the resolved target DIR-B's chain.
+  const a = fs.mkdtempSync(path.join(os.tmpdir(), 'pact-cvA-')); _dirs.push(a);
+  const b = fs.mkdtempSync(path.join(os.tmpdir(), 'pact-cvB-')); _dirs.push(b);
+  const real = path.join(b, 'real-wrapper'); fs.writeFileSync(real, '#!/bin/sh\n'); fs.chmodSync(real, 0o755);
+  const link = path.join(a, 'wrapper'); fs.symlinkSync(real, link);
+  const facts = V.gatherCustodyFacts({ keyFile: path.join(a, 'broker.key'), signer: () => null, registry: reg.createRegistry(), personaDid: 'x', wrapperPath: link });
+  const paths = facts.wrapper.ancestors.map((x) => x.path);
+  assert.ok(paths.includes(a), 'the symlink\'s OWN dir (DIR-A) must be in the raw chain, not only the resolved target chain: ' + JSON.stringify(paths));
+  assert.ok(paths.some((p) => p === b || p === fs.realpathSync(b)), 'the resolved target dir (DIR-B) is also walked');
+});
+
+test('verifyCrossUidCustody F3 — INTEGRATED real pipe: a real wrapper in a non-root temp dir FAILs (host-owned file rung)', () => {
+  if (IS_ROOT) { console.log('       (skipped: running as root — temp files/dirs would be root-owned)'); return; }
+  const { dir, keyFile, pair } = freshKey(0o600);
+  const w = path.join(dir, 'pact-broker-sign'); fs.writeFileSync(w, '#!/bin/sh\n'); fs.chmodSync(w, 0o755);
+  const registry = reg.createRegistry();
+  reg.registerPersona(registry, { personaDid: 'did:key:zBroker', humanUid: 'human:h', publicKeyPem: pair.publicKeyPem });
+  const r = V.verifyCrossUidCustody({ keyFile, signer: () => 'x', registry, personaDid: 'did:key:zBroker', wrapperPath: w });
+  assert.equal(r.hostObservableChecksPassed, false, 'a same-uid-owned wrapper must FAIL through the real gather->assess pipe');
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /root-owned|chown/i.test(c.detail)));
+});
+
+test('F3 INTEGRATED seam — REAL gathered ancestors drive the assess chain to a FAIL (gather.ancestors -> assess)', () => {
+  if (IS_ROOT) { console.log('       (skipped: running as root — the temp-dir ancestors would be root-owned)'); return; }
+  const { dir } = freshKey();
+  const w = path.join(dir, 'wrapper'); fs.writeFileSync(w, '#!/bin/sh\n'); fs.chmodSync(w, 0o755);
+  const facts = V.gatherCustodyFacts({ keyFile: path.join(dir, 'broker.key'), signer: () => 'x', registry: reg.createRegistry(), personaDid: 'x', wrapperPath: w });
+  // the real wrapper file is us-owned (would fail the file rung first); override ONLY the file owner to root so
+  // the verdict reaches the REAL gathered ancestor chain — whose non-root temp-dir parent must drive the FAIL.
+  const r = V.assessCustody({ isRoot: false, keyStat: STAT_DIFF, hostRead: { ok: false, errno: 'EACCES' }, runningUid: facts.runningUid, sign: SIGN_OK,
+    wrapper: { ...facts.wrapper, ownerUid: 0 } });
+  assert.equal(r.hostObservableChecksPassed, false, 'the real gathered ancestors (non-root temp dir) must drive a FAIL through assess');
+  assert.ok(r.checks.some((c) => c.id === 'C2.5-wrapper' && c.status === 'FAIL' && /ancestor|not root-owned/i.test(c.detail)), JSON.stringify(r.checks.filter((c) => c.id === 'C2.5-wrapper')));
 });
 
 test('verifyCrossUidCustody — full pipe with a REAL broker signer, same-uid: reports NOT real (host can read)', () => {
