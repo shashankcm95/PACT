@@ -9,8 +9,9 @@
 //     parse is a different, WIDER vocabulary; PACT deliberately accepts only '1'/'0').
 //   * isDeploySignalSet -- the LENIENT deployed-signal predicate (the asymmetric other half, borrowed
 //     SHAPE from the toolkit's isDeployFlagSet): an unrecognized token (an operator typo like 'ture')
-//     reads as SET => the caller fails CLOSED. FORWARD-CONTRACT export for P5-W2 armingCoherence (the
-//     DI-injected sibling-arm predicate); UNCONSUMED by any W1 decision path -- dormant, gates nothing.
+//     reads as SET => the caller fails CLOSED. CONSUMED by caller-auth.js resolveRequireCaller (F2/#78):
+//     a present-non-strict token -> require-caller ON (typo-fails-closed) on the deployed WHO gate. Also a
+//     forward-contract for P5-W2 armingCoherence (the DI-injected sibling-arm predicate).
 //   * assessEnableFlag -- observability for an ENABLE-class flag (deliberately NO deploySignal field:
 //     an enable flag must never be gated on the lenient semantics -- the VERIFY-hacker fold): a
 //     present-but-strict-invalid token emits a refuse-alert (class 'misconfig') so the silent

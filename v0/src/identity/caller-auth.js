@@ -16,6 +16,8 @@
 
 'use strict';
 
+const { parseEnabledFlag, isDeploySignalSet } = require('../lib/arm-flags');
+
 // a uid token: 1-10 digits (the regex admits up to 10 digits, i.e. values past 2^32 -- the integer bound below
 // rejects those). Anything else (empty, whitespace, sign, non-digit, >10 digits) fails CLOSED.
 const UID_RE = /^[0-9]{1,10}$/;
@@ -63,16 +65,59 @@ function parseAllowlist(raw) {
 }
 
 /**
+ * Resolve the FRAME broker's require-CALLER mode from its arm flag (PACT_BROKER_REQUIRE_CALLER), read ONCE in the
+ * entrypoint (single-arming-source). Tri-state so an UNSET flag can fall to the per-request SUDO_UID marker:
+ *   - strict '1' -> true (force require); strict '0' -> false (explicit opt-out, legacy even under sudo);
+ *   - a PRESENT-but-non-strict token (a typo like 'ture') -> true (typo-fails-closed, via isDeploySignalSet);
+ *   - genuinely unset (or a recognized-falsey non-'0' token like 'false') -> null (AUTO: the marker decides).
+ * @param {*} flagRaw
+ * @returns {boolean|null}
+ */
+function resolveRequireCaller(flagRaw) {
+  const explicit = parseEnabledFlag(flagRaw); // '1'->true, '0'->false, else null
+  if (explicit !== null) return explicit;
+  return isDeploySignalSet(flagRaw) ? true : null; // present-non-strict typo -> ON; unset / falsey-non-'0' -> AUTO
+}
+
+/**
  * Decide whether the caller may request a signature.
- * @param {{sudoUid:string|undefined, allowlistRaw:string|undefined}} opts
+ * @param {{sudoUid:string|undefined, allowlistRaw:string|undefined, requireCaller?:boolean|null}} opts
+ *   requireCaller (F2/#78) governs the UNSET-allowlist default -- resolved by resolveRequireCaller in the FRAME
+ *   entrypoint and threaded here. `undefined` (a caller that does NOT thread it -- the sigma-root broker, whose
+ *   mandatory-default-ON WHAT gate compensates) keeps the legacy `disabled`; only the FRAME's explicit `null`
+ *   reaches the SUDO_UID AUTO marker (`undefined !== null`, the shared-gate contract).
  * @returns {{decision:'allow'|'deny'|'disabled', reason:string}}
- *   'disabled' -> allowlist UNSET (opt-in OFF; the caller proceeds; broker-sign emits a LOUD notice). R2 OPEN.
- *   'deny'     -> fail-closed: malformed allowlist, absent/malformed SUDO_UID, or caller not in the allowlist.
+ *   'disabled' -> proceed (opt-in OFF; broker-sign emits a LOUD notice). R2-WHO OPEN.
+ *   'deny'     -> fail-closed: malformed allowlist, absent/malformed SUDO_UID, caller not in the allowlist, OR an
+ *                 unconfigured allowlist on a DEPLOYED broker (F2: flag-forced, or AUTO with SUDO_UID present).
  *   'allow'    -> allowlist SET + SUDO_UID parses + is a member.
  */
 function authorizeCaller(opts = {}) {
   const al = parseAllowlist(opts.allowlistRaw);
-  if (!al.configured) return { decision: 'disabled', reason: 'allowlist-unset' };
+  if (!al.configured) {
+    // F2 (#78): an unconfigured WHO gate on a DEPLOYED broker is a default-open K_broker signing oracle -> fail
+    // CLOSED. The PRIMARY, host-untamperable anchor is the broker-side flag (requireCaller, set in the root-owned
+    // wrapper -- the faithful mirror of the sigma-root's broker-side controllerPresent). The SUDO_UID AUTO marker
+    // is an ADDITIONAL per-request SAFETY NET for the sudo runbook, NOT a guarantee: its integrity rests on the
+    // deployed env_reset,!setenv sudoers (which this code CANNOT verify), and a non-sudo deploy (setuid/systemd)
+    // injects no SUDO_UID -> it MUST arm the flag. NS-9: this NARROWS the default-open oracle; it does not close it.
+    const rc = opts.requireCaller;
+    if (rc === true) return { decision: 'deny', reason: 'allowlist-unset-but-required' };       // flag forced ON
+    if (rc === false) return { decision: 'disabled', reason: 'allowlist-unset-opted-out' };     // strict '0' opt-out
+    if (rc === undefined) return { decision: 'disabled', reason: 'allowlist-unset' };           // sigma-root legacy (not threaded)
+    if (rc === null) {
+      // FRAME AUTO: a PRESENT SUDO_UID (ANY form -- a correct sudo always sets it well-formed, so an
+      // empty/whitespace/garbage value is a tamper/anomaly, NOT dev) means a cross-uid caller -> fail closed.
+      // Genuine ABSENCE (no sudo ran) is same-uid dev -> legacy disabled.
+      return typeof opts.sudoUid === 'string'
+        ? { decision: 'deny', reason: 'allowlist-unset-but-deployed' }
+        : { decision: 'disabled', reason: 'allowlist-unset' };
+    }
+    // ANY other requireCaller value is a MISWIRING (a future entrypoint threading a raw string/number instead of
+    // the resolveRequireCaller tri-state) -> fail CLOSED. The WHO gate's own state machine must NOT fall OPEN on an
+    // unrecognized state (security.md: a guard must be NON-BYPASSABLE + fail-closed by default).
+    return { decision: 'deny', reason: 'allowlist-unset-bad-requirecaller-state' };
+  }
   if (al.malformed || !al.set) return { decision: 'deny', reason: 'allowlist-malformed' };
   const uid = parseUid(opts.sudoUid);
   if (uid === null) return { decision: 'deny', reason: 'sudo-uid-absent-or-malformed' };
@@ -80,4 +125,4 @@ function authorizeCaller(opts = {}) {
   return { decision: 'allow', reason: 'authorized' };
 }
 
-module.exports = { authorizeCaller, parseAllowlist, parseUid, UID_MAX };
+module.exports = { authorizeCaller, resolveRequireCaller, parseAllowlist, parseUid, UID_MAX };

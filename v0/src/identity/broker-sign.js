@@ -32,6 +32,7 @@
 
 const { runBroker, makeFail } = require('./broker-core');
 const { authorizeRequest, resolveRequireFrame } = require('./request-auth');
+const { resolveRequireCaller } = require('./caller-auth');
 const { assessEnableFlag } = require('../lib/arm-flags');
 
 async function main() {
@@ -46,11 +47,20 @@ async function main() {
   assessEnableFlag('PACT_BROKER_REQUIRE_FRAME', requireFrameRaw);
   const requireFrame = resolveRequireFrame({ requireFrameRaw, brokerPersonaDid });
 
+  // F2 (#78): the WHO-gate arm flag -- read ONCE here (single-arming-source). resolveRequireCaller returns the
+  // tri-state (true / false / null=AUTO); assessEnableFlag surfaces a typo ('ture'/'false') as a misconfig alert.
+  // The broker-side flag is the PRIMARY, host-untamperable deploy signal; SUDO_UID-AUTO (inside authorizeCaller)
+  // is an additional per-request safety net. A non-sudo deploy MUST set PACT_BROKER_REQUIRE_CALLER=1.
+  const requireCallerRaw = process.env.PACT_BROKER_REQUIRE_CALLER;
+  assessEnableFlag('PACT_BROKER_REQUIRE_CALLER', requireCallerRaw);
+  const requireCaller = resolveRequireCaller(requireCallerRaw);
+
   await runBroker({
     progName: 'broker-sign',
     keyFileEnv: 'PACT_BROKER_KEY_FILE',
     allowlistEnv: 'PACT_BROKER_ALLOWED_UIDS',
     requireMode: requireFrame,
+    requireCaller, // F2/#78: an unconfigured allowlist on a DEPLOYED frame broker fails closed (not open)
     // the frame WHAT-gate: map the generic requireMode -> requireFrame and thread the (already-read) persona.
     authorize: ({ requireMode, claimedRecordId, presentedBodyRaw }) =>
       authorizeRequest({ requireFrame: requireMode, claimedRecordId, presentedBodyRaw, brokerPersonaDid }),
