@@ -75,6 +75,22 @@ test('VALIDATE HIGH: a >MAX_CANONICAL_NODES wide all-ABSENT-key object STILL tri
   assert.throws(() => canonicalJsonSerialize(wide), /node budget|max/i);
 });
 
+// ---- getter-read bound: a wide all-absent getter object reads at most ~budget getters, not all N ----
+test('getter-read bound: a wide all-absent getter object reads <= ~MAX_CANONICAL_NODES getters, not all N', () => {
+  // The object branch reads each value in a SINGLE sorted pass, so a value's getter is invoked at most once and
+  // processing aborts at ~MAX_CANONICAL_NODES (10000) -- the getter READS are bounded, not just the final reject
+  // (the prior .map()-then-.filter() read every getter before it could abort).
+  let reads = 0;
+  const wide = {};
+  const N = 50000; // far past the 10000 budget
+  for (let i = 0; i < N; i += 1) {
+    // zero-pad so sort order matches insertion -> the pass hits budget on the first ~budget keys
+    Object.defineProperty(wide, 'k' + String(i).padStart(7, '0'), { get() { reads += 1; return undefined; }, enumerable: true });
+  }
+  assert.throws(() => canonicalJsonSerialize(wide), /node budget|max/i);
+  assert.ok(reads <= 10010, 'expected <= ~10000 getter reads, got ' + reads + ' (getter cost must be budget-bounded)');
+});
+
 // ---- VALIDATE MED: a SPARSE array hole is native `null`, not an invalid empty slot (fix's own array scope) ----
 test('VALIDATE MED: a SPARSE array hole serializes as null (matches native), not an empty slot', () => {
   const sparse = []; sparse[0] = 1; sparse[2] = 2; // index 1 is a real hole (no sparse literal -> eslint-clean)
