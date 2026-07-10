@@ -34,6 +34,7 @@
 
 const { runBroker, makeFail } = require('./broker-core');
 const { authorizeBindingRequest, resolveRequireBinding } = require('./binding-request-auth');
+const { resolveRequireCaller } = require('./caller-auth');
 const { assessEnableFlag } = require('../lib/arm-flags');
 
 async function main() {
@@ -48,12 +49,27 @@ async function main() {
   assessEnableFlag('PACT_ROOT_REQUIRE_BINDING', requireBindingRaw);
   const requireBinding = resolveRequireBinding({ requireBindingRaw, rootController });
 
+  // F2-sibling (#106): the WHO-gate arm flag -- read ONCE here (single-arming-source). resolveRequireCaller returns
+  // the tri-state (true / false=strict-'0' opt-out / null=AUTO); assessEnableFlag surfaces a typo ('ture') as a
+  // misconfig alert. The broker-side flag is the PRIMARY, host-untamperable deploy signal; SUDO_UID-AUTO (inside
+  // authorizeCaller) is a per-request safety net. This REVERSES #78's WHAT-gate-only carve-out: the WHO gate is the
+  // SOLE caller-scoping control over the #273 mint-under-controller residual, so a deployed K_root broker fails CLOSED.
+  // DEPLOY-SIGNAL ASYMMETRY (VERIFY board): the WHAT gate keys deploy on controllerPresent, but the WHO gate keys on
+  // SUDO_UID + this flag ONLY -- so a NON-SUDO, controller-set, no-flag root deploy has the WHAT gate ON but the WHO
+  // gate OFF (the SUDO_UID marker never fires). A non-sudo K_root deploy MUST set PACT_ROOT_REQUIRE_CALLER=1 (the
+  // load-bearing mitigation; the deploy doc's MANDATORY WHO start-guard enforces it). PACT_ROOT_REQUIRE_CALLER=0 is
+  // the explicit WHAT-gate-only opt-out (disables WHO for ALL sudo-permitted callers on K_root -- a named residual).
+  const requireCallerRaw = process.env.PACT_ROOT_REQUIRE_CALLER;
+  assessEnableFlag('PACT_ROOT_REQUIRE_CALLER', requireCallerRaw);
+  const requireCaller = resolveRequireCaller(requireCallerRaw);
+
   await runBroker({
     progName: 'sigma-root-broker',
     keyFileEnv: 'PACT_ROOT_KEY_FILE',
     allowlistEnv: 'PACT_ROOT_ALLOWED_UIDS',
     distinctFromKeyFileEnv: 'PACT_BROKER_KEY_FILE', // HIGH-1: K_root MUST be a DISTINCT key from K_broker
     requireMode: requireBinding,
+    requireCaller, // F2-sibling/#106: an unconfigured allowlist on a DEPLOYED sigma-root broker fails closed (not open)
     // the binding WHAT-gate: map the generic requireMode -> requireBinding + thread the (already-read) controller.
     authorize: ({ requireMode, claimedRecordId, presentedBodyRaw }) =>
       authorizeBindingRequest({ requireBinding: requireMode, claimedRecordId, presentedBodyRaw, brokerController: rootController }),

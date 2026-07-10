@@ -90,6 +90,16 @@ Install a root-owned, not-host-writable wrapper that execs `node .../sigma-root-
   do not retype it.
 - `PACT_ROOT_ALLOWED_UIDS` — the root broker's OWN WHO-allowlist, **NARROWER than the frame broker's** (never reuse
   `PACT_BROKER_ALLOWED_UIDS`; a K_root sig is strictly higher-value than a K_broker sig — W1b F2).
+- `PACT_ROOT_REQUIRE_CALLER=1` — **set it EXPLICITLY in the wrapper (F2-sibling/#106).** The WHO gate (`authorizeCaller`)
+  keys deploy-detection on `SUDO_UID` **plus** this flag; a NON-SUDO root deploy (systemd/setuid/direct-root) injects no
+  `SUDO_UID`, so this flag is the ONLY thing that arms the WHO gate there. Without it, an unset `PACT_ROOT_ALLOWED_UIDS`
+  on a non-sudo box leaves the WHO gate OPEN — every uid that can reach the wrapper obtains a `K_root` signature (bounded
+  only by the WHAT gate's controller-bind; per the #273 residual the WHO gate is the SOLE caller-scoping control over
+  who can mint "K_root authorized MY key as persona P" within the controller). `=1` forces the WHO gate ON
+  unconditionally; a typo fails CLOSED (`resolveRequireCaller`, `caller-auth.js`). **`PACT_ROOT_REQUIRE_CALLER=0` is the
+  explicit WHAT-gate-only opt-out** — it disables the WHO gate for ALL sudo-permitted callers on `K_root` (a louder
+  hazard than the frame's `=0`, which only affects `K_broker`); use it only if you deliberately trust the WHAT gate
+  alone, and note it in the deploy record.
 - `PACT_ROOT_REQUIRE_BINDING=1` — **set it EXPLICITLY in the wrapper.** Do NOT rely on the code default-ON: making the
   blind-oracle protection depend on code-default behavior instead of the wrapper CONTRACT is fragile (a future change to
   the default would silently reopen the oracle). An explicit `=1` makes require-binding ON **unconditionally**; the
@@ -110,6 +120,26 @@ lines ABOVE the exec:
 case "$(printf %s "$PACT_ROOT_CONTROLLER" | tr -d ' \t')" in '') echo 'refusing: PACT_ROOT_CONTROLLER empty/whitespace -- require-binding would be the BLIND K_root ORACLE' >&2; exit 78 ;; esac
 case "$(printf %s "$PACT_ROOT_REQUIRE_BINDING" | tr -d ' \t')" in 0) echo 'refusing: PACT_ROOT_REQUIRE_BINDING=0 disables the K_root bind gate (the BLIND ORACLE)' >&2; exit 78 ;; esac
 ```
+
+**MANDATORY WHO-gate startup-guard (F2-sibling/#106 — the caller oracle).** The WHO gate is OFF when
+`PACT_ROOT_ALLOWED_UIDS` is unset AND the deploy is not detected — which on a **non-sudo** box (no `SUDO_UID`) means
+`PACT_ROOT_REQUIRE_CALLER` is also unset (the `SUDO_UID` auto-marker cannot fire there). Unlike the frame broker's
+"Recommended" belt-and-suspenders guard (`cross-uid-broker.md:73`), for the trust root this guard is **MANDATORY**: the
+WHO gate must have at least one of the allowlist or the flag, or the broker refuses to start. The guard TRIMS
+whitespace (a `" "` value reads as UNSET, matching `resolveRequireCaller`'s `isDeploySignalSet` — which resolves
+`" "` to AUTO, NOT armed), so a whitespace-only flag cannot give false "armed" assurance and start a blind oracle on a
+non-sudo box. Put this line above the exec too (an explicit `PACT_ROOT_REQUIRE_CALLER=0` satisfies it — a conscious
+WHAT-gate-only choice, not the unconfigured default):
+
+```sh
+[ -n "$(printf %s "$PACT_ROOT_ALLOWED_UIDS" | tr -d ' \t')" ] || [ -n "$(printf %s "$PACT_ROOT_REQUIRE_CALLER" | tr -d ' \t')" ] || { echo 'refusing: WHO gate entirely unconfigured -- set PACT_ROOT_ALLOWED_UIDS or PACT_ROOT_REQUIRE_CALLER (whitespace-only reads as unset, matching resolveRequireCaller; a non-sudo K_root deploy is otherwise a blind caller oracle)' >&2; exit 78; }
+```
+
+> **Migration (existing WHAT-gate-only deploy).** F2-sibling/#106 reverses #78's WHAT-gate-only carve-out: a sigma-root
+> wrapper that today relies on the WHAT gate alone (no `PACT_ROOT_ALLOWED_UIDS`) now fails the WHO gate CLOSED on a
+> **sudo** box (any cross-uid caller is denied). Before deploying this version, add `PACT_ROOT_ALLOWED_UIDS` (the
+> allowlisted callers) or set `PACT_ROOT_REQUIRE_CALLER=0` (explicit WHAT-gate-only). All SHADOW today — nothing is
+> armed — so no live box breaks; this is a pre-arming hardening.
 
 ## 4. Sudoers — the env-pin (defer to `cross-uid-broker.md` §4 + §8, with a root-broker audit)
 
@@ -169,8 +199,8 @@ Run these as the **host uid** (the uid that will call the broker), on the deploy
    ```
 3. **The deny controls (OBSERVABLE, not a reason grep).** The broker surfaces NO internal reason — a caller-auth
    (WHO) deny prints `caller not authorized`, a request-auth (WHAT) deny prints `request not authorized`, **both with
-   empty stdout + exit 1** (the deny paths `broker-core.js:96,107` route through `makeFail`, `:56-60`, which writes
-   stderr + `exit(1)` and NEVER touches stdout — stdout carries the sig ONLY on success, `:172`). So each control
+   empty stdout + exit 1** (the deny paths `broker-core.js:101,112` route through `makeFail`, `:56-60`, which writes
+   stderr + `exit(1)` and NEVER touches stdout — stdout carries the sig ONLY on success, `:177`). So each control
    asserts **empty stdout / exit 1** (plus the
    applicable fixed message), and you construct the input so the RIGHT gate is the denier:
    - **Foreign uid** — a uid not in `PACT_ROOT_ALLOWED_UIDS` → refuse, empty stdout, exit 1. Flip the allowlist to a

@@ -82,10 +82,11 @@ function resolveRequireCaller(flagRaw) {
 /**
  * Decide whether the caller may request a signature.
  * @param {{sudoUid:string|undefined, allowlistRaw:string|undefined, requireCaller?:boolean|null}} opts
- *   requireCaller (F2/#78) governs the UNSET-allowlist default -- resolved by resolveRequireCaller in the FRAME
- *   entrypoint and threaded here. `undefined` (a caller that does NOT thread it -- the sigma-root broker, whose
- *   mandatory-default-ON WHAT gate compensates) keeps the legacy `disabled`; only the FRAME's explicit `null`
- *   reaches the SUDO_UID AUTO marker (`undefined !== null`, the shared-gate contract).
+ *   requireCaller (F2/#78, #106) governs the UNSET-allowlist default -- resolved by resolveRequireCaller in each
+ *   entrypoint and threaded here. BOTH brokers thread it now (frame #78, sigma-root #106): true/false/null. The
+ *   `undefined` branch is a DEFENSIVE DEFAULT for an un-threaded caller (no production caller reaches it post-#106):
+ *   it keeps the legacy `disabled`, while a threaded `null` (AUTO) reaches the SUDO_UID marker (`undefined !== null`,
+ *   the shared-gate contract -- a future un-threaded entrypoint must not silently inherit the AUTO deny by accident).
  * @returns {{decision:'allow'|'deny'|'disabled', reason:string}}
  *   'disabled' -> proceed (opt-in OFF; broker-sign emits a LOUD notice). R2-WHO OPEN.
  *   'deny'     -> fail-closed: malformed allowlist, absent/malformed SUDO_UID, caller not in the allowlist, OR an
@@ -104,7 +105,7 @@ function authorizeCaller(opts = {}) {
     const rc = opts.requireCaller;
     if (rc === true) return { decision: 'deny', reason: 'allowlist-unset-but-required' };       // flag forced ON
     if (rc === false) return { decision: 'disabled', reason: 'allowlist-unset-opted-out' };     // strict '0' opt-out
-    if (rc === undefined) return { decision: 'disabled', reason: 'allowlist-unset' };           // sigma-root legacy (not threaded)
+    if (rc === undefined) return { decision: 'disabled', reason: 'allowlist-unset' };           // un-threaded caller default (post-#106 both brokers thread; no production caller)
     if (rc === null) {
       // FRAME AUTO: a PRESENT SUDO_UID (ANY form -- a correct sudo always sets it well-formed, so an
       // empty/whitespace/garbage value is a tamper/anomaly, NOT dev) means a cross-uid caller -> fail closed.

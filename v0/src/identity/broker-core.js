@@ -67,8 +67,9 @@ function makeFail(progName) {
  * @param {{progName:string, keyFileEnv:string, allowlistEnv:string, requireMode:boolean,
  *          requireCaller?:boolean|null, authorize:function, disabledNotice:{who:string, what:string},
  *          distinctFromKeyFileEnv?:string}} opts
- *   requireCaller (optional, F2/#78) -- the RESOLVED WHO-gate tri-state threaded from the entrypoint (frame:
- *   true/false/null; sigma-root: undefined -> legacy). Governs the unset-allowlist default in authorizeCaller.
+ *   requireCaller (optional, F2/#78 + #106) -- the RESOLVED WHO-gate tri-state (true/false/null) threaded from
+ *   the entrypoint. BOTH brokers thread it (frame #78, sigma-root #106); `undefined` is only the un-threaded
+ *   defensive default. Governs the unset-allowlist default in authorizeCaller.
  *   distinctFromKeyFileEnv (optional) -- the name of ANOTHER broker's key-file env this broker's key MUST
  *   NOT alias. The sigma-root broker (plans/42 W1b) passes 'PACT_BROKER_KEY_FILE': if K_root and K_broker
  *   resolve to the SAME inode, a single key signs both sigma-root bindings AND frame record_ids, and (since
@@ -94,8 +95,8 @@ async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, requ
   // REAL uid; LIVE-PROBED: sudo overwrites a host-forged value under env_reset,!setenv). SUDO_USER is
   // root-spoofable (man sudoers) -- NEVER authorize on SUDO_USER. The allowlist is set BROKER-SIDE in the
   // root-owned wrapper. Reject is a FIXED no-echo message (an echo is an allowlist-probing oracle).
-  // requireCaller (F2/#78) is the RESOLVED tri-state from the entrypoint (frame: true/false/null; sigma-root:
-  // undefined -> legacy). Threaded so an unconfigured allowlist on a DEPLOYED frame broker fails CLOSED.
+  // requireCaller (F2/#78 + #106) is the RESOLVED tri-state from the entrypoint (both brokers thread it:
+  // true/false/null). Threaded so an unconfigured allowlist on a DEPLOYED broker (frame OR sigma-root) fails CLOSED.
   const auth = authorizeCaller({ sudoUid: process.env.SUDO_UID, allowlistRaw: process.env[allowlistEnv], requireCaller });
   if (auth.decision === 'deny') fail('caller not authorized');
   if (auth.decision === 'disabled') {

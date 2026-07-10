@@ -51,12 +51,13 @@ function writeKey(dir, pem, mode, name) {
 
 // spawn sigma-root-broker.js directly with a presented binding body on stdin (the require-binding channel).
 // `input` always provided so stdin is a CLOSED pipe (an unprovided stdin would inherit + block on the deadline).
-function runBinding({ rootKeyFile, controller, allowedUids, requireBinding, brokerKeyFile, recordId, body, sudoUid }) {
+function runBinding({ rootKeyFile, controller, allowedUids, requireBinding, requireCaller, brokerKeyFile, recordId, body, sudoUid }) {
   const env = {};
   if (rootKeyFile !== undefined) env.PACT_ROOT_KEY_FILE = rootKeyFile;
   if (controller !== undefined) env.PACT_ROOT_CONTROLLER = controller;
   if (allowedUids !== undefined) env.PACT_ROOT_ALLOWED_UIDS = allowedUids;
   if (requireBinding !== undefined) env.PACT_ROOT_REQUIRE_BINDING = requireBinding;
+  if (requireCaller !== undefined) env.PACT_ROOT_REQUIRE_CALLER = requireCaller; // F2-sibling/#106: the WHO-gate arm flag
   if (brokerKeyFile !== undefined) env.PACT_BROKER_KEY_FILE = brokerKeyFile;
   if (sudoUid !== undefined) env.SUDO_UID = sudoUid;
   return spawnSync(process.execPath, [BROKER, recordId], { env, input: body === undefined ? '' : body, encoding: 'utf8' });
@@ -84,17 +85,80 @@ test('direct spawn: a valid binding on stdin (require-binding via controller) si
   assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'sig over the computed binding id verifies');
 });
 
-test('F2/#78 shared-gate regression: sigma-root WHO gate is BYTE-UNCHANGED -- a cross-uid SUDO_UID + UNSET PACT_ROOT_ALLOWED_UIDS still SIGNS (legacy disabled), never denies', () => {
-  // the frame broker F2 fix threads requireCaller ONLY from broker-sign.js; the sigma-root entrypoint threads
-  // nothing -> undefined -> authorizeCaller keeps the legacy `disabled`. A cross-uid-shaped SUDO_UID must NOT trip
-  // the frame AUTO deny here (that would brick a WHAT-gate-only root deploy); the WHAT gate (require-binding) still
-  // protects it. Guards a future refactor from conflating `undefined` (sigma-root) with the frame's `null` (auto).
+// ====================== F2-sibling/#106: the sigma-root WHO gate fails CLOSED on a deployed box ======================
+// REPLACES the #78 byte-unchanged regression test. The sigma-root entrypoint now threads
+// requireCaller = resolveRequireCaller(PACT_ROOT_REQUIRE_CALLER) into the SHARED authorizeCaller, so a deployed
+// K_root broker with an unset PACT_ROOT_ALLOWED_UIDS fails CLOSED -- the faithful mirror of the frame broker F2 fix
+// (#78/#107). The WHO gate is the SOLE caller-scoping control over the #273 mint-under-controller residual (any uid
+// that reaches the broker can mint "K_root authorized MY key as persona P" within the controller) -- the WHAT gate
+// does NOT compensate on the WHO axis (VERIFY board). #78's WHAT-gate-only carve-out is deliberately reversed;
+// an operator who wants WHAT-gate-only sets PACT_ROOT_REQUIRE_CALLER=0 (case d).
+
+test('#106 (a) DEPLOYED -> DENY: cross-uid SUDO_UID + UNSET PACT_ROOT_ALLOWED_UIDS (no flag) -> WHO gate denies (status 1, no sig, "caller not authorized")', () => {
+  // AUTO (flag unset) -> resolveRequireCaller(undefined)=null -> SUDO_UID present -> deny 'allowlist-unset-but-deployed'.
+  // Positively assert the WHO reject message so this is provably gate (0), NOT an incidental WHAT/key-vet deny
+  // (VERIFY non-vacuity fold). Controller SET so the ONLY change from case (b) is the presence of SUDO_UID.
   const dir = freshDir();
   const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
   const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), sudoUid: '501' });
+  assert.equal(r.status, 1, 'a deployed sigma-root broker with an unset allowlist fails closed');
+  assert.equal(r.stdout.trim(), '', 'no sig on the WHO deny');
+  assert.match(r.stderr, /caller not authorized/, 'the deny is specifically the WHO gate (gate 0), not WHAT/key-vet');
+  assert.doesNotMatch(r.stderr, /caller-auth DISABLED/, 'NOT the legacy disabled path -- the WHO gate is armed');
+});
+
+test('#106 (b) SAME-UID DEV preserved: NO SUDO_UID + UNSET allowlist -> disabled (still signs, LOUD notice)', () => {
+  // the differential for (a): a byte-identical request with SUDO_UID ABSENT -> AUTO -> disabled -> signs. Proves the
+  // (a) deny is the SUDO_UID (cross-uid) axis, not a blanket refusal that would brick same-uid dev.
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING) });
   assert.equal(r.status, 0, r.stderr);
-  assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'signs under a cross-uid SUDO_UID (NOT bricked by the frame F2 change)');
-  assert.match(r.stderr, /caller-auth DISABLED/, 'the sigma-root stays on the legacy R2-WHO disabled path');
+  assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'same-uid dev still signs');
+  assert.match(r.stderr, /caller-auth DISABLED/, 'the LOUD R2-WHO disabled notice (NS-9)');
+});
+
+test('#106 (c) FLAG-FORCED even without sudo: PACT_ROOT_REQUIRE_CALLER=1 + UNSET allowlist + no SUDO_UID -> DENY', () => {
+  // the broker-side flag is the PRIMARY, host-untamperable deploy anchor (a non-sudo deploy sets it): strict '1'
+  // forces require even when the SUDO_UID marker is absent -> fail closed (the non-sudo blind-oracle residual).
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), requireCaller: '1' });
+  assert.equal(r.status, 1, 'the flag forces the WHO gate on even with no SUDO_UID');
+  assert.equal(r.stdout.trim(), '', 'no sig');
+  assert.match(r.stderr, /caller not authorized/);
+});
+
+test('#106 (d) EXPLICIT OPT-OUT: PACT_ROOT_REQUIRE_CALLER=0 + cross-uid SUDO_UID + UNSET allowlist -> disabled (WHAT-gate-only deploy still signs)', () => {
+  // strict '0' is the ONLY way to opt out (asymmetric-flag rule). A VALID binding body + controller so require-binding
+  // (ON via controllerPresent) AUTHORIZES on the WHAT gate -- else a WHAT refuse would make the "signs" a false
+  // artifact (VERIFY fold). Verify the sig under K_root to prove it actually signed.
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), sudoUid: '501', requireCaller: '0' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'the =0 opt-out signs under K_root');
+  assert.match(r.stderr, /caller-auth DISABLED/, 'the opt-out still emits the LOUD disabled notice (NS-9)');
+});
+
+test('#106 (e) TYPO fails CLOSED: PACT_ROOT_REQUIRE_CALLER="ture" + UNSET allowlist + no sudo -> DENY (intent-to-arm)', () => {
+  // isDeploySignalSet: a present-but-non-strict token is intent-to-arm -> require ON -> deny; NEVER a silent
+  // fall-through to the blind K_root oracle (security.md asymmetric-flag rule).
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), requireCaller: 'ture' });
+  assert.equal(r.status, 1, 'a typo is intent-to-arm -> fail closed');
+  assert.equal(r.stdout.trim(), '', 'no sig');
+  assert.match(r.stderr, /caller not authorized/);
+});
+
+test('#106 (f) allowlist SET + member: PACT_ROOT_ALLOWED_UIDS includes SUDO_UID -> ALLOW (signs, no disabled notice)', () => {
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), allowedUids: '501,600', sudoUid: '501' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'an allowlisted cross-uid caller signs');
+  assert.doesNotMatch(r.stderr, /caller-auth DISABLED/, 'no disabled notice when the allowlist IS set + the caller is a member');
 });
 
 // ====================== the WHAT-gate refuses (frame body / blind argv / wrong controller) ======================
@@ -227,6 +291,11 @@ test('T1 forward-guard: sigma-root-broker.js reads PACT_ROOT_* inputs, wires the
   assert.doesNotMatch(src, /keyFileEnv:\s*'PACT_BROKER_KEY_FILE'/, 'never signs with the FRAME broker key');
   // the same-inode guard IS wired (references PACT_BROKER_KEY_FILE ONLY as distinctFrom, not as its key)
   assert.match(src, /distinctFromKeyFileEnv:\s*'PACT_BROKER_KEY_FILE'/, 'the same-inode guard is wired');
+  // F2-sibling/#106: the WHO gate is threaded (NOT silently un-armed) -- reads its OWN root WHO-arm env + resolves it.
+  assert.match(src, /process\.env\.PACT_ROOT_REQUIRE_CALLER/, 'reads its OWN root WHO-arm env');
+  assert.match(src, /resolveRequireCaller/, 'resolves + threads the WHO-gate tri-state (not silently un-armed)');
+  assert.match(src, /\brequireCaller\b/, 'threads requireCaller into runBroker');
+  assert.doesNotMatch(src, /PACT_BROKER_REQUIRE_CALLER/, 'never reads the FRAME WHO-arm env');
   // never reads the frame broker's persona / allowlist
   assert.doesNotMatch(src, /PACT_BROKER_PERSONA_DID/, 'never reads the frame persona');
   assert.doesNotMatch(src, /PACT_BROKER_ALLOWED_UIDS/, 'never reads the frame allowlist');
@@ -234,7 +303,7 @@ test('T1 forward-guard: sigma-root-broker.js reads PACT_ROOT_* inputs, wires the
 
 test('single-arming-source: sigma-root-broker.js reads each arm env EXACTLY once (shape tripwire)', () => {
   const src = fs.readFileSync(BROKER, 'utf8');
-  for (const v of ['PACT_ROOT_CONTROLLER', 'PACT_ROOT_REQUIRE_BINDING']) {
+  for (const v of ['PACT_ROOT_CONTROLLER', 'PACT_ROOT_REQUIRE_BINDING', 'PACT_ROOT_REQUIRE_CALLER']) {
     const n = (src.match(new RegExp('process\\.env\\.' + v, 'g')) || []).length;
     assert.equal(n, 1, v + ' must be read from process.env exactly once (found ' + n + ')');
   }
