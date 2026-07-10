@@ -66,7 +66,11 @@ sudo tee /usr/local/bin/pact-broker-sign >/dev/null <<'EOF'
 #!/bin/sh
 export PACT_BROKER_KEY_FILE=/etc/pact/broker.key
 export PACT_BROKER_ALLOWED_UIDS=501          # R2-WHO caller-auth: host uid(s) allowed to request a signature (comma-separated)
+export PACT_BROKER_REQUIRE_CALLER=1          # F2/#78: the authoritative deploy signal -- a dropped allowlist then fails CLOSED, not open
 export PACT_BROKER_PERSONA_DID=did:key:zBroker  # R2-WHAT per-request auth: the persona this broker keys (enables require-frame by default)
+# F2/#78 belt-and-suspenders: refuse to start if the WHO gate is ENTIRELY unconfigured (neither the allowlist nor
+# the require-caller flag) -- closes the non-sudo-deploy residual where the SUDO_UID auto-signal never fires.
+[ -n "$PACT_BROKER_ALLOWED_UIDS" ] || [ -n "$PACT_BROKER_REQUIRE_CALLER" ] || { echo 'pact-broker-sign: refusing to start -- set PACT_BROKER_ALLOWED_UIDS or PACT_BROKER_REQUIRE_CALLER' >&2; exit 1; }
 exec /usr/bin/node /opt/pact/v0/src/identity/broker-sign.js "$@"
 EOF
 sudo chown root:root /usr/local/bin/pact-broker-sign
@@ -77,8 +81,20 @@ sudo chmod 0755 /usr/local/bin/pact-broker-sign          # NOT group/world-writa
 be a **hardcoded literal** here in the root-owned wrapper (the host can't tamper it; sudo `env_reset` also strips
 any host-supplied value). Its VALUE's provenance — not just the wrapper file's integrity — is the trust anchor
 (integrity ≠ provenance): never interpolate it from a host-influenced source (a `/tmp` file, a host env var).
-**OMIT the line to leave caller-auth OFF** (opt-in; the broker then signs for any sudoers-permitted caller and
-prints a loud `caller-auth DISABLED` notice). Honest scope: this is **coarse uid-level caller-auth (R2-WHO)**.
+On a **DEPLOYED (cross-uid) broker a DROPPED allowlist now fails CLOSED** (F2/#78): with
+`PACT_BROKER_REQUIRE_CALLER=1` set (below) — or, as an automatic safety net, whenever `SUDO_UID` is present (a
+sudo/cross-uid invocation) — an unconfigured allowlist REFUSES to sign rather than becoming a blind signing
+oracle. A same-uid **direct** dev invocation (no `SUDO_UID`) still runs with caller-auth OFF and a loud
+`caller-auth DISABLED` notice. Honest scope: this is **coarse uid-level caller-auth (R2-WHO)**.
+
+`PACT_BROKER_REQUIRE_CALLER=1` is the **authoritative deploy signal** for the WHO gate — the faithful analog of
+the sigma-root broker's broker-side mandatory default. Set it in the (host-untamperable) wrapper so a
+dropped/misconfigured allowlist fails CLOSED **regardless of invocation path**. It is **REQUIRED for a non-sudo
+deployment** (a setuid wrapper, a systemd service uid, an explicit privilege drop): those inject no `SUDO_UID`, so
+the automatic safety net never fires and only this flag closes the oracle. Asymmetric parse (like
+`PACT_BROKER_REQUIRE_FRAME`): **only a strict `0` disables it** (a typo like `ture` fails CLOSED = ON);
+`false`/`no`/`off` fall to the `SUDO_UID` auto-signal, NOT to OFF. **AUTO is a safety net, not a guarantee** — its
+integrity rests on the `env_reset,!setenv` sudoers policy pinned in §4; a high-assurance box MUST set the flag.
 
 `PACT_BROKER_PERSONA_DID` is the persona this broker keys, and setting it **enables R2-WHAT require-frame mode
 by DEFAULT** (per-request auth, see §9): the broker then signs only a `record_id` it can RECOMPUTE from a
@@ -201,8 +217,27 @@ sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX" | head -c 20; echo
 > `plans/16` (the R2 caller-auth custody dogfood). Prefer it when world-anchoring the gate.
 
 The deployment is only caller-auth-enabled once the allowlist is set to your uid(s) AND the flip test refuses a
-non-member. Omit the allowlist → caller-auth OFF (the broker signs for any sudoers-permitted caller + prints a
-loud `caller-auth DISABLED` notice on stderr; R2-WHO open).
+non-member. **F2/#78:** with `PACT_BROKER_REQUIRE_CALLER=1` set (or, as an auto safety net, under any sudo
+invocation), OMITTING the allowlist now **fails CLOSED** — the broker REFUSES rather than signing for any
+sudoers-permitted caller. Only a same-uid *direct* (no-`SUDO_UID`) dev call, or an explicit
+`PACT_BROKER_REQUIRE_CALLER=0`, keeps R2-WHO open (with the loud `caller-auth DISABLED` notice). Prove the
+fail-closed default with the PRIMARY anchor (the broker-side flag, which needs no `SUDO_UID` at all):
+
+```sh
+# (c) F2 fail-closed via the flag: DROP the allowlist line but KEEP `export PACT_BROKER_REQUIRE_CALLER=1` (so the
+#     start-guard still lets the wrapper run) -> any caller must REFUSE, independent of SUDO_UID:
+#   sudo sed -i '' '/PACT_BROKER_ALLOWED_UIDS=/d' /usr/local/bin/pact-broker-sign
+#   sudo -n -u pact-broker /usr/local/bin/pact-broker-sign "$HEX"   # -> "caller not authorized", empty, exit 1
+#   (then RESTORE the `export PACT_BROKER_ALLOWED_UIDS=501` line to the wrapper)
+```
+
+> **The `SUDO_UID` auto-signal is a SAFETY NET, not the guarantee** — its integrity is exactly the property §4
+> already establishes: (1) sudo sets `SUDO_UID` from the real ruid under `env_reset,!setenv` (the §4 forgery probe:
+> `SUDO_UID=999999 sudo … printenv SUDO_UID` → `501`), so a host cannot forge OR blank it *before* sudo; and (2) the
+> `Defaults!<wrapper>` sudoers restriction (§4) means the host may run ONLY the wrapper — it cannot inject
+> `env -u SUDO_UID <wrapper>` to strip the variable *after* sudo. Both conditions live in the sudoers this code
+> cannot verify at runtime, so a **high-assurance box arms `PACT_BROKER_REQUIRE_CALLER=1`** (test (c)) and does not
+> lean on AUTO. A **non-sudo** deploy (setuid/systemd) has no `SUDO_UID` at all and MUST arm the flag.
 
 ## 9. Enable + verify per-request auth (R2-WHAT)
 
@@ -254,7 +289,9 @@ This makes the per-request-auth posture a deployment invariant, not a thing the 
 
 - **R2-WHO — oracle-abuse, caller axis.** With `PACT_BROKER_ALLOWED_UIDS` set, the broker signs only for an
   allowlisted *caller uid* — coarse caller-auth, policy held by the key-holder (not only by `sudoers`). Allowlist
-  OMITTED → R2-WHO open. SHADOW.
+  OMITTED → on a **deployed** broker (`PACT_BROKER_REQUIRE_CALLER=1`, or `SUDO_UID` present) it now **fails CLOSED**
+  (F2/#78); only a same-uid *direct* dev call (no `SUDO_UID`) leaves R2-WHO open, with a loud `caller-auth DISABLED`
+  notice. A non-sudo deploy MUST arm the flag (`SUDO_UID`-auto does not fire there). SHADOW.
 - **R2-WHAT — per-request auth NARROWS, does not close.** With `PACT_BROKER_PERSONA_DID` set (require-frame on),
   the broker signs only a `record_id` it can recompute from a presented P-frame — no longer a blind oracle for an
   arbitrary 64-hex. But the **entitled operator can still make P assert ANY payload** (payload-semantics ceiling),

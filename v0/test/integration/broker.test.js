@@ -440,7 +440,7 @@ test('P5-W1 single-arming-source: broker-sign.js reads each arm env var EXACTLY 
   // anchored to the full process.env.<NAME> token so prose mentions of the bare var name don't inflate
   // the count (the header comments name these vars without the prefix). An alias/destructure read would
   // evade this grep -- it is a cheap author-mistake tripwire; the live spawn legs are the real proof.
-  for (const v of ['PACT_BROKER_PERSONA_DID', 'PACT_BROKER_REQUIRE_FRAME']) {
+  for (const v of ['PACT_BROKER_PERSONA_DID', 'PACT_BROKER_REQUIRE_FRAME', 'PACT_BROKER_REQUIRE_CALLER']) {
     const n = (src.match(new RegExp('process\\.env\\.' + v, 'g')) || []).length;
     assert.equal(n, 1, v + ' must be read from process.env exactly once (found ' + n + ')');
   }

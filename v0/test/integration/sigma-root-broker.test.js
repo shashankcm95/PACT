@@ -51,13 +51,14 @@ function writeKey(dir, pem, mode, name) {
 
 // spawn sigma-root-broker.js directly with a presented binding body on stdin (the require-binding channel).
 // `input` always provided so stdin is a CLOSED pipe (an unprovided stdin would inherit + block on the deadline).
-function runBinding({ rootKeyFile, controller, allowedUids, requireBinding, brokerKeyFile, recordId, body }) {
+function runBinding({ rootKeyFile, controller, allowedUids, requireBinding, brokerKeyFile, recordId, body, sudoUid }) {
   const env = {};
   if (rootKeyFile !== undefined) env.PACT_ROOT_KEY_FILE = rootKeyFile;
   if (controller !== undefined) env.PACT_ROOT_CONTROLLER = controller;
   if (allowedUids !== undefined) env.PACT_ROOT_ALLOWED_UIDS = allowedUids;
   if (requireBinding !== undefined) env.PACT_ROOT_REQUIRE_BINDING = requireBinding;
   if (brokerKeyFile !== undefined) env.PACT_BROKER_KEY_FILE = brokerKeyFile;
+  if (sudoUid !== undefined) env.SUDO_UID = sudoUid;
   return spawnSync(process.execPath, [BROKER, recordId], { env, input: body === undefined ? '' : body, encoding: 'utf8' });
 }
 
@@ -81,6 +82,19 @@ test('direct spawn: a valid binding on stdin (require-binding via controller) si
   const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING) });
   assert.equal(r.status, 0, r.stderr);
   assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'sig over the computed binding id verifies');
+});
+
+test('F2/#78 shared-gate regression: sigma-root WHO gate is BYTE-UNCHANGED -- a cross-uid SUDO_UID + UNSET PACT_ROOT_ALLOWED_UIDS still SIGNS (legacy disabled), never denies', () => {
+  // the frame broker F2 fix threads requireCaller ONLY from broker-sign.js; the sigma-root entrypoint threads
+  // nothing -> undefined -> authorizeCaller keeps the legacy `disabled`. A cross-uid-shaped SUDO_UID must NOT trip
+  // the frame AUTO deny here (that would brick a WHAT-gate-only root deploy); the WHAT gate (require-binding) still
+  // protects it. Guards a future refactor from conflating `undefined` (sigma-root) with the frame's `null` (auto).
+  const dir = freshDir();
+  const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
+  const r = runBinding({ rootKeyFile, controller: CONTROLLER, recordId: BINDING_ID, body: JSON.stringify(BINDING), sudoUid: '501' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: r.stdout.trim(), rootPublicKeyPem: ROOT.publicKeyPem }), 'signs under a cross-uid SUDO_UID (NOT bricked by the frame F2 change)');
+  assert.match(r.stderr, /caller-auth DISABLED/, 'the sigma-root stays on the legacy R2-WHO disabled path');
 });
 
 // ====================== the WHAT-gate refuses (frame body / blind argv / wrong controller) ======================

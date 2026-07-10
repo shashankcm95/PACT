@@ -65,8 +65,10 @@ function makeFail(progName) {
  * -> swap-resistant key vet -> sign -> emit ONLY the sig. Behavior-identical to the pre-extraction
  * broker-sign.js main() when invoked with the frame params (the W1a behavioral-equivalence gate).
  * @param {{progName:string, keyFileEnv:string, allowlistEnv:string, requireMode:boolean,
- *          authorize:function, disabledNotice:{who:string, what:string},
+ *          requireCaller?:boolean|null, authorize:function, disabledNotice:{who:string, what:string},
  *          distinctFromKeyFileEnv?:string}} opts
+ *   requireCaller (optional, F2/#78) -- the RESOLVED WHO-gate tri-state threaded from the entrypoint (frame:
+ *   true/false/null; sigma-root: undefined -> legacy). Governs the unset-allowlist default in authorizeCaller.
  *   distinctFromKeyFileEnv (optional) -- the name of ANOTHER broker's key-file env this broker's key MUST
  *   NOT alias. The sigma-root broker (plans/42 W1b) passes 'PACT_BROKER_KEY_FILE': if K_root and K_broker
  *   resolve to the SAME inode, a single key signs both sigma-root bindings AND frame record_ids, and (since
@@ -75,7 +77,7 @@ function makeFail(progName) {
  *   (the frame broker passes nothing -> W1a behavior is byte-unchanged). Custody isolation is otherwise a
  *   process/uid/env property; this guard closes only the same-FILE mis-deploy.
  */
-async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, authorize, disabledNotice, distinctFromKeyFileEnv }) {
+async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, requireCaller, authorize, disabledNotice, distinctFromKeyFileEnv }) {
   const fail = makeFail(progName);
 
   // In require mode the caller presents the PREIMAGE body on stdin. DRAIN it FIRST -- before any gate that
@@ -92,7 +94,9 @@ async function runBroker({ progName, keyFileEnv, allowlistEnv, requireMode, auth
   // REAL uid; LIVE-PROBED: sudo overwrites a host-forged value under env_reset,!setenv). SUDO_USER is
   // root-spoofable (man sudoers) -- NEVER authorize on SUDO_USER. The allowlist is set BROKER-SIDE in the
   // root-owned wrapper. Reject is a FIXED no-echo message (an echo is an allowlist-probing oracle).
-  const auth = authorizeCaller({ sudoUid: process.env.SUDO_UID, allowlistRaw: process.env[allowlistEnv] });
+  // requireCaller (F2/#78) is the RESOLVED tri-state from the entrypoint (frame: true/false/null; sigma-root:
+  // undefined -> legacy). Threaded so an unconfigured allowlist on a DEPLOYED frame broker fails CLOSED.
+  const auth = authorizeCaller({ sudoUid: process.env.SUDO_UID, allowlistRaw: process.env[allowlistEnv], requireCaller });
   if (auth.decision === 'deny') fail('caller not authorized');
   if (auth.decision === 'disabled') {
     // opt-in OFF: an explicit, named R2-WHO-stays-open residual (NOT an accidental fall-through). LOUD (NS-9).
