@@ -4,7 +4,8 @@
 // The OUT-OF-BAND custody verifier: the operator runs this AS THE HOST UID on the deployed box to check
 // every custody condition the host uid can OBSERVE, and to surface the one it CANNOT (that the running
 // broker PROCESS is genuinely the other uid). It NEVER asserts custody-real (NS-9, the close→narrow reflex):
-// it reports `custodyMechanismVerified` + `requiresOutOfBandUidConfirmation`. Per NS-7, only the operator's
+// it reports `hostObservableChecksPassed` + `requiresOutOfBandUidConfirmation` (never a custody-verified /
+// mechanism-verified field — that over-claim was deliberately removed, see the return below). Per NS-7, only the operator's
 // out-of-band uid attestation (`id` / `ls -l`) HARDENS — the kernel's EACCES under a genuinely separate uid
 // is the world-anchored signal; this tool checks the necessary (not sufficient) condition.
 //
@@ -16,6 +17,7 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const { verifyRecordSig } = require('../lib/edge-attestation');
 const { computeRecordId } = require('../lib/record');
@@ -25,6 +27,37 @@ const { lookupPublicKey } = require('./registry');
 // EISDIR / ENOENT) is a custody-leg ERROR, never silently treated as "denied".
 const DENIAL_ERRNOS = new Set(['EACCES', 'EPERM']);
 
+// defensive cap on the ancestor walk; path.dirname strictly shortens the string each hop, so a real path
+// terminates at the root fixpoint long before this — the bound only guards against a pathological input.
+const MAX_ANCESTOR_WALK = 4096;
+
+// F3 (#79): a wrapper ancestor is TRUSTED only if it is a real directory, root-owned (uid 0), and NOT
+// group/world-writable — OR a root-owned SYMLINK (a root-owned symlink cannot be repointed in place, and its
+// own containing dir is checked separately as its own ancestor; a NON-root symlink is host-repointable ->
+// hijack). Mirrors registry-store.js assertTrustedDirStat's SHAPE, but ACCUMULATES a verdict (custody-verify
+// never throws) instead of throwing. Returns null when every ancestor is clean, else the FAIL detail for the
+// FIRST bad component (fail-closed: an unstattable / non-root-symlink / special-file / others-writable /
+// non-root component stops the walk). root-owned is an ALLOWLIST {0}, not a host-uid denylist, so a
+// THIRD-uid-owned dir -- hijackable by that uid via rename/unlink -- also fails (VERIFY H2). The caller walks
+// BOTH the RAW and the resolved chains to / (sudo re-resolves the RAW path at exec — VALIDATE HIGH), so this
+// also closes the grandparent-rename + symlinked-container bypasses.
+function assessWrapperChain(ancestors) {
+  if (!Array.isArray(ancestors) || ancestors.length === 0) {
+    return 'the wrapper ancestor chain is unavailable — cannot attest the directory chain to /';
+  }
+  for (const a of ancestors) {
+    if (!a.ok) return 'a wrapper ancestor dir (' + a.path + ') is not statable (' + (a.errno || 'unknown') + ') — cannot attest the chain to / (fail-closed; a locked-down root-owned ancestor also yields this — verify out-of-band)';
+    if (a.isSymlink) {
+      if (a.ownerUid !== 0) return 'a wrapper ancestor (' + a.path + ') is a non-root-owned symlink (uid ' + a.ownerUid + ') — the host can repoint it, so sudo re-resolves to an attacker target (privesc)';
+      continue; // a root-owned symlink cannot be repointed; the resolved chain covers the dirs it points into
+    }
+    if (!a.isDir) return 'a wrapper ancestor (' + a.path + ') is not a directory (special file) — hijackable';
+    if (a.worldOrGroupWritable) return 'a wrapper ancestor dir (' + a.path + ') is group/world-writable — the host can rename/replace a descendant (grandparent-rename privesc)';
+    if (a.ownerUid !== 0) return 'a wrapper ancestor dir (' + a.path + ') is not root-owned (uid ' + a.ownerUid + ') — its owner can rename the wrapper subtree (grandparent-rename privesc)';
+  }
+  return null;
+}
+
 /**
  * PURE verdict over observed facts. No I/O.
  * @param {{
@@ -33,7 +66,10 @@ const DENIAL_ERRNOS = new Set(['EACCES', 'EPERM']);
  *   hostRead:{ok:true}|{ok:false,errno:string},
  *   runningUid:number|null,
  *   sign:{signed:boolean,personaMatches:boolean},
- *   wrapper:null|{ok:true,isFile:boolean,worldOrGroupWritable:boolean}|{ok:false,errno:string}
+ *   wrapper:null
+ *     |{ok:true,isFile:boolean,ownerUid:number,worldOrGroupWritable:boolean,ancestors:object[]}
+ *     |{ok:false,errno?:string,pathInvalid?:boolean,reason?:string},
+ *   keyDir:null|{ok:true,isDir:boolean,ownerUid:number,worldOrGroupWritable:boolean}|{ok:false,errno:string}
  * }} facts
  * @returns {{hostObservableChecksPassed:boolean, requiresOutOfBandUidConfirmation:boolean, checks:object[], residuals:string[]}}
  *   NOTE: deliberately NO `custodyReal` / `custodyMechanismVerified` field (NS-9) — the host cannot observe
@@ -99,16 +135,48 @@ function assessCustody(facts = {}) {
   else if (!sg.personaMatches) fail('C3-liveness', 'broker signed but as a DIFFERENT persona — key <-> registry mismatch (check the registered public key)');
   else pass('C3-liveness', 'broker produced a signature that verifies as the persona — a real, usable key exists behind the broker');
 
-  // C2.5 — wrapper integrity (only if a wrapperPath was provided). A host-writable wrapper is a privesc path:
-  // the host edits the script sudo execs as the broker uid → code execution as the broker uid → key exfil.
+  // C2.5 — wrapper integrity (only if a wrapperPath was provided). A wrapper the host can MODIFY is a privesc
+  // path: the host rewrites the script sudo execs as the broker uid -> code exec as the broker uid -> key exfil.
+  // "Modify" has THREE faces, all checked here (F3 / #79): (a) the wrapper FILE is host-writable -- directly if
+  // the host OWNS it (owner-write, no rename needed) or if it is group/world-writable; (b) any ANCESTOR dir up to
+  // / is host-writable -- the host renames/replaces the wrapper (or a parent dir) regardless of the file's own
+  // mode; (c) the wrapperPath is relative / ".."-bearing / a symlink -- it resolves to a DIFFERENT target than
+  // attested. gatherCustodyFacts realpath-resolves the wrapperPath first, so the file + ancestors are the
+  // RESOLVED topology. The whole leg is a SNAPSHOT (no openat in Node sync) -- see the residual on the PASS path.
   if (facts.wrapper) {
     const w = facts.wrapper;
-    if (!w.ok) note('C2.5-wrapper', 'sudo wrapper not statable (' + (w.errno || 'unknown') + ') — check the wrapperPath');
-    else if (!w.isFile) fail('C2.5-wrapper', 'the sudo wrapper is not a regular file (symlink/dir) — hijackable');
-    else if (w.worldOrGroupWritable) fail('C2.5-wrapper', 'the sudo wrapper is group/world-writable — the host can run code as the broker uid (privesc)');
-    else pass('C2.5-wrapper', 'sudo wrapper is a regular, non-group/world-writable file');
+    if (w.pathInvalid) {
+      fail('C2.5-wrapper', 'the wrapperPath is ' + (w.reason === 'not-absolute' ? 'not absolute' : 'not canonical (contains "..")') + ' — refusing to attest a relative / non-canonical wrapper path (it would resolve to a different target than the one checked)');
+    } else if (!w.ok) {
+      fail('C2.5-wrapper', 'the sudo wrapper is absent / not statable (' + (w.errno || 'unknown') + ') — cannot attest a wrapper that is not there (a host-writable parent could let the host CREATE it)');
+    } else if (!w.isFile) {
+      fail('C2.5-wrapper', 'the sudo wrapper is not a regular file (symlink/dir) — hijackable');
+    } else if (w.worldOrGroupWritable) {
+      fail('C2.5-wrapper', 'the sudo wrapper is group/world-writable — the host can run code as the broker uid (privesc)');
+    } else if (w.ownerUid !== 0) {
+      fail('C2.5-wrapper', 'the sudo wrapper is not root-owned (owner uid ' + w.ownerUid + ') — its owner can rewrite the script sudo execs as the broker uid, with NO rename (privesc). chown root the wrapper.');
+    } else {
+      const chainFail = assessWrapperChain(w.ancestors);
+      if (chainFail) {
+        fail('C2.5-wrapper', chainFail);
+      } else {
+        pass('C2.5-wrapper', 'sudo wrapper is a root-owned, non-group/world-writable regular file, and every ancestor dir of BOTH the raw and the resolved wrapperPath to / is root-owned + not others-writable (a symlink component must be root-owned)');
+        residuals.push('wrapper chain is a SNAPSHOT: C2.5 attested the wrapper file + every ancestor dir of BOTH the raw and the resolved wrapperPath to / at THIS instant via lstat. Two residual limits remain (NS-9): (1) Node sync has no openat, so this verifies the STATIC topology, NOT a post-check swap — a host who still controls a writable ancestor could rename a component AFTER this check and before sudo re-resolves the path at exec (mirrors registry-store.js:227); (2) writability is mode-based (`& 0o022`) and CANNOT see a POSIX ACL grant — verify `getfacl` out-of-band on the wrapper + its ancestor chain. Re-run immediately before arming AND confirm out-of-band.');
+      }
+    }
   } else {
     note('C2.5-wrapper', 'wrapper integrity NOT checked — pass wrapperPath to enable');
+  }
+
+  // C2.6 — key-directory hygiene (informational NOTE, NEVER gates the verdict). Dir-write lets the host
+  // rename/replace the key FILE, but cannot READ a 0600 broker-owned key (read needs the file mode+owner, not
+  // the dir), and C3-liveness already FAILs on a substituted key (persona mismatch) or a deleted key (no
+  // signature). A hard-FAIL here would mass-false-alarm the NORMAL deployment (a broker-uid-owned key dir), so
+  // this is a DISCLOSURE, not a gate (VERIFY board: key-dir severity = NOTE).
+  if (facts.keyDir) {
+    const kd = facts.keyDir;
+    if (!kd.ok) note('C2.6-keydir', 'key directory not statable (' + (kd.errno || 'unknown') + ') — check the key path');
+    else note('C2.6-keydir', 'key directory owner uid ' + kd.ownerUid + ', ' + (kd.worldOrGroupWritable ? 'GROUP/WORLD-WRITABLE' : 'not others-writable') + ' — a writable key dir lets the host rename/replace the key file (it cannot READ a 0600 key); C3-liveness backstops a substituted/deleted key. Attest the key dir out-of-band if it is host-writable.');
   }
 
   // The bind-gap is UNCONDITIONAL on the passed path (VALIDATE hacker C2 / integrity!=provenance): C2 proves a
@@ -129,6 +197,18 @@ function assessCustody(facts = {}) {
     checks,
     residuals,
   };
+}
+
+// F3 (#79): lstat a directory path into a fact for the ancestor walk / key-dir NOTE. lstat (NOT stat) so a
+// symlinked component is reported AS a symlink (isSymlink:true, isDir:false), never followed — assessWrapperChain
+// then requires it be root-owned. `& 0o022` = group/world-writable.
+function statDir(dirPath) {
+  try {
+    const st = fs.lstatSync(dirPath);
+    return { path: dirPath, ok: true, isDir: st.isDirectory(), isSymlink: st.isSymbolicLink(), ownerUid: st.uid, worldOrGroupWritable: !!(st.mode & 0o022) };
+  } catch (e) {
+    return { path: dirPath, ok: false, errno: (e && e.code) || 'EUNKNOWN' };
+  }
 }
 
 /** Gather the observed facts from real I/O (impure). */
@@ -171,17 +251,59 @@ function gatherCustodyFacts(opts = {}) {
     }
   } catch { /* fail-closed — signed stays false */ }
 
-  // C2.5 — wrapper integrity (optional). lstat (not follow) + the `& 0o022` group/world-writable bit-logic
-  // from broker-sign.js:56.
+  // C2.5 — wrapper integrity (optional). F3 (#79): validate the path is absolute + canonical BEFORE any fs op
+  // (do NOT trust the launcher's validation transitively), realpath-resolve it ONCE (so a symlinked /var-style
+  // path is not a false positive), then lstat the resolved FILE (ownerUid + `& 0o022` group/world-writable,
+  // mirroring broker-sign.js:56) and walk EVERY resolved ancestor dir to / (statDir) for the chain check.
   let wrapper = null;
   if (typeof wrapperPath === 'string' && wrapperPath.length) {
-    try {
-      const st = fs.lstatSync(wrapperPath);
-      wrapper = { ok: true, isFile: st.isFile(), worldOrGroupWritable: !!(st.mode & 0o022) };
-    } catch (e) { wrapper = { ok: false, errno: (e && e.code) || 'EUNKNOWN' }; }
+    const notAbsolute = !path.isAbsolute(wrapperPath);
+    if (notAbsolute || wrapperPath.split('/').includes('..')) {
+      wrapper = { ok: false, pathInvalid: true, reason: notAbsolute ? 'not-absolute' : 'dotdot' };
+    } else {
+      let resolved = null;
+      try { resolved = fs.realpathSync(wrapperPath); } catch { /* absent/broken link -> lstat below reports !ok */ }
+      const target = resolved || wrapperPath;
+      let fileFact;
+      try {
+        const st = fs.lstatSync(target);
+        fileFact = { ok: true, isFile: st.isFile(), ownerUid: st.uid, worldOrGroupWritable: !!(st.mode & 0o022) };
+      } catch (e) { fileFact = { ok: false, errno: (e && e.code) || 'EUNKNOWN' }; }
+      // walk BOTH the RAW wrapperPath's ancestor chain AND the resolved target's chain to / (deduped by path).
+      // sudo execs the RAW, un-resolved wrapperPath (broker-launch.js:64) and re-resolves it at EVERY exec, so a
+      // symlink's OWN host-writable directory is a standing hijack surface even when the symlink points at a
+      // root-owned target (VALIDATE HIGH). The RAW walk covers those literal-path dirs; the resolved walk covers
+      // the canonical target's dirs (and avoids a macOS /var-style false-positive on the real file location).
+      // Terminate at the dirname fixpoint; fail-closed handling lives in assessWrapperChain.
+      const ancestors = [];
+      const seenDirs = new Set();
+      const walkAncestors = (startPath) => {
+        let dir = path.dirname(startPath);
+        let guard = 0;
+        while (guard < MAX_ANCESTOR_WALK) {
+          guard += 1;
+          if (!seenDirs.has(dir)) { seenDirs.add(dir); ancestors.push(statDir(dir)); }
+          const parent = path.dirname(dir);
+          if (parent === dir) break; // reached the filesystem root
+          dir = parent;
+        }
+      };
+      walkAncestors(wrapperPath);                                  // the RAW path sudo actually re-resolves
+      if (resolved && resolved !== wrapperPath) walkAncestors(resolved); // + the canonical target's chain
+      wrapper = { ...fileFact, resolvedPath: resolved, ancestors };
+    }
   }
 
-  return { isRoot, keyStat, hostRead, runningUid: ruid, sign, wrapper };
+  // C2.6 — key directory (informational NOTE only; assessCustody never gates on it). realpath so a symlinked
+  // key-dir path is reported by its real location; fall back to the raw path if the key is absent/broken.
+  let keyDir = null;
+  if (typeof keyFile === 'string' && keyFile.length) {
+    let kdTarget = keyFile;
+    try { kdTarget = fs.realpathSync(keyFile); } catch { /* fall back to the raw path for the NOTE */ }
+    keyDir = statDir(path.dirname(kdTarget));
+  }
+
+  return { isRoot, keyStat, hostRead, runningUid: ruid, sign, wrapper, keyDir };
 }
 
 /** gather → assess. */
