@@ -26,9 +26,21 @@ const { isHex64, isCanonicalBase64, verifyRecordSig } = require('../lib/edge-att
 const { computeRecordId } = require('../lib/record');
 const { lookupPublicKey } = require('./registry');
 
-// opts.env is a caller-allowlisted EXTRAS channel — but it must not re-open the code-loading hole the env
-// scrub closes, nor shadow the key-path channel. Refuse the node/linker hijack vars + PACT_BROKER_KEY_FILE.
-const RESERVED_ENV = /^(NODE_OPTIONS|PACT_BROKER_KEY_FILE|LD_|DYLD_)/;
+// opts.env is the trusted caller's config/ARMING + extras channel (the sigma-root broker's SOLE arming path is
+// `env: PACT_ROOT_*`), but it must NEVER carry a CODE-EXECUTION / code-LOAD var -- an env var that turns "set a var"
+// into "run arbitrary code" in the `#!/bin/sh` wrapper or the `node` child (defense-in-depth vs a caller accidentally
+// spreading a host NODE_OPTIONS/PATH). This guard blocks ONLY that class -- NOT the broker's config (PACT_ROOT_*,
+// PACT_BROKER_* config), which is the trusted caller's legit arming channel (#85/F10). (A config-vs-extras channel
+// SEPARATION -- so config cannot be injected via extras at all -- is a filed follow-up, not this fix.)
+//   prefix-class: NODE_OPTIONS / NODE_REPL_ (node code-load), OPENSSL_ (node reads OPENSSL_CONF -> engine/provider
+//                 .dylib load = RCE, VALIDATE F4), BASH_FUNC_ (bash exported-function import = RCE into a shell
+//                 wrapper, VALIDATE F5), LD_/DYLD_ (loader preload), PACT_BROKER_KEY_FILE (dedicated: opts.keyFile).
+//   exact-class : BASH_ENV/ENV (shell startup source), PATH/SHELLOPTS/BASHOPTS/PS4 (shell RCE), NODE_PATH (module
+//                 shadow), NODE_V8_COVERAGE/NODE_COMPILE_CACHE (write-as-broker-uid). EXACT so benign NODE_ENV /
+//                 ENVIRONMENT / PATH_FOO are not over-blocked.
+const RESERVED_ENV_PREFIX = /^(NODE_OPTIONS|NODE_REPL_|OPENSSL_|BASH_FUNC_|LD_|DYLD_|PACT_BROKER_KEY_FILE)/;
+const RESERVED_ENV_EXACT = new Set(['BASH_ENV', 'ENV', 'PATH', 'NODE_PATH', 'NODE_V8_COVERAGE', 'NODE_COMPILE_CACHE', 'SHELLOPTS', 'BASHOPTS', 'PS4']);
+function isReservedEnvKey(k) { return RESERVED_ENV_PREFIX.test(k) || RESERVED_ENV_EXACT.has(k); }
 
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_MAX_BYTES = 4096;
@@ -49,12 +61,15 @@ function brokerSigner(opts = {}) {
   const timeout = (Number.isInteger(opts.timeoutMs) && opts.timeoutMs > 0) ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
   const maxBuffer = (Number.isInteger(opts.maxBytes) && opts.maxBytes > 0) ? opts.maxBytes : DEFAULT_MAX_BYTES;
   // env ALLOWLIST: build from scratch; NEVER spread process.env (the NODE_OPTIONS defense). opts.keyFile is
-  // the SOLE key-path channel; opts.env extras are refused if they'd re-open the hole (RESERVED_ENV).
+  // the SOLE key-path channel; opts.env extras are refused if they'd re-open the hole (isReservedEnvKey).
   const env = {};
   if (typeof opts.keyFile === 'string') env.PACT_BROKER_KEY_FILE = opts.keyFile;
   if (opts.env && typeof opts.env === 'object') {
     for (const k of Object.keys(opts.env)) {
-      if (RESERVED_ENV.test(k)) throw new Error('brokerSigner: opts.env may not set a code-loading/key-path var (' + k + ') — use opts.keyFile for the key path');
+      if (isReservedEnvKey(k)) {
+        const hint = k === 'PACT_BROKER_KEY_FILE' ? ' — use opts.keyFile for the key path' : '';
+        throw new Error('brokerSigner: opts.env may not set a reserved broker-child environment variable (' + k + ')' + hint);
+      }
       env[k] = opts.env[k];
     }
   }

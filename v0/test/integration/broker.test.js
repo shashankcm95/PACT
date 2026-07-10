@@ -249,11 +249,28 @@ test('client config guards: timeoutMs/maxBytes <= 0 fall back to defaults; opts.
   // timeoutMs:0 must NOT mean "no timeout" (the execFileSync footgun) — falls back to the default and signs
   assert.ok(brokerFor(a.keyFile, { timeoutMs: 0 })(RID), 'timeoutMs:0 falls back to default (not no-timeout)');
   assert.ok(brokerFor(a.keyFile, { maxBytes: 0 })(RID), 'maxBytes:0 falls back to default (not a 0-byte buffer)');
-  // opts.env may NOT re-open the code-loading hole or shadow the key-path channel
-  for (const bad of ['NODE_OPTIONS', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'PACT_BROKER_KEY_FILE']) {
-    assert.throws(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [bad]: 'x' } }), /may not set a code-loading\/key-path var/, bad + ' refused in opts.env');
+  // opts.env may NOT set a CODE-EXECUTION / code-LOAD var (env -> arbitrary code in the #!/bin/sh wrapper or the
+  // node child) or shadow the dedicated key-path channel. The set covers the reachable/enumerated env->RCE vectors
+  // (#85/F10): BASH_ENV/ENV (shell source), PATH/SHELLOPTS/BASHOPTS/PS4 (shell RCE), NODE_PATH/NODE_REPL_ (node
+  // code-load), OPENSSL_ (engine/provider .dylib), BASH_FUNC_ (bash func-import), NODE_V8_COVERAGE (write-as-uid).
+  const codeExec = ['NODE_OPTIONS', 'NODE_REPL_EXTERNAL_MODULE', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES',
+    'PACT_BROKER_KEY_FILE', 'BASH_ENV', 'ENV', 'PATH', 'NODE_PATH', 'SHELLOPTS', 'BASHOPTS', 'PS4',
+    // VALIDATE folds: OPENSSL_CONF (node loads an engine/provider .dylib = RCE), BASH_FUNC_* (bash func-import RCE),
+    // NODE_V8_COVERAGE/NODE_COMPILE_CACHE (write-as-broker-uid)
+    'OPENSSL_CONF', 'OPENSSL_MODULES', 'BASH_FUNC_x%%', 'NODE_V8_COVERAGE', 'NODE_COMPILE_CACHE',
+    // synthetic PREFIX cases (CodeRabbit): prove the prefix families match an arbitrary suffix, not just the known
+    // exact names -- an exact-only regression on any of these would otherwise slip through.
+    'NODE_OPTIONS_SYNTH', 'NODE_REPL_SYNTH', 'OPENSSL_SYNTH', 'LD_SYNTH', 'DYLD_SYNTH', 'PACT_BROKER_KEY_FILE_SYNTH'];
+  for (const bad of codeExec) {
+    assert.throws(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [bad]: 'x' } }), /may not set a reserved broker-child environment variable/, bad + ' refused in opts.env');
   }
-  assert.ok(brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { SOME_BENIGN: '1' } })(RID), 'a benign extra env var is allowed');
+  // POSITIVE CONTROL (regression guard, #85/F10): the guard ALLOWS the trusted caller's arming config + benign vars.
+  // opts.env is the sigma-root broker's SOLE arming channel (PACT_ROOT_*, sigma-root-broker.test.js:71) -- blocking
+  // it would BREAK arming. NODE_ENV is benign (must NOT be over-blocked by a NODE_ prefix).
+  for (const allowed of ['PACT_ROOT_KEY_FILE', 'PACT_ROOT_CONTROLLER', 'PACT_BROKER_PERSONA_DID', 'NODE_ENV', 'ENVIRONMENT']) {
+    assert.doesNotThrow(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [allowed]: 'x' } }), allowed + ' must be allowed (config/benign, not code-exec)');
+  }
+  assert.ok(brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { SOME_BENIGN: '1' } })(RID), 'a benign extra env var is allowed AND signs');
   w.cleanup();
 });
 
