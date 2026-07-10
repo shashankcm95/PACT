@@ -17,7 +17,7 @@ const { buildFrame } = require('../../src/frame/frame');
 const { appendRecord } = require('../../src/lib/record-store');
 const { computeRecordId } = require('../../src/lib/record');
 const { direct, decayWeight } = require('../../src/trust/direct');
-const { wcons } = require('../../src/trust/consensus');
+const { wcons, beats } = require('../../src/trust/consensus');
 const { convert, disjointPaths } = require('../../src/trust/convert');
 const { independenceLabel, mayGate, epistemicIndependence, configStability } = require('../../src/independence/weak-flag');
 const { trust } = require('../../src/trust/model');
@@ -225,6 +225,117 @@ test('wcons cold-start: an empty DIRECT graph → undefined (caller uses novice 
   const t = trust(w.meCtx, w.ME, 'did:key:zTarget');
   assert.ok(Number.isFinite(t.value), 'TRUST must be finite at cold-start, never NaN');
   w.cleanup();
+});
+
+// ---- CONSENSUS F4 (#80): a persona REVISION supersedes its stale vouch (recency, not readdir order) ----
+test('wcons F4: a persona revision (lower value, higher t) supersedes its stale vouch', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  for (let i = 0; i < 10; i++) w.emit('did:key:zAlice', 'CLAIM', { claim: { content: 'earned' + i } });
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.95 }, { t: 2000 });
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.02 }, { t: 5000 });
+  const r = wcons(w.meCtx, w.ME, 'did:key:zTarget');
+  assert.ok(r.defined);
+  assert.ok(Math.abs(r.value - 0.02) < 1e-9, 'the revision (0.02 @t=5000) must win, not the stale 0.95; got ' + r.value);
+  w.cleanup();
+});
+
+test('wcons F4: the revision wins regardless of EMIT order (no readdir/content-hash artifact)', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  for (let i = 0; i < 10; i++) w.emit('did:key:zAlice', 'CLAIM', { claim: { content: 'e' + i } });
+  // emit the NEWER (higher-t) vouch FIRST, the older one second — recency (t), not order, must decide
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.02 }, { t: 5000 });
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.95 }, { t: 2000 });
+  const r = wcons(w.meCtx, w.ME, 'did:key:zTarget');
+  assert.ok(Math.abs(r.value - 0.02) < 1e-9, 'higher-t vouch wins regardless of emission order; got ' + r.value);
+  w.cleanup();
+});
+
+test('wcons F4: a REVOCATION (revise to 0) is reflected, not silently dropped', () => {
+  const w = freshWorld();
+  w.add('did:key:zAlice');
+  for (let i = 0; i < 10; i++) w.emit('did:key:zAlice', 'CLAIM', { claim: { content: 'c' + i } });
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 1.0 }, { t: 1000 });
+  w.emit('did:key:zAlice', 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.0 }, { t: 9000 });
+  const r = wcons(w.meCtx, w.ME, 'did:key:zTarget');
+  assert.ok(r.defined && r.value < 1e-9, 'the revocation to 0 must be reflected; got ' + r.value);
+  w.cleanup();
+});
+
+test('wcons F4: two personas of ONE human tie on w; RECENCY (not value) picks the representative (value-blind end-to-end)', () => {
+  const w = freshWorld();
+  // two personas of ONE human with IDENTICAL claim histories -> direct() gives an exactly-equal w for both
+  const P1 = w.addUnder('did:key:zD1', 'human:dana');
+  const P2 = w.addUnder('did:key:zD2', 'human:dana');
+  for (let i = 0; i < 5; i++) { w.emit(P1, 'CLAIM', { claim: { content: 'h' + i } }); w.emit(P2, 'CLAIM', { claim: { content: 'h' + i } }); }
+  // P1 vouches HIGH but OLD; P2 vouches LOW but NEW. If VALUE drove the tie, 0.9 would win — recency must pick 0.1.
+  w.emit(P1, 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.9 }, { t: 1000 });
+  w.emit(P2, 'VOUCH', { target_persona: 'did:key:zTarget', value: 0.1 }, { t: 8000 });
+  const r = wcons(w.meCtx, w.ME, 'did:key:zTarget');
+  assert.ok(r.defined);
+  // one human collapses to ONE voucher; the NEWER (t=8000) vouch represents them -> ~0.1, not 0.9 (value-blind)
+  assert.ok(Math.abs(r.value - 0.1) < 1e-9, 'recency (t), not vouch value, must pick the human representative; got ' + r.value);
+  w.cleanup();
+});
+
+// ---- F4 beats() comparator — direct unit tests (deterministic; no signed-frame world needed) ----
+const RID = (s) => s.padEnd(64, '0'); // a stand-in 64-char record_id for lexicographic ordering
+
+test('beats: no incumbent -> the first record always wins', () => {
+  assert.equal(beats(0.5, { t: 1, seq: 1, record_id: RID('a') }, null), true);
+});
+
+test('beats: greater weight wins; recency is irrelevant when weights differ', () => {
+  assert.equal(beats(0.9, { t: 1, seq: 1, record_id: RID('a') }, { weight: 0.5, t: 999, seq: 999, record_id: RID('z') }), true);
+  assert.equal(beats(0.4, { t: 999, seq: 999, record_id: RID('z') }, { weight: 0.5, t: 1, seq: 1, record_id: RID('a') }), false);
+});
+
+test('beats: weight tie -> higher t wins EVEN with a LOWER seq (t is primary; seq resets across sessions)', () => {
+  const w = 0.5;
+  assert.equal(beats(w, { t: 5000, seq: 1, record_id: RID('a') }, { weight: w, t: 2000, seq: 99, record_id: RID('z') }), true);
+});
+
+test('beats: weight+t tie -> higher seq wins (same-session recency hint)', () => {
+  const w = 0.5;
+  assert.equal(beats(w, { t: 100, seq: 7, record_id: RID('a') }, { weight: w, t: 100, seq: 3, record_id: RID('z') }), true);
+});
+
+test('beats: weight+t+seq tie -> record_id lexicographic total order (the determinism FLOOR; no readdir dep)', () => {
+  const w = 0.5;
+  assert.equal(beats(w, { t: 1, seq: 1, record_id: RID('b') }, { weight: w, t: 1, seq: 1, record_id: RID('a') }), true);
+  assert.equal(beats(w, { t: 1, seq: 1, record_id: RID('a') }, { weight: w, t: 1, seq: 1, record_id: RID('b') }), false);
+});
+
+test('beats: t/seq ABSENT on both -> falls through to record_id (never readdir order)', () => {
+  const w = 0.5;
+  assert.equal(beats(w, { record_id: RID('b') }, { weight: w, record_id: RID('a') }), true);
+  assert.equal(beats(w, { record_id: RID('a') }, { weight: w, record_id: RID('b') }), false);
+});
+
+test('beats: NaN/Infinity/undefined t or seq fall to -Infinity (Number.isFinite guard), never crash', () => {
+  const w = 0.5;
+  // NaN t on the challenger -> -Infinity; incumbent has a real t -> the challenger does NOT beat it
+  assert.equal(beats(w, { t: NaN, seq: NaN, record_id: RID('z') }, { weight: w, t: 10, seq: 1, record_id: RID('a') }), false);
+  // Infinity is NOT finite -> both -Infinity t -> fall through to record_id ('b' > 'a')
+  assert.equal(beats(w, { t: Infinity, record_id: RID('b') }, { weight: w, t: Infinity, record_id: RID('a') }), true);
+});
+
+test('beats: RESIDUAL — no-t + a session-reset (lower) seq lets a stale vouch outlive a later revision (why t is primary)', () => {
+  // NAMED residual (VERIFY board): when an emitter omits t AND seq resets across a session boundary, the later
+  // revision arrives with a LOWER seq and loses to the stale vouch. record_id still guarantees DETERMINISM (no
+  // readdir dependence) — only the recency GUARANTEE degrades without t. Forward-contract: a kernel-stamped
+  // receive-time closes this before wcons ever gates. This test PINS the current (accepted) behavior.
+  const w = 0.5;
+  const laterRevision = { record_id: RID('a'), seq: 1 };          // t absent; reset session-2 seq
+  const staleVouch = { weight: w, record_id: RID('z'), seq: 99 }; // t absent; higher session-1 seq
+  assert.equal(beats(w, laterRevision, staleVouch), false, 'without t, a reset-seq later revision cannot supersede the stale vouch — the documented residual');
+});
+
+test('beats: VALUE-BLIND by construction — the comparator takes no vouch-value parameter (Q1: no persona-mult lever)', () => {
+  // structural guarantee: a weight tie between two personas of one human resolves by t/seq/record_id ONLY, so a
+  // high-value vouch cannot win on value alone. beats(w, vch, prev) has exactly 3 params — value is never passed.
+  assert.equal(beats.length, 3, 'beats must take exactly (w, vch, prev) — no value arg');
 });
 
 // ---- CONVERT: max-flow, not a tally ----
