@@ -55,9 +55,6 @@ function isJsonAbsent(x) {
 // never minted = no read side = no mint-then-reject); its message is discarded by the caller's bare catch (record.js).
 //
 // KNOWN RESIDUALS of the SAME content-address-mismatch class -- pinned in canonical-json.test.js so NOT silent:
-//   * BOXED PRIMITIVES (new Number/String/Boolean): native unwraps (step 4), canonical does not -> emits `{}` -> a
-//     distinct value class, tracked as #110 (not #99 scope). Reachable BOTH as a direct field AND as a toJSON RETURN
-//     value (a toJSON returning `Object(5)`); both pinned in the test.
 //   * NON-IDEMPOTENT toJSON (counter/Date.now/mutating): unhashable by definition -> mint != read -> the store fails
 //     CLOSED (suppression), the safe direction; native is equally non-deterministic.
 //   * KEY-DEPENDENT toJSON: computeRecordId hashes payload at key "payload" but deriveIdempotencyKey hashes it at root
@@ -65,20 +62,60 @@ function isJsonAbsent(x) {
 //     skipped as a poison record (INV-22 dedup fail-safe, not forgery). Exotic.
 //   * PROTOTYPE POLLUTION (Object.prototype.toJSON set): every object canonicalizes to the polluted value
 //     (native-consistent); both native + store are already game-over under prototype pollution.
-// (BigInt is HANDLED, not a residual: applyToJSON mirrors native's Object-OR-BigInt step-2 dispatch, and the
-// walk-scalar throw above rejects any bigint reaching a leaf -- see those comments. CodeRabbit Major, #111.)
+// (BigInt + BOXED PRIMITIVES are HANDLED, not residuals: applyToJSON mirrors native's Object-OR-BigInt step-2 dispatch
+// + the step-4 boxed-primitive unwrap (unwrapBoxed below), and the walk-scalar throw rejects any bigint reaching a
+// leaf. #111 [BigInt] + #110 [boxed] -> canonical is now a COMPLETE mirror of native's SerializeJSONProperty.)
+// Captured at module load so the boxed-primitive slot-DETECTION below resists LATER prototype pollution of these
+// methods (native step-4 detection reads the true internal slot; capturing the built-in valueOf -- which reads the
+// slot -- is the closest JS approximation). (VALIDATE M2.)
+const OBJ_TO_STRING = Object.prototype.toString;
+const NUM_VALUEOF = Number.prototype.valueOf;
+const STR_VALUEOF = String.prototype.valueOf;
+const BOOL_VALUEOF = Boolean.prototype.valueOf;
+const BIGINT_VALUEOF = BigInt.prototype.valueOf;
+
+// native SerializeJSONProperty step 4 (#110): unwrap a boxed primitive to its primitive, detected BY INTERNAL SLOT.
+// A captured `X_VALUEOF.call(out)` throws iff `out` lacks the [[XData]] slot -> realm-independent + resists
+// `Object.create(X.prototype)` (instanceof-true but SLOT-LESS -> not unwrapped -> walks as {} == native, no throw) and
+// the `Symbol.toStringTag` spoof (the tag pre-filter routes it in, the slot-probe rejects it). The tag pre-filter is a
+// PERF gate ONLY (VALIDATE code-reviewer: 4 thrown exceptions per non-boxed object node was ~38x on wide structures)
+// and is caller-spoofable, so the slot-probe stays the authority. SPLIT the slot-probe from the CONVERSION (VALIDATE
+// hacker H1): a boxed primitive whose valueOf/@@toPrimitive THROWS must fail-closed at mint (the conversion throw
+// PROPAGATES == native), NOT be swallowed into a colliding plain-object walk. Per-slot conversion mirrors native:
+// Number -> ToNumber via unary `+` (throws on a bigint result == native, unlike Number()=ToNumeric -- VALIDATE M1);
+// String -> ToString (`String()`, toString-first); Boolean/BigInt -> the RAW captured slot (ignores an overridden
+// valueOf). A boxed BigInt yields a primitive bigint -> the walk-scalar throw rejects it == native's throw.
+function unwrapBoxed(out) {
+  const tag = OBJ_TO_STRING.call(out);
+  if (tag !== '[object Number]' && tag !== '[object String]' && tag !== '[object Boolean]' && tag !== '[object BigInt]') {
+    return { hit: false }; // fast path: not a boxed-primitive candidate (the common object/array/Date case)
+  }
+  let slot = null;
+  try { NUM_VALUEOF.call(out); slot = 'num'; } catch { /* no [[NumberData]] */ }
+  if (slot === null) { try { STR_VALUEOF.call(out); slot = 'str'; } catch { /* no [[StringData]] */ } }
+  if (slot === null) { try { return { hit: true, v: BOOL_VALUEOF.call(out) }; } catch { /* no [[BooleanData]] */ } }
+  if (slot === null) { try { return { hit: true, v: BIGINT_VALUEOF.call(out) }; } catch { /* no [[BigIntData]] */ } }
+  if (slot === 'num') return { hit: true, v: +out };            // ToNumber; a throwing conversion PROPAGATES (fail-closed)
+  if (slot === 'str') return { hit: true, v: String(out) };     // ToString (toString-first)
+  return { hit: false }; // tag matched but no real slot (a Symbol.toStringTag spoof) -> not unwrapped == native {}
+}
+
 function applyToJSON(v, key) {
-  // native's step-2 dispatch is Object-OR-BigInt: a bigint with a (prototype) toJSON is transformed at the PARENT too,
-  // so its toJSON receives the correct property key (a leaf JSON.stringify would re-wrap the bigint at root key '' and
-  // lose the key -- CodeRabbit Major, firsthand-probed).
+  let out = v;
+  // step 2a: native's dispatch is Object-OR-BigInt -- a bigint with a (prototype) toJSON is transformed at the PARENT
+  // so its toJSON receives the correct property key (a leaf JSON.stringify would re-wrap it at root key '' and lose the
+  // key -- CodeRabbit Major). Reflect.apply, NOT `fn.call(v, key)`: `.call` is read off the UNTRUSTED toJSON, so a
+  // payload-supplied own `.call` would hijack serialization; Reflect.apply uses the internal [[Call]] == native.
   if ((v !== null && typeof v === 'object') || typeof v === 'bigint') {
     const fn = v.toJSON;
-    // Reflect.apply, NOT `fn.call(v, key)`: `.call` is read off the UNTRUSTED toJSON function, so a payload-supplied
-    // function carrying its OWN `.call` property would hijack serialization. Reflect.apply uses the internal [[Call]],
-    // matching native JSON.stringify (CodeRabbit).
-    if (typeof fn === 'function') return Reflect.apply(fn, v, [key]);
+    if (typeof fn === 'function') out = Reflect.apply(fn, v, [key]);
   }
-  return v;
+  // step 4: unwrap a boxed primitive from the POST-toJSON value (so a boxed value RETURNED by a toJSON is unwrapped too).
+  if (out !== null && typeof out === 'object') {
+    const boxed = unwrapBoxed(out);
+    if (boxed.hit) return boxed.v;
+  }
+  return out;
 }
 
 /**
