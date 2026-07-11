@@ -40,18 +40,26 @@ is type-ASYMMETRIC and slot-based, NOT a uniform `valueOf`: Number → `ToNumber
 `instanceof` is a prototype-chain test, not a slot test — `Object.create(Number.prototype)` is `instanceof`-true but
 slot-less, so `out.valueOf()` THROWS (regressing a currently-clean `{}` case to un-mintable). Faithful design:
 
+**FINAL code (superseding the VERIFY-era snippet after the VALIDATE folds — a tag pre-filter was tried for perf and
+REMOVED as unsound; see the VALIDATE result):**
+
 ```js
-// native SerializeJSONProperty step 4: unwrap a boxed primitive BY INTERNAL SLOT. X.prototype.valueOf.call(out) throws
-// iff `out` lacks the [[XData]] slot -> realm-INDEPENDENT + spoof-safe (a Symbol.toStringTag fake or
-// Object.create(X.prototype) has no slot -> not unwrapped -> walks as {} == native). Per-slot conversion mirrors native
-// EXACTLY: Number -> ToNumber (Number(); honors @@toPrimitive/valueOf/toString), String -> ToString (String();
-// toString-first), Boolean/BigInt -> the RAW slot (ignores an overridden valueOf). A boxed BigInt yields the primitive
-// bigint -> the walk-scalar throw rejects it == native's throw.
+const NUM_VALUEOF = Number.prototype.valueOf, STR_VALUEOF = String.prototype.valueOf,
+      BOOL_VALUEOF = Boolean.prototype.valueOf, BIGINT_VALUEOF = BigInt.prototype.valueOf; // captured at module load
+// native step 4: unwrap a boxed primitive BY INTERNAL SLOT. The throw-based slot-probe is the SOLE SOUND detector
+// (every cheaper check -- toString tag, instanceof, proto -- is spoofable one way or the other). Only Array.isArray is
+// a sound cheap fast-skip. SPLIT the slot-probe from the CONVERSION so a throwing valueOf/@@toPrimitive fails-closed
+// (propagates == native), not swallowed into a colliding {} walk. Per-slot: Number -> ToNumber (unary +; throws on a
+// bigint == native, unlike Number()=ToNumeric), String -> ToString (String()), Boolean/BigInt -> RAW captured slot.
 function unwrapBoxed(out) {
-  try { Number.prototype.valueOf.call(out); return { hit: true, v: Number(out) }; } catch { /* no [[NumberData]] */ }
-  try { String.prototype.valueOf.call(out); return { hit: true, v: String(out) }; } catch { /* no [[StringData]] */ }
-  try { return { hit: true, v: Boolean.prototype.valueOf.call(out) }; } catch { /* no [[BooleanData]] */ }
-  try { return { hit: true, v: BigInt.prototype.valueOf.call(out) }; } catch { /* no [[BigIntData]] */ }
+  if (Array.isArray(out)) return { hit: false };
+  let slot = null;
+  try { NUM_VALUEOF.call(out); slot = 'num'; } catch { /* no [[NumberData]] */ }
+  if (slot === null) { try { STR_VALUEOF.call(out); slot = 'str'; } catch { /* no [[StringData]] */ } }
+  if (slot === null) { try { return { hit: true, v: BOOL_VALUEOF.call(out) }; } catch { /* no [[BooleanData]] */ } }
+  if (slot === null) { try { return { hit: true, v: BIGINT_VALUEOF.call(out) }; } catch { /* no [[BigIntData]] */ } }
+  if (slot === 'num') return { hit: true, v: +out };
+  if (slot === 'str') return { hit: true, v: String(out) };
   return { hit: false };
 }
 // applyToJSON: after the toJSON step, if the (post-toJSON) value is an object, unwrap a boxed primitive.
@@ -153,5 +161,17 @@ firsthand-verified + folded:
 / throwing conversion / valueOf→bigint / Object.create(proto) / class-extends / toStringTag-spoof / boxed BigInt /
 polluted Number.prototype.valueOf / plain / Date): ALL == native (byte-identical or both-throw).**
 
-**Gate: canonical-json 36/36, full suite 829/0, eslint 0, perf restored. Closes #110 → canonical is a COMPLETE mirror
-of native `SerializeJSONProperty`.**
+### Pre-PR CodeRabbit fold (2 Major, both firsthand-probed + folded)
+
+- **[Major, correctness] the tag pre-filter was UNSOUND** — a REAL boxed primitive with an own `Symbol.toStringTag`
+  reports a non-boxed tag (`[object Foo]`) → my pre-filter skipped it → `{}` while native unwraps to `5` (the FOURTH
+  time this session the async-bot/adversarial lens caught a shape I didn't probe). Confirmed firsthand. Fix: REMOVED the
+  tag pre-filter — the throw-based slot-probe is the SOLE sound detector (every cheaper check is spoofable one way or
+  the other); kept only a sound `Array.isArray` fast-skip. Perf trade accepted: a typical record is ~51µs/call
+  (negligible); the ~57ms ceiling is only a pathological near-budget wide structure (bounded by MAX_CANONICAL_NODES).
+  Correctness > the perf optimization for the integrity primitive.
+- **[Major, doc] the plan's Design snippet was stale** (VERIFY-era `Number(out)`, no split) — an implementer could copy
+  it and reintroduce the H1 collision. Synced the Design block to the FINAL code.
+
+**Gate: canonical-json 37/37, full suite 830/0, eslint 0. Closes #110 → canonical is a COMPLETE mirror of native
+`SerializeJSONProperty`.**

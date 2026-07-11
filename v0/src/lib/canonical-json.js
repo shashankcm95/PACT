@@ -68,28 +68,27 @@ function isJsonAbsent(x) {
 // Captured at module load so the boxed-primitive slot-DETECTION below resists LATER prototype pollution of these
 // methods (native step-4 detection reads the true internal slot; capturing the built-in valueOf -- which reads the
 // slot -- is the closest JS approximation). (VALIDATE M2.)
-const OBJ_TO_STRING = Object.prototype.toString;
 const NUM_VALUEOF = Number.prototype.valueOf;
 const STR_VALUEOF = String.prototype.valueOf;
 const BOOL_VALUEOF = Boolean.prototype.valueOf;
 const BIGINT_VALUEOF = BigInt.prototype.valueOf;
 
 // native SerializeJSONProperty step 4 (#110): unwrap a boxed primitive to its primitive, detected BY INTERNAL SLOT.
-// A captured `X_VALUEOF.call(out)` throws iff `out` lacks the [[XData]] slot -> realm-independent + resists
-// `Object.create(X.prototype)` (instanceof-true but SLOT-LESS -> not unwrapped -> walks as {} == native, no throw) and
-// the `Symbol.toStringTag` spoof (the tag pre-filter routes it in, the slot-probe rejects it). The tag pre-filter is a
-// PERF gate ONLY (VALIDATE code-reviewer: 4 thrown exceptions per non-boxed object node was ~38x on wide structures)
-// and is caller-spoofable, so the slot-probe stays the authority. SPLIT the slot-probe from the CONVERSION (VALIDATE
-// hacker H1): a boxed primitive whose valueOf/@@toPrimitive THROWS must fail-closed at mint (the conversion throw
-// PROPAGATES == native), NOT be swallowed into a colliding plain-object walk. Per-slot conversion mirrors native:
-// Number -> ToNumber via unary `+` (throws on a bigint result == native, unlike Number()=ToNumeric -- VALIDATE M1);
-// String -> ToString (`String()`, toString-first); Boolean/BigInt -> the RAW captured slot (ignores an overridden
-// valueOf). A boxed BigInt yields a primitive bigint -> the walk-scalar throw rejects it == native's throw.
+// The throw-based slot-probe is the SOLE SOUND detector: every cheaper check is spoofable one way or the other -- an
+// `Object.prototype.toString` tag is overridable by Symbol.toStringTag in BOTH directions (a real box can carry an own
+// tag -> a non-boxed string; a plain object can fake a boxed tag; CodeRabbit killed a tag pre-filter that dropped a
+// real box with an own toStringTag -> {} != native), `instanceof`/proto is defeated by a proto-swap AND false-matches
+// `Object.create(X.prototype)` (slot-less). A captured `X_VALUEOF.call(out)` throws iff `out` lacks the [[XData]] slot
+// -> realm-independent + pollution-resistant + slot-accurate. Only the cheap SOUND `Array.isArray` fast-skip is safe
+// (an array never has a primitive slot). Cost is O(1) throws per object node: a typical record is a few dozen nodes
+// (~negligible), and a pathological wide structure is bounded by MAX_CANONICAL_NODES. SPLIT the slot-probe from the
+// CONVERSION (VALIDATE hacker H1): a boxed primitive whose valueOf/@@toPrimitive THROWS must fail-closed at mint (the
+// conversion throw PROPAGATES == native), NOT be swallowed into a colliding plain-object walk. Per-slot conversion
+// mirrors native: Number -> ToNumber via unary `+` (throws on a bigint result == native, unlike Number()=ToNumeric --
+// VALIDATE M1); String -> ToString (`String()`, toString-first); Boolean/BigInt -> the RAW captured slot (ignores an
+// overridden valueOf). A boxed BigInt yields a primitive bigint -> the walk-scalar throw rejects it == native's throw.
 function unwrapBoxed(out) {
-  const tag = OBJ_TO_STRING.call(out);
-  if (tag !== '[object Number]' && tag !== '[object String]' && tag !== '[object Boolean]' && tag !== '[object BigInt]') {
-    return { hit: false }; // fast path: not a boxed-primitive candidate (the common object/array/Date case)
-  }
+  if (Array.isArray(out)) return { hit: false }; // sound cheap fast-skip: an array never carries a primitive slot
   let slot = null;
   try { NUM_VALUEOF.call(out); slot = 'num'; } catch { /* no [[NumberData]] */ }
   if (slot === null) { try { STR_VALUEOF.call(out); slot = 'str'; } catch { /* no [[StringData]] */ } }
@@ -97,7 +96,7 @@ function unwrapBoxed(out) {
   if (slot === null) { try { return { hit: true, v: BIGINT_VALUEOF.call(out) }; } catch { /* no [[BigIntData]] */ } }
   if (slot === 'num') return { hit: true, v: +out };            // ToNumber; a throwing conversion PROPAGATES (fail-closed)
   if (slot === 'str') return { hit: true, v: String(out) };     // ToString (toString-first)
-  return { hit: false }; // tag matched but no real slot (a Symbol.toStringTag spoof) -> not unwrapped == native {}
+  return { hit: false }; // no primitive slot (a plain object, or a Symbol.toStringTag spoof) -> not unwrapped == native
 }
 
 function applyToJSON(v, key) {

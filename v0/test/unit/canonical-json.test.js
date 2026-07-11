@@ -281,6 +281,13 @@ test('#110: slot-DETECTION (not instanceof) -- a slot-less prototype match / toS
   class X extends Number { constructor() { super(9); } }
   assert.equal(canonicalJsonSerialize({ x: new X() }), '{"x":9}', 'a real [[NumberData]] slot -> unwrapped');
 });
+test('#110: a REAL boxed primitive with an own Symbol.toStringTag is STILL unwrapped == native (slot, not tag)', () => {
+  // CodeRabbit: a real box can carry an own @@toStringTag -> Object.prototype.toString reports a non-boxed tag, so a
+  // tag-based pre-filter would DROP it -> {} != native. The slot-probe detects it regardless of the reported tag.
+  const n = Object(5); n[Symbol.toStringTag] = 'Foo';
+  assert.equal(canonicalJsonSerialize({ x: n }), '{"x":5}');
+  assert.equal(canonicalJsonSerialize({ x: n }), JSON.stringify({ x: n }), '== native (unwrapped via the slot, not the tag)');
+});
 test('#110: a BOXED BigInt (Object(1n)) throws at mint == native (unwrapped to a primitive bigint -> walk-scalar throw)', () => {
   assert.throws(() => canonicalJsonSerialize({ x: Object(1n) }), /BigInt/);
   assert.throws(() => JSON.stringify({ x: Object(1n) }), /BigInt/, 'native throws too');
