@@ -120,10 +120,12 @@ test('authorizeCaller F2 AUTO -- unset allowlist + SUDO_UID ABSENT (same-uid dev
   assert.equal(CA.authorizeCaller({ sudoUid: undefined, allowlistRaw: undefined, requireCaller: null }).decision, 'disabled');
 });
 
-test('authorizeCaller F2 -- unset allowlist + requireCaller UNDEFINED (sigma-root, not threaded) -> disabled (byte-unchanged; undefined != null)', () => {
-  // the SHARED gate (broker-core.js calls authorizeCaller for BOTH brokers): the sigma-root entrypoint threads no
-  // requireCaller -> undefined MUST keep the legacy 'disabled', NEVER the AUTO deny (that would brick a
-  // WHAT-gate-only root deploy). The crossUid deny is gated STRICTLY on requireCaller === null (frame auto).
+test('authorizeCaller F2 -- unset allowlist + requireCaller UNDEFINED (un-threaded caller defensive default) -> disabled (undefined != null)', () => {
+  // the SHARED gate (broker-core.js calls authorizeCaller for BOTH brokers). Post-#106 BOTH entrypoints thread
+  // requireCaller (frame #78 + sigma-root #106), so `undefined` reaches this gate ONLY from an un-threaded caller (a
+  // future entrypoint that forgets to thread it) -> it MUST keep 'disabled', NEVER silently inherit the AUTO deny.
+  // The cross-uid AUTO deny is gated STRICTLY on requireCaller === null; the sigma-root-broker.test.js forward-guard
+  // asserts the real entrypoint DOES thread it (so this branch is defensive-only, not the sigma-root's live behavior).
   assert.equal(CA.authorizeCaller({ sudoUid: '501', allowlistRaw: undefined }).decision, 'disabled');
   assert.equal(CA.authorizeCaller({ sudoUid: '501', allowlistRaw: undefined, requireCaller: undefined }).decision, 'disabled');
 });
