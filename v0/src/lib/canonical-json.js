@@ -55,8 +55,9 @@ function isJsonAbsent(x) {
 // never minted = no read side = no mint-then-reject); its message is discarded by the caller's bare catch (record.js).
 //
 // KNOWN RESIDUALS of the SAME content-address-mismatch class -- pinned in canonical-json.test.js so NOT silent:
-//   * BOXED PRIMITIVES (new Number/String/Boolean): native unwraps (step 4), canonical does not (no toJSON) -> a
-//     distinct value class, tracked as #110 (not #99 scope).
+//   * BOXED PRIMITIVES (new Number/String/Boolean): native unwraps (step 4), canonical does not -> emits `{}` -> a
+//     distinct value class, tracked as #110 (not #99 scope). Reachable BOTH as a direct field AND as a toJSON RETURN
+//     value (a toJSON returning `Object(5)`); both pinned in the test.
 //   * NON-IDEMPOTENT toJSON (counter/Date.now/mutating): unhashable by definition -> mint != read -> the store fails
 //     CLOSED (suppression), the safe direction; native is equally non-deterministic.
 //   * KEY-DEPENDENT toJSON: computeRecordId hashes payload at key "payload" but deriveIdempotencyKey hashes it at root
@@ -64,14 +65,18 @@ function isJsonAbsent(x) {
 //     skipped as a poison record (INV-22 dedup fail-safe, not forgery). Exotic.
 //   * PROTOTYPE POLLUTION (Object.prototype.toJSON set): every object canonicalizes to the polluted value
 //     (native-consistent); both native + store are already game-over under prototype pollution.
-//   * BigInt: native's step-2 dispatch is Object-OR-BigInt, but applyToJSON guards typeof==='object' only, so it does
-//     NOT apply toJSON to a bigint. A BARE bigint then falls through to walk's scalar branch -> JSON.stringify(bigint)
-//     THROWS at mint (fail-closed), == native. A bigint WITH a callable BigInt.prototype.toJSON is STILL honored: the
-//     same scalar JSON.stringify(v) delegation applies it -> == native (canonical does not diverge either way).
+// (BigInt is HANDLED, not a residual: applyToJSON mirrors native's Object-OR-BigInt step-2 dispatch, and the
+// walk-scalar throw above rejects any bigint reaching a leaf -- see those comments. CodeRabbit Major, #111.)
 function applyToJSON(v, key) {
-  if (v !== null && typeof v === 'object') {
+  // native's step-2 dispatch is Object-OR-BigInt: a bigint with a (prototype) toJSON is transformed at the PARENT too,
+  // so its toJSON receives the correct property key (a leaf JSON.stringify would re-wrap the bigint at root key '' and
+  // lose the key -- CodeRabbit Major, firsthand-probed).
+  if ((v !== null && typeof v === 'object') || typeof v === 'bigint') {
     const fn = v.toJSON;
-    if (typeof fn === 'function') return fn.call(v, key);
+    // Reflect.apply, NOT `fn.call(v, key)`: `.call` is read off the UNTRUSTED toJSON function, so a payload-supplied
+    // function carrying its OWN `.call` property would hijack serialization. Reflect.apply uses the internal [[Call]],
+    // matching native JSON.stringify (CodeRabbit).
+    if (typeof fn === 'function') return Reflect.apply(fn, v, [key]);
   }
   return v;
 }
@@ -92,6 +97,12 @@ function canonicalJsonSerialize(value) {
     if (++nodeCount > MAX_CANONICAL_NODES) {
       throw new TypeError('canonicalJsonSerialize: max node budget exceeded (' + MAX_CANONICAL_NODES + ')');
     }
+    // a bigint reaching a leaf is unserializable by native's rules -- a BARE bigint (native JSON.stringify throws) OR a
+    // value a toJSON RETURNED (native resolves toJSON ONCE then throws on the bigint result; it does NOT re-apply
+    // BigInt.prototype.toJSON). Throw here: a `JSON.stringify(bigint)` delegation would RE-resolve toJSON at the wrong
+    // key and emit bytes native rejects (a content-hash desync -- CodeRabbit Major). A bigint WITH a toJSON was already
+    // transformed at the parent by applyToJSON. Fail-closed at mint == native (callers catch).
+    if (typeof v === 'bigint') throw new TypeError('canonicalJsonSerialize: cannot serialize a BigInt');
     if (v === null || typeof v !== 'object') return JSON.stringify(v);
     if (Array.isArray(v)) {
       // native serializes arrays BY INDEX (0..length-1): a JSON-absent element (incl. a SPARSE HOLE, read as

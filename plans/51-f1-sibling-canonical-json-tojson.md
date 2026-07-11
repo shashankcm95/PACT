@@ -168,7 +168,7 @@ bare `fn(key)` loses `this` → `Date.prototype.toJSON` throws → breaks EVERY 
 BUILT module → ZERO mint≠read divergences for any IN-SCOPE deterministic value (boxed primitives are the pinned #110
 residual, a distinct value class explicitly out of #99 scope); single-read fold confirmed LANDED via a
 flip-getter; no forgeable collision; every DoS/throw fails closed with a controlled TypeError; toJSON call-count
-bounded at exactly MAX_NODES). code-reviewer **PASS-WITH-NITS**; honesty-auditor **PASS-WITH-NOTES (grade B)**.
+bounded at ~MAX_NODES — within O(1); a root-level or budget-trip toJSON callback can run once past). code-reviewer **PASS-WITH-NITS**; honesty-auditor **PASS-WITH-NOTES (grade B)**.
 
 ### Post-VALIDATE folds applied
 
@@ -192,10 +192,36 @@ bounded at exactly MAX_NODES). code-reviewer **PASS-WITH-NITS**; honesty-auditor
 - **NO-OP for toJSON-free values** — every existing on-disk content-address is unchanged (deductive: a JSON round-trip
   strips methods, so read-back bodies have no callable toJSON → `applyToJSON` is identity). Full suite green corroborates.
 - **#108 node accounting preserved** — one increment per key; toJSON call-count bounded at ~budget (hacker probed the
-  all-present AND all-absent cases both abort at exactly MAX_NODES, no drift).
+  all-present AND all-absent cases both abort at ~MAX_NODES (within O(1); the root/budget-trip callback can run once past), no drift).
 
 **Named residuals (pinned, NOT closed by #99):** boxed primitives (**#110**), non-idempotent toJSON (fail-closed
 suppression), key-dependent toJSON (INV-22 dedup fail-safe), prototype-pollution (native-consistent, game-over anyway).
 
-**Gate: full suite 821/0, eslint 0. Pre-PR CodeRabbit: 4 Minor (all plan/test-doc; #3 BigInt was a false positive
-refuted by a firsthand probe — canonical honors a bigint-with-prototype-toJSON via scalar delegation, == native), folded.**
+**Gate: full suite 821/0, eslint 0. Pre-PR CodeRabbit (CLI): 4 Minor, folded.**
+
+## POST-PR CodeRabbit fold (PR-side review, 2026-07-11)
+
+The PR-side CodeRabbit posted **4 findings** on a green check (the async-bot gate: the check reads `pass` while real
+findings exist). All firsthand-probed against native. **My pre-PR-CLI note called the BigInt finding a "false
+positive" — that was WRONG: my probe used a KEY-INDEPENDENT `BigInt.prototype.toJSON`; CodeRabbit used the shapes I
+didn't pick (key-dependent + a toJSON RETURNING a bigint), which genuinely diverge** ("attack the shapes you didn't
+pick", SCAR-24 class; the async bot COMPLEMENTS the lens tier again).
+
+- **[Finding 3, MAJOR — FIXED] BigInt dispatch.** Two real byte-parity divergences, both from `applyToJSON` guarding
+  `typeof==='object'` only, so a bigint fell to walk's leaf `JSON.stringify(v)`: (3a) a nested bigint with a
+  key-dependent `BigInt.prototype.toJSON` got root key `''` not the property key (`{"n":"K="}` vs native `{"n":"K=n"}`);
+  (3b) a toJSON RETURNING a bigint + `BigInt.prototype.toJSON` set made canonical emit `{"d":7}` while native THROWS
+  (the leaf re-resolved toJSON, breaking native's resolve-once → **bytes native rejects → content-hash desync**). Fix:
+  `applyToJSON` mirrors native's Object-OR-BigInt step-2 dispatch (transform a bigint at the PARENT with the correct
+  key), and walk's scalar branch THROWS on any bigint reaching a leaf (bare → native throws; toJSON-result → native
+  throws via resolve-once). Premise-probed live: all cases now == native (byte-identical or both-throw). +4 regression
+  tests (incl. `BigInt.prototype.toJSON` set, try/finally-restored).
+- **[Finding 4, Minor security — FIXED] `Reflect.apply`.** `fn.call(v, key)` read `.call` off the UNTRUSTED toJSON; a
+  payload-supplied own `.call` hijacked serialization (`{"d":"HIJACKED"}`). Switched to `Reflect.apply(fn, v, [key])`
+  (internal [[Call]], == native). +1 regression test proving the hijack value never appears.
+- **[Finding 2, Minor — PINNED, deferred to #110] boxed primitive via toJSON return.** A toJSON returning `Object(5)`
+  hits the same boxed-primitive residual (`{"d":{}}` vs native `{"d":5}`). Broadened #110 + the residual test to cover
+  the toJSON-return path; boxed-primitive UNWRAP stays deferred to #110 (native step 4, orthogonal to toJSON).
+- **[Finding 1, Minor — doc] budget "exactly" claim** softened above (the root/trip callback can run once past).
+
+**Gate after fold: canonical-json 32/32, full suite green, eslint 0.**

@@ -183,13 +183,45 @@ test('#99: the node budget still bounds a toJSON-returned HUGE object (no DoS es
   const huge = { toJSON() { return Array.from({ length: 10001 }, (_v, i) => i); } };
   assert.throws(() => canonicalJsonSerialize({ d: huge }), /node budget|max/i);
 });
-test('#99: a BARE BigInt (no prototype toJSON) throws at mint (fail-closed) == native (applyToJSON guards typeof object only)', () => {
-  // applyToJSON guards typeof==='object' only, so a bigint falls through to walk's scalar branch -> JSON.stringify(bigint)
-  // THROWS. Fail-closed at mint, byte-identical to native's own throw. (A bigint WITH a callable BigInt.prototype.toJSON
-  // is honored via the SAME scalar JSON.stringify delegation -> == native; not tested here to avoid a global-prototype
-  // mutation, documented in canonical-json.js.)
+test('#99: a BARE BigInt throws at mint (fail-closed) == native', () => {
   assert.throws(() => canonicalJsonSerialize({ n: 10n }), /BigInt/);
   assert.throws(() => JSON.stringify({ n: 10n }), /BigInt/, 'native throws too');
+});
+test('#99: a toJSON RETURNING a bigint throws (fail-closed) == native -- the leaf does NOT re-serialize it', () => {
+  assert.throws(() => canonicalJsonSerialize({ d: { toJSON() { return 1n; } } }), /BigInt/);
+  assert.throws(() => JSON.stringify({ d: { toJSON() { return 1n; } } }), /BigInt/, 'native throws too');
+});
+test('#99: BigInt dispatch mirrors native when BigInt.prototype.toJSON is set (correct key at object/array/root)', () => {
+  // native's step-2 dispatch is Object-OR-BigInt: applyToJSON transforms a bigint at the PARENT so its toJSON gets the
+  // correct property key (a leaf JSON.stringify would pass root key ''). CodeRabbit Major, firsthand-probed. Restore in finally.
+  BigInt.prototype.toJSON = function (key) { return 'K=' + key; };
+  try {
+    assert.equal(canonicalJsonSerialize({ n: 1n }), '{"n":"K=n"}');
+    assert.equal(canonicalJsonSerialize({ n: 1n }), JSON.stringify({ n: 1n }), '== native (correct property key, not "")');
+    assert.equal(canonicalJsonSerialize([1n, 2n]), JSON.stringify([1n, 2n]), '== native (array index keys)');
+    assert.equal(canonicalJsonSerialize(1n), JSON.stringify(1n), '== native (root key "")');
+  } finally {
+    delete BigInt.prototype.toJSON;
+  }
+});
+test('#99: a toJSON->bigint still throws EVEN WITH BigInt.prototype.toJSON set (resolve-once == native, no "7" desync)', () => {
+  // the 3b divergence: native resolves the OUTER toJSON once (-> 1n) then throws; canonical must NOT re-apply
+  // BigInt.prototype.toJSON at the leaf (that would emit bytes native rejects). Both throw. Restore in finally.
+  BigInt.prototype.toJSON = function () { return 7; };
+  try {
+    assert.throws(() => canonicalJsonSerialize({ d: { toJSON() { return 1n; } } }), /BigInt/);
+    assert.throws(() => JSON.stringify({ d: { toJSON() { return 1n; } } }), /BigInt/, 'native throws too (resolve-once)');
+  } finally {
+    delete BigInt.prototype.toJSON;
+  }
+});
+test('#99: a toJSON function with a SHADOWED .call cannot hijack serialization (Reflect.apply, not fn.call) == native', () => {
+  // `.call` is read off the untrusted toJSON; a payload-supplied own `.call` would hijack. Reflect.apply uses the
+  // internal [[Call]] (CodeRabbit). Prove the hijack value never appears.
+  const evil = { toJSON() { return 'real'; } };
+  evil.toJSON.call = function () { return 'HIJACKED'; };
+  assert.equal(canonicalJsonSerialize({ d: evil }), '{"d":"real"}');
+  assert.equal(canonicalJsonSerialize({ d: evil }), JSON.stringify({ d: evil }), '== native (not hijacked)');
 });
 
 // ---- #99 KNOWN RESIDUALS (same content-address-mismatch class, pinned so NOT silent -- VERIFY board) ----
@@ -200,12 +232,15 @@ test('#99 RESIDUAL (pinned): a NON-IDEMPOTENT toJSON is unhashable by definition
   const flip = { toJSON() { n += 1; return n; } };
   assert.notEqual(canonicalJsonSerialize({ d: flip }), canonicalJsonSerialize({ d: flip }), 'non-idempotent -> mint != read -> fail-closed');
 });
-test('#99 RESIDUAL (pinned, DEFERRED sibling): a BOXED primitive reproduces the mint-then-reject -- NOT closed by the toJSON fix', () => {
-  // native unwraps a boxed primitive (SerializeJSONProperty step 4); canonical does not (no toJSON) -> the same
-  // content-address-mismatch class as the Date bug, for a distinct value class. Tracked as #110.
-  const boxed = { x: Object(5) }; // a Number wrapper object (no-new-wrappers-clean)
-  assert.equal(canonicalJsonSerialize(boxed), '{"x":{}}', 'boxed primitive serializes as {} (the residual)');
-  assert.notEqual(canonicalJsonSerialize(boxed), JSON.stringify(boxed), 'diverges from native "{\\"x\\":5}" -- residual is real + pinned');
+test('#99 RESIDUAL (pinned, DEFERRED #110): a BOXED primitive reproduces the mint-then-reject -- direct field AND toJSON return', () => {
+  // native unwraps a boxed primitive (SerializeJSONProperty step 4); canonical does not -> the same
+  // content-address-mismatch class as the Date bug, a distinct value class. Reachable BOTH ways (CodeRabbit). Tracked as #110.
+  const direct = { x: Object(5) }; // a Number wrapper object as a direct field
+  assert.equal(canonicalJsonSerialize(direct), '{"x":{}}', 'direct boxed field serializes as {} (the residual)');
+  assert.notEqual(canonicalJsonSerialize(direct), JSON.stringify(direct), 'diverges from native "{\\"x\\":5}"');
+  const viaToJson = { x: { toJSON() { return Object(5); } } }; // a toJSON RETURNING a boxed primitive
+  assert.equal(canonicalJsonSerialize(viaToJson), '{"x":{}}', 'toJSON-returned boxed primitive also serializes as {}');
+  assert.notEqual(canonicalJsonSerialize(viaToJson), JSON.stringify(viaToJson), 'also diverges from native "{\\"x\\":5}"');
 });
 
 console.log(`\n[canonical-json] ${pass} passed, ${fail} failed`);
