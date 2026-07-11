@@ -36,11 +36,49 @@ const MAX_CANONICAL_NODES = 10000;
 // value with none of these (a value already free of them is byte-stable -- the deductive proof: every on-disk body
 // was written via native JSON.stringify, so every parsed-back body is already JSON-absent-free, so the fix is
 // identity for it; every existing READABLE content-address is unchanged).
-// DEFERRED SIBLING -- `toJSON`: a distinct value-TRANSFORM mechanism (native calls `toJSON()` first, e.g. Date ->
-// ISO string). NOT handled here, and it reproduces the SAME mint-then-reject + false class:attack for a toJSON/Date
-// value, REACHABLE via the lenient `validateRecord` payload path. Tracked as its own issue (a real bug, not cosmetic).
+// SIBLING (#99) -- `toJSON`: a distinct value-TRANSFORM mechanism native applies FIRST (Date -> ISO string). Handled by
+// applyToJSON below (mirrors SerializeJSONProperty step 2a), closing the SAME mint-then-reject + false class:attack as
+// #77 for the toJSON/Date value class.
 function isJsonAbsent(x) {
   return x === undefined || typeof x === 'function' || typeof x === 'symbol';
+}
+
+// #99 -- native SerializeJSONProperty step 2a: an object with a callable `toJSON` is TRANSFORMED before the type
+// dispatch (Date -> ISO string), and native threads the property key. Resolved in the PARENT (before isJsonAbsent) so a
+// toJSON RETURNING undefined correctly DROPS the object key / NULLS the array element -- walk() returns a string
+// unconditionally, so only the parent can omit/null. SINGLE read of `.toJSON` (mirrors native's one GetV): reading it
+// twice diverges from the native WRITE path for a getter-valued toJSON (mint would hash read#2 while disk gets read#1 ->
+// the exact content-address-mismatch this closes). `fn.call(v, key)` preserves `this` -- a bare fn(key) loses it and
+// Date.prototype.toJSON throws on EVERY Date. Native resolves toJSON ONCE per value (does NOT loop): the RESULT is
+// walked without re-applying toJSON at the same level (a returned toJSON-bearing object leaves that inner toJSON a
+// dropped function-property, like native). A THROWING toJSON propagates -> fail-closed at mint (record uncomputable =
+// never minted = no read side = no mint-then-reject); its message is discarded by the caller's bare catch (record.js).
+//
+// KNOWN RESIDUALS of the SAME content-address-mismatch class -- pinned in canonical-json.test.js so NOT silent:
+//   * BOXED PRIMITIVES (new Number/String/Boolean): native unwraps (step 4), canonical does not -> emits `{}` -> a
+//     distinct value class, tracked as #110 (not #99 scope). Reachable BOTH as a direct field AND as a toJSON RETURN
+//     value (a toJSON returning `Object(5)`); both pinned in the test.
+//   * NON-IDEMPOTENT toJSON (counter/Date.now/mutating): unhashable by definition -> mint != read -> the store fails
+//     CLOSED (suppression), the safe direction; native is equally non-deterministic.
+//   * KEY-DEPENDENT toJSON: computeRecordId hashes payload at key "payload" but deriveIdempotencyKey hashes it at root
+//     key "" (record.js) -> a key-sensitive toJSON makes the idempotency_key mint-vs-read inconsistent -> the record is
+//     skipped as a poison record (INV-22 dedup fail-safe, not forgery). Exotic.
+//   * PROTOTYPE POLLUTION (Object.prototype.toJSON set): every object canonicalizes to the polluted value
+//     (native-consistent); both native + store are already game-over under prototype pollution.
+// (BigInt is HANDLED, not a residual: applyToJSON mirrors native's Object-OR-BigInt step-2 dispatch, and the
+// walk-scalar throw above rejects any bigint reaching a leaf -- see those comments. CodeRabbit Major, #111.)
+function applyToJSON(v, key) {
+  // native's step-2 dispatch is Object-OR-BigInt: a bigint with a (prototype) toJSON is transformed at the PARENT too,
+  // so its toJSON receives the correct property key (a leaf JSON.stringify would re-wrap the bigint at root key '' and
+  // lose the key -- CodeRabbit Major, firsthand-probed).
+  if ((v !== null && typeof v === 'object') || typeof v === 'bigint') {
+    const fn = v.toJSON;
+    // Reflect.apply, NOT `fn.call(v, key)`: `.call` is read off the UNTRUSTED toJSON function, so a payload-supplied
+    // function carrying its OWN `.call` property would hijack serialization. Reflect.apply uses the internal [[Call]],
+    // matching native JSON.stringify (CodeRabbit).
+    if (typeof fn === 'function') return Reflect.apply(fn, v, [key]);
+  }
+  return v;
 }
 
 /**
@@ -59,6 +97,12 @@ function canonicalJsonSerialize(value) {
     if (++nodeCount > MAX_CANONICAL_NODES) {
       throw new TypeError('canonicalJsonSerialize: max node budget exceeded (' + MAX_CANONICAL_NODES + ')');
     }
+    // a bigint reaching a leaf is unserializable by native's rules -- a BARE bigint (native JSON.stringify throws) OR a
+    // value a toJSON RETURNED (native resolves toJSON ONCE then throws on the bigint result; it does NOT re-apply
+    // BigInt.prototype.toJSON). Throw here: a `JSON.stringify(bigint)` delegation would RE-resolve toJSON at the wrong
+    // key and emit bytes native rejects (a content-hash desync -- CodeRabbit Major). A bigint WITH a toJSON was already
+    // transformed at the parent by applyToJSON. Fail-closed at mint == native (callers catch).
+    if (typeof v === 'bigint') throw new TypeError('canonicalJsonSerialize: cannot serialize a BigInt');
     if (v === null || typeof v !== 'object') return JSON.stringify(v);
     if (Array.isArray(v)) {
       // native serializes arrays BY INDEX (0..length-1): a JSON-absent element (incl. a SPARSE HOLE, read as
@@ -67,7 +111,7 @@ function canonicalJsonSerialize(value) {
       // hash divergence from the native write path, e.g. a poisoned array field: pre-PR CodeRabbit).
       const parts = [];
       for (let i = 0; i < v.length; i += 1) {
-        const x = v[i];
+        const x = applyToJSON(v[i], String(i)); // #99: native transforms each element via toJSON (index key) FIRST
         parts.push(walk(isJsonAbsent(x) ? null : x, depth + 1));
       }
       return '[' + parts.join(',') + ']';
@@ -84,8 +128,8 @@ function canonicalJsonSerialize(value) {
     const parts = [];
     for (let i = 0; i < sortedKeys.length; i += 1) {
       const k = sortedKeys[i];
-      const val = v[k];
-      if (isJsonAbsent(val)) {
+      const val = applyToJSON(v[k], k); // #99: native transforms each value via toJSON (property key) FIRST; a
+      if (isJsonAbsent(val)) {          // toJSON->undefined then drops the key here, exactly like native's omit.
         if (++nodeCount > MAX_CANONICAL_NODES) {
           throw new TypeError('canonicalJsonSerialize: max node budget exceeded (' + MAX_CANONICAL_NODES + ')');
         }
@@ -95,7 +139,7 @@ function canonicalJsonSerialize(value) {
     }
     return '{' + parts.join(',') + '}';
   }
-  return walk(value, 0);
+  return walk(applyToJSON(value, ''), 0); // #99: native wraps the root as {"": value} -> root toJSON key is ''
 }
 
 module.exports = { canonicalJsonSerialize, MAX_CANONICAL_DEPTH, MAX_CANONICAL_NODES };
