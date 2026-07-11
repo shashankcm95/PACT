@@ -232,15 +232,65 @@ test('#99 RESIDUAL (pinned): a NON-IDEMPOTENT toJSON is unhashable by definition
   const flip = { toJSON() { n += 1; return n; } };
   assert.notEqual(canonicalJsonSerialize({ d: flip }), canonicalJsonSerialize({ d: flip }), 'non-idempotent -> mint != read -> fail-closed');
 });
-test('#99 RESIDUAL (pinned, DEFERRED #110): a BOXED primitive reproduces the mint-then-reject -- direct field AND toJSON return', () => {
-  // native unwraps a boxed primitive (SerializeJSONProperty step 4); canonical does not -> the same
-  // content-address-mismatch class as the Date bug, a distinct value class. Reachable BOTH ways (CodeRabbit). Tracked as #110.
-  const direct = { x: Object(5) }; // a Number wrapper object as a direct field
-  assert.equal(canonicalJsonSerialize(direct), '{"x":{}}', 'direct boxed field serializes as {} (the residual)');
-  assert.notEqual(canonicalJsonSerialize(direct), JSON.stringify(direct), 'diverges from native "{\\"x\\":5}"');
-  const viaToJson = { x: { toJSON() { return Object(5); } } }; // a toJSON RETURNING a boxed primitive
-  assert.equal(canonicalJsonSerialize(viaToJson), '{"x":{}}', 'toJSON-returned boxed primitive also serializes as {}');
-  assert.notEqual(canonicalJsonSerialize(viaToJson), JSON.stringify(viaToJson), 'also diverges from native "{\\"x\\":5}"');
+// ---- #110: canonical UNWRAPS boxed primitives (native step 4) -- closes the residual cascade #77->#99->#110 ----
+test('#110: a BOXED primitive is unwrapped == native (direct field + toJSON return + String/Boolean + mint==read)', () => {
+  assert.equal(canonicalJsonSerialize({ x: Object(5) }), '{"x":5}');
+  assert.equal(canonicalJsonSerialize({ x: Object(5) }), JSON.stringify({ x: Object(5) }), '== native');
+  assert.equal(canonicalJsonSerialize({ x: Object('ab') }), '{"x":"ab"}');
+  assert.equal(canonicalJsonSerialize({ x: Object(true) }), '{"x":true}');
+  // a toJSON RETURNING a boxed primitive is unwrapped too (step 4 runs on the post-toJSON value)
+  assert.equal(canonicalJsonSerialize({ x: { toJSON() { return Object(5); } } }), '{"x":5}');
+  const rec = { x: Object(5) };
+  assert.equal(canonicalJsonSerialize(rec), canonicalJsonSerialize(JSON.parse(JSON.stringify(rec))), 'mint == read (no false attack)');
+});
+test('#110: boxed unwrap mirrors native PER-SLOT under adversarial coercion overrides (NOT a uniform valueOf)', () => {
+  // native reads the Boolean slot directly (ignores an overridden valueOf); toString-first for String; ToNumber
+  // (honors @@toPrimitive) for Number. A uniform out.valueOf() would diverge -> re-open the mint-then-reject (VERIFY).
+  const bt = Object(true); bt.valueOf = () => false;
+  assert.equal(canonicalJsonSerialize({ x: bt }), '{"x":true}', 'Boolean reads the RAW slot, not the overridden valueOf');
+  assert.equal(canonicalJsonSerialize({ x: bt }), JSON.stringify({ x: bt }), '== native');
+  const sv = Object('ab'); sv.valueOf = () => 'HACKED';
+  assert.equal(canonicalJsonSerialize({ x: sv }), '{"x":"ab"}', 'String uses toString-first, not valueOf');
+  assert.equal(canonicalJsonSerialize({ x: sv }), JSON.stringify({ x: sv }), '== native');
+  const st = Object('ab'); st.toString = () => 'TS';
+  assert.equal(canonicalJsonSerialize({ x: st }), JSON.stringify({ x: st }), 'String toString-override == native');
+  const np = Object(5); np[Symbol.toPrimitive] = () => 777;
+  assert.equal(canonicalJsonSerialize({ x: np }), '{"x":777}', 'Number honors @@toPrimitive (ToNumber)');
+  assert.equal(canonicalJsonSerialize({ x: np }), JSON.stringify({ x: np }), '== native');
+});
+test('#110: a boxed primitive whose conversion THROWS or yields a bigint fails CLOSED at mint == native (no swallow-to-{} collision)', () => {
+  // VALIDATE hacker H1: swallowing the conversion throw would walk the box as {} -> a content-address COLLISION with a
+  // plain {} that native REJECTS. The conversion throw must PROPAGATE (fail-closed). M1: Number()=ToNumeric accepts a
+  // bigint; native step-4a ToNumber (unary +) throws -> both throw.
+  const throwsVO = Object(5); throwsVO.valueOf = () => { throw new Error('boom'); }; throwsVO.toString = () => { throw new Error('boom'); };
+  assert.throws(() => canonicalJsonSerialize({ x: throwsVO }), /boom/, 'a throwing conversion propagates, not swallowed to {}');
+  assert.throws(() => JSON.stringify({ x: throwsVO }), /boom/, 'native throws too');
+  const bigVO = Object(5); bigVO.valueOf = () => 10n;
+  assert.throws(() => canonicalJsonSerialize({ x: bigVO }), /BigInt|convert/i, 'ToNumber (unary +) throws on a bigint');
+  assert.throws(() => JSON.stringify({ x: bigVO }), /BigInt|convert/i, 'native throws too');
+});
+test('#110: slot-DETECTION (not instanceof) -- a slot-less prototype match / toStringTag spoof is NOT unwrapped == native', () => {
+  // Object.create(Number.prototype) is instanceof-true but SLOT-LESS -> native walks it as {} (no throw); instanceof +
+  // valueOf would THROW (a regression). The slot-probe matches native.
+  const noSlot = Object.create(Number.prototype);
+  assert.equal(canonicalJsonSerialize({ x: noSlot }), '{"x":{}}', 'slot-less instanceof match stays {} (no throw)');
+  assert.equal(canonicalJsonSerialize({ x: noSlot }), JSON.stringify({ x: noSlot }), '== native');
+  const spoof = {}; Object.defineProperty(spoof, Symbol.toStringTag, { value: 'Number' });
+  assert.equal(canonicalJsonSerialize({ x: spoof }), '{"x":{}}', 'toStringTag spoof stays {} (slot-probe ignores it)');
+  assert.equal(canonicalJsonSerialize({ x: spoof }), JSON.stringify({ x: spoof }), '== native');
+  class X extends Number { constructor() { super(9); } }
+  assert.equal(canonicalJsonSerialize({ x: new X() }), '{"x":9}', 'a real [[NumberData]] slot -> unwrapped');
+});
+test('#110: a REAL boxed primitive with an own Symbol.toStringTag is STILL unwrapped == native (slot, not tag)', () => {
+  // CodeRabbit: a real box can carry an own @@toStringTag -> Object.prototype.toString reports a non-boxed tag, so a
+  // tag-based pre-filter would DROP it -> {} != native. The slot-probe detects it regardless of the reported tag.
+  const n = Object(5); n[Symbol.toStringTag] = 'Foo';
+  assert.equal(canonicalJsonSerialize({ x: n }), '{"x":5}');
+  assert.equal(canonicalJsonSerialize({ x: n }), JSON.stringify({ x: n }), '== native (unwrapped via the slot, not the tag)');
+});
+test('#110: a BOXED BigInt (Object(1n)) throws at mint == native (unwrapped to a primitive bigint -> walk-scalar throw)', () => {
+  assert.throws(() => canonicalJsonSerialize({ x: Object(1n) }), /BigInt/);
+  assert.throws(() => JSON.stringify({ x: Object(1n) }), /BigInt/, 'native throws too');
 });
 
 console.log(`\n[canonical-json] ${pass} passed, ${fail} failed`);
