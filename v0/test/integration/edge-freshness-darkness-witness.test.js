@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 const MODULE_REL = 'lib/edge-freshness.js';
 
 let pass = 0; let fail = 0;
@@ -44,6 +45,9 @@ test('precondition: the src/ enumeration is non-empty (else "nothing requires it
 });
 
 test('DORMANT: edge-freshness is imported ONLY by signed-edge + the disarmed vouch-freshness filter (W2 exact-set allowlist)', () => {
+  // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
+  // (a require(base+name) would slip past silently). Fail RED the instant one is added.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importers = allSrcFiles(SRC)
     .filter((f) => !/edge-freshness\.js$/.test(f))
     // match BOTH the bare `require('.../edge-freshness')` and the explicit `.js` form (CodeRabbit Major): a regex

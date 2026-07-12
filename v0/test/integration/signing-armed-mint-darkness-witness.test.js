@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 const MODULE_REL = 'trust/signing-armed-mint.js';
 // the require SPECIFIERS (relative to trust/) this module is allowed to hold -- exactly the three folded-in edges.
 const EXPECTED_IMPORTS = ['../identity/mint-fresh-vouch', '../lib/refuse-alert', './arming-coherence'];
@@ -50,6 +51,9 @@ test('precondition: the src/ enumeration is non-empty (else the checks pass vacu
 });
 
 test('(1) DORMANT: no src module requires signing-armed-mint (the arming-gated producer is import-dark)', () => {
+  // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
+  // (a require(base+name) would slip past silently). Fail RED the instant one is added.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importers = allSrcFiles(SRC)
     .filter((f) => !/signing-armed-mint\.js$/.test(f))
     // anchored to the closing quote so `signing-armed-mint-v2` / `signing-armed-minter` do NOT false-match.
