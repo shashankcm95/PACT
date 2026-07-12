@@ -57,11 +57,13 @@ read-path gate arms, changing the read-chokepoint contract is a trust-boundary m
 
 3. **DEFER the open decision to the arming boundary, with a hard revisit trigger** — whether `root_valid` and
    inclusion-proof presence become **read-gate requirements** is decided *before the first read-path gate arms*,
-   not assumed. The natural home is ADR-0001 Decision 4, which **proposes** relocating the anchoring/freshness
-   filters into `read-gate.js` as `authenticatedAnchoredRecords` — **NOT yet built** (that function exists only in
-   these two ADRs; today the filters live in `convert.disjointPaths`, `v0/src/trust/convert.js:89-90`). That
-   proposed relocation is where the read chokepoint would ALSO gain the ingress-only checks. Revisit trigger:
-   **the operator elects to arm a read-path gate** (NS-7, operator-only — Claude never arms).
+   not assumed. The natural home is ADR-0001 Decision 4, which relocated the anchoring/freshness filters into a
+   chokepoint `authenticatedAnchoredRecords` — **now BUILT** (2026-07-12, plans/56 W2b) as
+   `v0/src/trust/authenticated-read.js` (a NEW module, NOT `read-gate.js` — see ADR-0001 Dec 4's 2026-07-12
+   amendment). Today only `convert.disjointPaths` routes through it (the other consumers are named residuals — the
+   monotonicity inversion); the read chokepoint is where the ingress-only checks (`root_valid` + inclusion) would
+   ALSO land when a read-path gate arms. Revisit trigger: **the operator elects to arm a read-path gate** (NS-7,
+   operator-only — Claude never arms).
 
 4. **Guard against silent drift until then** — a cross-reference comment at BOTH chokepoints (`receiveFrame` and
    `verifiedRecords`) points here, so an editor changing the authentication check-set in one path is confronted
