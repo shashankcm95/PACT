@@ -66,17 +66,17 @@ test('ARMED == DARK (convert.actionable): full arming does NOT flip actionable',
   assert.equal(out.actionable, false, 'convert.actionable stays false under full arming (INV-16, U2 open)');
 });
 
-test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dormant {admission-gate, signing-armed-mint} consumers', () => {
-  // COMPUTED whole-tree scan, not a hardcoded pair (VALIDATE-hacker LOW: 5 other decision-shaped trust
-  // modules exist; a future edit wiring arming into read-gate/issuance-policy/... must go RED too). Anchored to
-  // a require() call so a prose mention cannot false-fail.
+test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dormant {signing-armed-mint} consumer', () => {
+  // COMPUTED whole-tree scan, not a hardcoded pair (VALIDATE-hacker LOW: other decision-shaped trust modules
+  // exist; a future edit wiring arming into read-gate/issuance-policy/... must go RED too). Anchored to a
+  // require() call so a prose mention cannot false-fail.
   //
-  // W2 UPDATE (plans/42): arming-coherence now has TWO consumers, BOTH deliberate + BOTH dark -- admission-gate
-  // (the admission arm's consumer, plans/33) and signing-armed-mint (the SIGNING arm's producer-consumer, this
-  // wave). Each is ITSELF wired to nothing (proven by admission-gate-darkness-witness /
-  // signing-armed-mint-darkness-witness), so the "arms nothing" guarantee holds transitively through both. The
-  // allowlist is EXACTLY these two (deepEqual, never a subset). ANY OTHER importer, or either consumer being
-  // wired into a live gate, goes RED (the intended deliberate-update signal; never silently broaden it).
+  // W2a UPDATE (plans/55): admission-gate MIGRATED off arming-coherence onto the 4-signal arming-MANIFEST
+  // (resolveArmedContext), so arming-coherence now has EXACTLY ONE consumer -- signing-armed-mint (the SIGNING
+  // arm's producer-consumer, plans/42), itself wired to nothing (signing-armed-mint-darkness-witness). The
+  // "arms nothing" guarantee holds transitively through it. The allowlist is EXACTLY this one (deepEqual, never a
+  // subset). ANY OTHER importer -- or signing-armed-mint being wired into a live gate -- goes RED. (admission-gate's
+  // consumption of arming-manifest is witnessed by arming-manifest-darkness-witness instead.)
   // #94/F19 SOUNDNESS: the inline literal-require scan below is complete only if NO computed require() exists in
   // the tree (a require(base+name) would slip past silently). Fail RED the instant one is added.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
@@ -91,7 +91,7 @@ test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dor
     }
   };
   walk(SRC);
-  assert.deepEqual(importers.sort(), ['trust/admission-gate.js', 'trust/signing-armed-mint.js'], 'arming-coherence must be imported ONLY by the dormant {admission-gate, signing-armed-mint}; found: ' + importers.join(', '));
+  assert.deepEqual(importers.sort(), ['trust/signing-armed-mint.js'], 'arming-coherence must be imported ONLY by the dormant {signing-armed-mint}; found: ' + importers.join(', '));
 });
 
 console.log(`\n[arming-darkness-witness] ${pass} passed, ${fail} failed`);

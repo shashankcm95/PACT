@@ -71,7 +71,7 @@ test('BASELINE SINK is dark (convert.actionable): actionable stays false (weak c
   assert.equal(out.actionable, false, 'convert.actionable stays false under a fully-armed manifest (INV-16, U2 open)');
 });
 
-test('STRUCTURAL dormancy tripwire (THE dormancy proof): arming-manifest is imported by NOTHING in src', () => {
+test('STRUCTURAL dormancy tripwire (THE dormancy proof): arming-manifest is imported ONLY by the dormant {admission-gate}', () => {
   // #94/F19 SOUNDNESS: the literal-specifier scan below is complete only if NO computed require() exists in the
   // tree (a require(base+name) would slip past silently). assertOnlyLiteralRequires fails RED the instant one is added.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
@@ -97,9 +97,11 @@ test('STRUCTURAL dormancy tripwire (THE dormancy proof): arming-manifest is impo
     })
     .map((f) => path.relative(SRC, f))
     .sort();
-  // EXACT-SET (deepEqual, never .includes): the Wave-1 primitive has NO live consumer (consumers are this witness
-  // + the future operator-wiring / Wave-2 admission-gate rewire). ANY src importer goes RED (deliberate-update signal).
-  assert.deepEqual(importers, [], 'arming-manifest must be imported by NOTHING in src; found: ' + importers.join(', '));
+  // EXACT-SET (deepEqual, never .includes): W2a (plans/55) wired admission-gate as the manifest's FIRST + ONLY
+  // consumer. TRANSITIVE dormancy -- admission-gate imports the manifest but is ITSELF import-dark (proven by
+  // admission-gate-darkness-witness (A)), so "arms nothing" holds through it. ANY OTHER importer -- or admission-gate
+  // being wired into a live gate -- goes RED (the intended deliberate-update signal; never silently broaden it).
+  assert.deepEqual(importers, ['trust/admission-gate.js'], 'arming-manifest must be imported ONLY by the dormant {admission-gate}; found: ' + importers.join(', '));
 });
 
 console.log(`\n[arming-manifest-darkness-witness] ${pass} passed, ${fail} failed`);
