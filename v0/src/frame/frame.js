@@ -90,7 +90,9 @@ function receiveFrame(frame, { registry } = {}) {
   let computed;
   try { computed = computeRecordId(authFrame); } catch { return { ok: false, reason: 'uncomputable' }; }
   if (computed !== authFrame.record_id) return { ok: false, reason: 'record-id-mismatch' };
-  // (3) root_valid (INV-18: a known root; the registry RECORDS, it does not mint trust)
+  // (3) root_valid (INV-18: a known root; the registry RECORDS, it does not mint trust). INGRESS-ONLY: the read
+  // chokepoint trust/read-gate.js:verifiedRecords does NOT re-check root_valid -- a deliberate SHADOW-era
+  // asymmetry (ADR-0002). Changing the authenticated-record check-set here means revisiting that ADR.
   if (!isKnownRoot(registry, authFrame.parent_human_uid)) return { ok: false, reason: 'unknown-root' };
   // (4) P1 auth: verify under the SENDER's registered key (per-sender; fail-closed if unknown)
   const pub = lookupPublicKey(registry, authFrame.src_persona_did);
@@ -99,7 +101,9 @@ function receiveFrame(frame, { registry } = {}) {
     return { ok: false, reason: 'bad-signature' };
   }
   // (5) §7 audit attachment (additive). ABSENT -> accept with `audited:false` (the OBSERVABLE downgrade — the
-  // hook the network phase escalates on). PRESENT -> it MUST verify (the spec §2 rule applied when present): the
+  // hook the network phase escalates on). INGRESS-ONLY: verifiedRecords never re-consults the inclusion proof, so
+  // the merkle/audit layer gates nothing the trust engine WEIGHTS (audit and compute are disjoint — ADR-0002 Context #1).
+  // PRESENT -> it MUST verify (the spec §2 rule applied when present): the
   // sender's STH signature (under its registered key) + the inclusion proof connecting leafHash(record_id) to the
   // STH root at leaf_index. A present-but-INVALID proof => DROP. (Forward contract: the network phase flips the
   // ABSENT branch from accept(audited:false) to drop — same code path, only the absent branch changes.)

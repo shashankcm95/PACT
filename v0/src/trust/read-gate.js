@@ -6,6 +6,13 @@
 // engine weights MUST pass through here first: its signature must verify under the SENDER's registered
 // key. An unsigned / bad-sig / unregistered-sender record is DROPPED (contributes 0). Store-presence is
 // never provenance — integrity != provenance (the #273 family).
+//
+// DELIBERATE ASYMMETRY vs frame.receiveFrame (ADR-0002 / #89): this read chokepoint enforces a NAMED SUBSET of
+// the ingress contract — content-integrity (via the store) + per-sender sig ONLY. It does NOT re-check
+// `root_valid` or the §7 audit inclusion proof; both are INGRESS-ONLY. Tolerable solely because the weight this
+// feeds is SHADOW (gates nothing) — NOT a claim the subset is the correct ARMED contract. Whether `root_valid` +
+// inclusion become read-gate requirements is DEFERRED to the arming boundary (ADR-0002 Decision 3 / ADR-0001
+// Decision 4). Changing the check-set here means revisiting ADR-0002 (do not let the two paths drift silently).
 
 'use strict';
 
