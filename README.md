@@ -9,8 +9,16 @@ a mutually-untrusting multi-agent network.
 > drifting (the anti-drift loop); [`docs/ADRs/`](docs/ADRs/) records the decisions. The deep,
 > amend-deliberately invariants live in **[`PACT-NORTH-STAR.md`](PACT-NORTH-STAR.md)**.
 
-**## Status: **v0 + P2 + P3 + P-minter + P-broker + R2-WHO/R2-WHAT auth + cross-uid custody + U2-seam + merkle/audit anti-equivocation + the U1-stake arc (S1-S5) BUILT + CI (2026-06-24)** — P0-minimal + P1 (ATMS) + P2 (trust) + P3 (grounding + REACH) + P-minter (require-custody) + P-broker (out-of-band custody mechanism) + R2-WHO caller-auth + R2-WHAT per-request auth + the cross-uid custody verifier + the U2 lift-point seam + the §7 merkle/audit anti-equivocation layer (`plans/15`) + the U1 issuance-stake arc (StakeAnchor → issuance-policy → funded-root axis → crater-disciplined SLASH, `plans/18`), **all SHADOW**; the suite is green — run `node test/run.js` for the live count (never quote a remembered one). CI (vacuous-pass-guarded runner + eslint + layering tripwire) on push/PR (node 20+22). **★ 2026-06-23: the R1 cross-uid custody DOGFOOD ran live — file-read non-exfiltration ESTABLISHED (scoped to that, NOT trust broadly), PACT's first world-anchored hardening signal (`plans/14` §8, PR #9).** PRs #1–#21 merged.
-**
+## Status
+
+A research blueprint with a **buildable node** (`v0/`): the ATMS core, the P2 trust engine, the P3 grounding +
+REACH engine, the P-minter + P-broker custody layer, R2-WHO / R2-WHAT auth, cross-uid custody (frame **and**
+sigma-root brokers), the P5 arming arc (arm-flags → admission-gate → signing-armed-mint → registration- and
+vouch-freshness gates), the §7 merkle/audit anti-equivocation layer, and the U1 issuance-stake arc — **all SHADOW**
+(every weight gates nothing; residuals stay loud, NS-9). The one true metric is the count of **world-anchored
+HARDEN signals**; see the live scoreboard in **[`docs/PRD.md` §8](docs/PRD.md#8-success-metrics)** rather than a
+remembered count. Run `node test/run.js` for the live test count; CI (vacuous-pass-guarded runner + eslint +
+layering tripwire) runs on push/PR (node 20 + 22).
 > **All weights are SHADOW (gate nothing) because residuals remain open.** **P-minter** removed the ambient env-PEM signing default and named a structurally key-free custody writer — but it **NARROWS, it does not CLOSE** integrity≠provenance: provenance is a key-custody property crypto cannot prove in-process (a same-uid attacker re-exports any in-process key), so it closes only when the signer routes to a real out-of-band boundary (separate OS uid / enclave / HSM — a *deployment* property). **Still open (loud):** **U1** (human-uniqueness — `rootOf`-keying defeats persona-multiplication, but N distinct *human* roots is the frontier); **own-key forgery** (a same-uid holder of a registered key mints authentic records — U1's issuance-cost problem); same-uid in-process custody (by physics). **U1 issuance-cost now has a SHADOW containment layer** — the slashable STAKE arc (`plans/18`, S1-S5: a custody-minted non-transferable stake, surfaced as an advisory funded-root axis, forfeitable by a crater-disciplined SLASH) — but it **CONTAINS, it does not CLOSE U1** (a wealthy attacker still buys N roots); only a really-deployed on-chain slash (S6, external/unbuilt) would harden the one issuance-cost axis. The full built substrate (v0+P2+P3+minter+broker/custody+merkle/audit+U1-stake) passed a 4-lens coherence checkpoint ([plans/25](plans/25-coherence-checkpoint-2.md) — COHERENT 4/4, all three plans/03 carry-findings RESOLVED); the original v0+P2+P3 checkpoint is [plans/03](plans/03-coherence-checkpoint.md); P-minter passed a 3-lens VERIFY that reframed it close→narrow ([plans/04](plans/04-authenticated-minter-plan.md)).
 
 | Document | What |
