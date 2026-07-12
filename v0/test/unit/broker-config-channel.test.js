@@ -1,0 +1,199 @@
+#!/usr/bin/env node
+'use strict';
+
+// PACT P-broker — config-vs-extras channel separation (#100, plans/53).
+//
+// brokerSigner's opts.env was ONE channel for BOTH the trusted caller's config/ARMING vars AND a benign-extras
+// tail. #100 SEPARATES them so config cannot be injected via extras at all:
+//   * opts.config — a positive allowlist (CONFIG_ENV_KEYS). Fail-closed on any unknown key.
+//   * opts.env    — a negative gate: rejects any config key (NEW), any code-exec reserved key (EXISTING #85),
+//                   any sudo caller-signal (SUDO_UID/SUDO_USER, NEW), and any __proto__/constructor/prototype
+//                   dunder key (NEW); the unbounded benign tail passes.
+// Both channels reject a non-string value LOUDLY (no silent `${v}` coercion mis-arming a security flag).
+//
+// These are CONSTRUCTION-time assertions (the throw fires while brokerSigner builds the child env, before any
+// spawn) + a drift tripwire scanning the two entrypoints. The end-to-end "the injection is CLOSED at the real
+// child" proofs live in the integration suite (broker.test.js), which spawns the actual broker.
+
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const path = require('path');
+const { brokerSigner, CONFIG_ENV_KEYS, CALLER_SIGNAL_ENV } = require('../../src/identity/broker-client');
+
+const IDENTITY = path.join(__dirname, '..', '..', 'src', 'identity');
+const BROKER = path.join(IDENTITY, 'broker-sign.js');
+// a construction that never needs to spawn (every assertion below throws while building the child env).
+const mk = (extra) => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: '/nonexistent', ...extra });
+
+let pass = 0; let fail = 0;
+function test(name, fn) {
+  try { fn(); pass++; console.log('  ok   - ' + name); }
+  catch (e) { fail++; console.error('  FAIL - ' + name + '\n         ' + (e && e.message)); }
+}
+
+// ====================== the config allowlist is a frozen, exported, enumerable set ======================
+
+test('CONFIG_ENV_KEYS is an exported, READ-ONLY membership set of the 9 config/arming vars', () => {
+  assert.equal(typeof CONFIG_ENV_KEYS.has, 'function', 'exposes .has for the membership gate');
+  // NON-VACUOUS immutability (CodeRabbit MAJOR): Object.freeze(new Set()) reports frozen but is STILL mutable via
+  // .add/.delete/.clear -- an exported frozen Set is a caller-widenable/emptyable allowlist (a .clear() reopens the
+  // injection). The read-only wrapper must expose NO mutator, so an importer cannot widen/empty the gate at runtime.
+  assert.equal(CONFIG_ENV_KEYS.add, undefined, 'no .add (an importer cannot WIDEN the allowlist)');
+  assert.equal(CONFIG_ENV_KEYS.clear, undefined, 'no .clear (an importer cannot EMPTY the allowlist -> reopen injection)');
+  assert.equal(CONFIG_ENV_KEYS.delete, undefined, 'no .delete');
+  const expected = [
+    'PACT_BROKER_REQUIRE_FRAME', 'PACT_BROKER_PERSONA_DID', 'PACT_BROKER_REQUIRE_CALLER', 'PACT_BROKER_ALLOWED_UIDS',
+    'PACT_ROOT_KEY_FILE', 'PACT_ROOT_CONTROLLER', 'PACT_ROOT_REQUIRE_BINDING', 'PACT_ROOT_REQUIRE_CALLER', 'PACT_ROOT_ALLOWED_UIDS',
+  ];
+  assert.deepEqual([...CONFIG_ENV_KEYS].sort(), expected.slice().sort(), 'exactly the 9 config vars');
+  // PACT_BROKER_KEY_FILE is EXCLUDED (it owns opts.keyFile + is reserved) -> no two-channel collision.
+  assert.ok(!CONFIG_ENV_KEYS.has('PACT_BROKER_KEY_FILE'), 'PACT_BROKER_KEY_FILE is NOT a config key (keyFile-only)');
+});
+
+test('a truthy non-object opts.config / opts.env FAILS LOUD (not a silent no-op that leaves the broker unarmed)', () => {
+  for (const bad of ['PACT_BROKER_REQUIRE_FRAME', 42, true, null, ['PACT_ROOT_KEY_FILE']]) {
+    assert.throws(() => mk({ config: bad }), /must be a plain object/, 'opts.config=' + JSON.stringify(bad) + ' fails loud');
+    assert.throws(() => mk({ env: bad }), /must be a plain object/, 'opts.env=' + JSON.stringify(bad) + ' fails loud');
+  }
+  // absent / undefined is still fine (the channel is simply skipped, no throw).
+  assert.doesNotThrow(() => mk({}), 'no channels -> no throw');
+  assert.doesNotThrow(() => mk({ config: undefined, env: undefined }), 'explicit undefined -> skipped');
+});
+
+// ====================== opts.config — positive allowlist, fail-closed ======================
+
+test('opts.config ACCEPTS every CONFIG_ENV_KEYS member', () => {
+  for (const k of CONFIG_ENV_KEYS) {
+    assert.doesNotThrow(() => mk({ config: { [k]: 'x' } }), k + ' is a legal config key');
+  }
+});
+
+test('opts.config THROWS on an unknown (non-config) key — fail-closed', () => {
+  for (const bad of ['SOME_BENIGN', 'NODE_ENV', 'PACT_BROKER_TYPO', 'PACT_BROKER_KEY_FILE']) {
+    assert.throws(() => mk({ config: { [bad]: 'x' } }), /opts\.config/, bad + ' is refused in opts.config (not an allowlisted config var)');
+  }
+});
+
+test('opts.config THROWS on a code-exec key (unknown -> fail-closed; single allowlist gate)', () => {
+  for (const bad of ['NODE_OPTIONS', 'LD_PRELOAD', 'OPENSSL_CONF']) {
+    assert.throws(() => mk({ config: { [bad]: 'x' } }), /opts\.config/, bad + ' refused in opts.config');
+  }
+});
+
+test('opts.config THROWS on a sudo caller-signal key', () => {
+  for (const bad of ['SUDO_UID', 'SUDO_USER']) {
+    assert.throws(() => mk({ config: { [bad]: '0' } }), /opts\.config/, bad + ' refused in opts.config');
+  }
+});
+
+test('opts.config THROWS on a __proto__/constructor/prototype dunder key', () => {
+  // JSON.parse makes __proto__ an OWN enumerable key (a literal { __proto__: ... } would set the prototype).
+  assert.throws(() => mk({ config: JSON.parse('{"__proto__":{"PACT_BROKER_REQUIRE_FRAME":"0"}}') }), /opts\.config|reserved|prototype/i, '__proto__ refused in opts.config');
+  assert.throws(() => mk({ config: { constructor: 'x' } }), /opts\.config|reserved|prototype/i, 'constructor refused in opts.config');
+});
+
+test('opts.config THROWS on a non-string value — no silent ${v} coercion mis-arming a flag', () => {
+  for (const v of [0, false, 1, {}, ['x'], null]) {
+    assert.throws(() => mk({ config: { PACT_BROKER_REQUIRE_FRAME: v } }), /string/i, 'non-string config value ' + JSON.stringify(v) + ' refused');
+  }
+});
+
+// ====================== opts.env — negative gate (the injection-closing rejects) ======================
+
+test('opts.env THROWS on ANY config key — config cannot be injected via the extras channel (THE #100 bug)', () => {
+  // Non-vacuity anchor: today opts.env:{PACT_BROKER_REQUIRE_FRAME:'0'} SILENTLY passes (-> blind oracle). The
+  // split makes it fail-closed. This is the headline behavioral change; it is RED against the pre-#100 impl.
+  for (const k of CONFIG_ENV_KEYS) {
+    assert.throws(() => mk({ env: { [k]: '0' } }), /config.*opts\.config|opts\.config/i, k + ' must be refused in opts.env (use opts.config)');
+  }
+});
+
+test('opts.env THROWS on a sudo caller-signal (WHO-gate forge, HIGH-1) — no sudo env_reset backstop in-process', () => {
+  for (const bad of ['SUDO_UID', 'SUDO_USER']) {
+    assert.throws(() => mk({ env: { [bad]: '12345' } }), /reserved|SUDO|caller/i, bad + ' refused in opts.env');
+  }
+});
+
+test('opts.env THROWS on __proto__ (prototype pollution -> config injection, CRITICAL-1)', () => {
+  // The VERIFY hacker proved a real child inheriting PACT_BROKER_REQUIRE_FRAME=0 via a __proto__ key straight
+  // through the gate. Reject the dunder key at construction (throw); Object.create(null) is the belt-and-suspenders
+  // second layer (proven by the integration suite's real-child sign path still working).
+  assert.throws(() => mk({ env: JSON.parse('{"SOME_BENIGN":"1","__proto__":{"PACT_BROKER_REQUIRE_FRAME":"0"}}') }), /reserved|prototype|__proto__/i, '__proto__ key refused in opts.env');
+  assert.throws(() => mk({ env: { constructor: 'x' } }), /reserved|prototype|constructor/i, 'constructor refused in opts.env');
+  assert.throws(() => mk({ env: { prototype: 'x' } }), /reserved|prototype/i, 'prototype refused in opts.env');
+});
+
+test('opts.env THROWS on a non-string value — parity with opts.config (no coercion footgun)', () => {
+  for (const v of [0, false, {}, ['x'], null]) {
+    assert.throws(() => mk({ env: { SOME_BENIGN: v } }), /string/i, 'non-string extra value ' + JSON.stringify(v) + ' refused');
+  }
+});
+
+test('opts.env / opts.config REJECT a NUL/control-char value LOUDLY (fail-closed made observable, not a silent null)', () => {
+  // A control char in a value fails closed at execFileSync but SILENTLY (the sign() bare catch -> null). Reject it
+  // at construction so a tamper/misconfig throws visibly (VALIDATE hacker LOW-1, drift:fail-silent).
+  for (const v of ['a b', 'x\ny', '[0m', 'tab\there']) {
+    assert.throws(() => mk({ env: { SOME_BENIGN: v } }), /control character/i, 'control-char extra value ' + JSON.stringify(v) + ' refused');
+    assert.throws(() => mk({ config: { PACT_BROKER_PERSONA_DID: v } }), /control character/i, 'control-char config value ' + JSON.stringify(v) + ' refused');
+  }
+  // a normal printable value with spaces is still fine (0x20 is a space, not a control char).
+  assert.doesNotThrow(() => mk({ env: { SOME_BENIGN: 'a normal value' } }), 'a space-bearing value is legal');
+});
+
+test('exact-string match: a case/whitespace near-miss of a config key is a BENIGN extra, not a config key (shape #5)', () => {
+  // POSIX env names are case-sensitive and the child reads the EXACT case, so a near-miss is inert AT THE CHILD.
+  // Pin that the gate matches by exact string (no trim/casefold) so a future refactor can't reclassify a near-miss.
+  for (const nearMiss of [' PACT_BROKER_REQUIRE_FRAME', 'PACT_BROKER_REQUIRE_FRAME ', 'pact_broker_require_frame', 'PACT_BROKER_REQUIRE_FRAME\t']) {
+    assert.doesNotThrow(() => mk({ env: { [nearMiss]: '0' } }), JSON.stringify(nearMiss) + ' is a benign extra (not the exact config key)');
+  }
+});
+
+test('opts.env config-membership reject fires INDEPENDENTLY of isReservedEnvKey', () => {
+  // PACT_BROKER_PERSONA_DID is a config key but NOT a code-exec reserved key — so its reject MUST come from the
+  // config-membership arm, not the reserved arm. Guards against a future reserved-set edit silently dropping a
+  // config key back into the benign tail.
+  assert.throws(() => mk({ env: { PACT_BROKER_PERSONA_DID: 'did:key:zX' } }), /config.*opts\.config|opts\.config/i, 'config key rejected via the config-membership arm');
+});
+
+test('opts.env still ACCEPTS the unbounded benign tail (regression: the extras channel survives)', () => {
+  for (const ok of ['SOME_BENIGN', 'NODE_ENV', 'ENVIRONMENT']) {
+    assert.doesNotThrow(() => mk({ env: { [ok]: 'x' } }), ok + ' is a legal benign extra');
+  }
+});
+
+// ====================== drift tripwire: CONFIG_ENV_KEYS must match what the entrypoints read ======================
+
+// strip // line + /* */ block comments so a comment mention of a config-shaped name can't inject a phantom into
+// the scan (code-reviewer LOW). Safe here: the scanned files carry no `//`-in-string (no URL literals).
+function stripComments(src) {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+}
+
+test('DRIFT TRIPWIRE: every PACT_* var the broker code reads is gated (CONFIG_ENV_KEYS union the keyFile channel)', () => {
+  // A renamed/added arm var that falls OUT of CONFIG_ENV_KEYS silently drops back into the unguarded benign tail (a
+  // security regression). Scan the two entrypoints AND the shared broker-core (the honesty-auditor's coverage gap)
+  // for: direct process.env.PACT_* reads (dot AND bracket notation), the keyFileEnv/allowlistEnv/distinctFromKeyFileEnv
+  // literal args (the indirection a naive grep misses), and the SUDO_* caller-signal reads. Comments are stripped
+  // first so a prose mention can't false-fail. Assert the PACT_* union equals CONFIG_ENV_KEYS plus the deliberately
+  // excluded PACT_BROKER_KEY_FILE (opts.keyFile), and every SUDO_* read is in CALLER_SIGNAL_ENV.
+  const pactNames = new Set();
+  const sudoNames = new Set();
+  for (const f of ['broker-sign.js', 'sigma-root-broker.js', 'broker-core.js']) {
+    const src = stripComments(fs.readFileSync(path.join(IDENTITY, f), 'utf8'));
+    for (const m of src.matchAll(/process\.env\.(PACT_[A-Z0-9_]+)/g)) pactNames.add(m[1]);
+    for (const m of src.matchAll(/process\.env\[['"](PACT_[A-Z0-9_]+)['"]\]/g)) pactNames.add(m[1]);
+    for (const m of src.matchAll(/(?:keyFileEnv|allowlistEnv|distinctFromKeyFileEnv):\s*'(PACT_[A-Z0-9_]+)'/g)) pactNames.add(m[1]);
+    for (const m of src.matchAll(/process\.env\.(SUDO_[A-Z0-9_]+)/g)) sudoNames.add(m[1]);
+    for (const m of src.matchAll(/process\.env\[['"](SUDO_[A-Z0-9_]+)['"]\]/g)) sudoNames.add(m[1]);
+  }
+  const expected = new Set([...CONFIG_ENV_KEYS, 'PACT_BROKER_KEY_FILE']);
+  const missing = [...pactNames].filter((n) => !expected.has(n));   // read by the broker but ungated
+  const stale = [...expected].filter((n) => !pactNames.has(n));      // gated but nothing reads it
+  const ungatedSudo = [...sudoNames].filter((n) => !CALLER_SIGNAL_ENV.has(n)); // a SUDO_* read not in the reject set
+  assert.deepEqual(missing, [], 'un-gated config var(s) read by the broker: ' + missing.join(', '));
+  assert.deepEqual(stale, [], 'gated var(s) nothing reads (stale allowlist): ' + stale.join(', '));
+  assert.deepEqual(ungatedSudo, [], 'SUDO_* caller-signal read but not in CALLER_SIGNAL_ENV: ' + ungatedSudo.join(', '));
+});
+
+console.log(`\n[broker-config-channel] ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

@@ -264,13 +264,33 @@ test('client config guards: timeoutMs/maxBytes <= 0 fall back to defaults; opts.
   for (const bad of codeExec) {
     assert.throws(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [bad]: 'x' } }), /may not set a reserved broker-child environment variable/, bad + ' refused in opts.env');
   }
-  // POSITIVE CONTROL (regression guard, #85/F10): the guard ALLOWS the trusted caller's arming config + benign vars.
-  // opts.env is the sigma-root broker's SOLE arming channel (PACT_ROOT_*, sigma-root-broker.test.js:71) -- blocking
-  // it would BREAK arming. NODE_ENV is benign (must NOT be over-blocked by a NODE_ prefix).
-  for (const allowed of ['PACT_ROOT_KEY_FILE', 'PACT_ROOT_CONTROLLER', 'PACT_BROKER_PERSONA_DID', 'NODE_ENV', 'ENVIRONMENT']) {
-    assert.doesNotThrow(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [allowed]: 'x' } }), allowed + ' must be allowed (config/benign, not code-exec)');
+  // POSITIVE CONTROL (#100 channel split, plans/53): config/ARMING vars now flow through opts.config (accepted
+  // there, REJECTED in the extras channel — config cannot be injected via extras); genuinely-benign vars stay on
+  // opts.env. NODE_ENV is benign (must NOT be over-blocked by a NODE_ prefix).
+  for (const cfg of ['PACT_ROOT_KEY_FILE', 'PACT_ROOT_CONTROLLER', 'PACT_BROKER_PERSONA_DID']) {
+    assert.doesNotThrow(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, config: { [cfg]: 'x' } }), cfg + ' is a legal config var via opts.config');
+    assert.throws(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [cfg]: 'x' } }), /use opts\.config/, cfg + ' is REJECTED in opts.env — no config injection via extras (#100)');
+  }
+  for (const benign of ['NODE_ENV', 'ENVIRONMENT']) {
+    assert.doesNotThrow(() => brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { [benign]: 'x' } }), benign + ' is a benign extra (opts.env)');
   }
   assert.ok(brokerSigner({ command: process.execPath, args: [BROKER], keyFile: a.keyFile, env: { SOME_BENIGN: '1' } })(RID), 'a benign extra env var is allowed AND signs');
+  w.cleanup();
+});
+
+test('#100 real-child: an INHERITED-prototype config var on opts.env NEVER reaches the broker child', () => {
+  // A config var on opts.env's PROTOTYPE (not an own key) does NOT trip the dunder reject (Object.keys is own-only,
+  // so nothing is iterated/copied) -> the signer builds. This is the end-to-end proof that the Object.create(null)
+  // target + own-only copy hold: the REAL spawned child must NOT inherit PACT_BROKER_REQUIRE_FRAME (else it enters
+  // require-frame mode and REFUSES a bare-hex id). Closes VERIFY fold 1(c) against the BUILT code (VALIDATE).
+  const w = freshWorld();
+  const me = w.personas[w.ME];
+  const pollutedEnv = Object.create({ PACT_BROKER_REQUIRE_FRAME: '1', PACT_BROKER_PERSONA_DID: w.ME });
+  assert.equal(Object.keys(pollutedEnv).length, 0, 'the config vars are inherited, not own keys (so no dunder throw)');
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, env: pollutedEnv });
+  // a valid sig over a BARE hex proves the child is in LEGACY mode -> the inherited PACT_BROKER_REQUIRE_FRAME never
+  // reached it (had it leaked, require-frame mode would REFUSE the bare hex -> null).
+  assert.ok(signer(RID), 'the child signed a bare-hex id -> legacy mode -> the inherited config var did NOT reach it');
   w.cleanup();
 });
 
@@ -472,7 +492,7 @@ test('R2-WHAT FULL SEAM: buildFrame -> brokerSigner presents the body -> receive
   const w = freshWorld();
   const me = w.personas[w.ME];
   // the broker child runs in require-frame mode (persona in its allowlisted env); buildFrame threads the body.
-  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, env: { PACT_BROKER_PERSONA_DID: w.ME } });
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, config: { PACT_BROKER_PERSONA_DID: w.ME } });
   const built = buildFrame({ srcPersonaDid: w.ME, parentHumanUid: me.human, type: 'CLAIM', seq: 0, nonce: 'seam1', payload: { claim: { content: 'real' } } }, { signer });
   assert.ok(built.ok, 'buildFrame succeeds through the require-frame broker: ' + built.reason);
   assert.ok(receiveFrame(built.frame, { registry: w.registry }).ok, 'the frame the broker signed is accepted end-to-end');
@@ -481,7 +501,7 @@ test('R2-WHAT FULL SEAM: buildFrame -> brokerSigner presents the body -> receive
 test('R2-WHAT FULL SEAM: a payload-less frame round-trips (A1 undefined-key normalization)', () => {
   const w = freshWorld();
   const me = w.personas[w.ME];
-  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, env: { PACT_BROKER_PERSONA_DID: w.ME } });
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], keyFile: me.keyFile, config: { PACT_BROKER_PERSONA_DID: w.ME } });
   // NO payload field -> withKey would carry payload:undefined pre-normalization; the broker recompute must match.
   const built = buildFrame({ srcPersonaDid: w.ME, parentHumanUid: me.human, type: 'CLAIM', seq: 1, nonce: 'noPayload' }, { signer });
   assert.ok(built.ok, 'payload-less frame signs through the broker (undefined-key normalized): ' + built.reason);
