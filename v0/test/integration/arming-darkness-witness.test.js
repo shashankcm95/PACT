@@ -38,6 +38,7 @@ function test(name, fn) {
 }
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 
 test('ARMED == DARK (mayGate): full arming does NOT unlock a high-stakes gate', () => {
   const coh = armingCoherence({ admissionArmed: true, signingArmed: true });
@@ -76,6 +77,9 @@ test('STRUCTURAL dormancy tripwire: arming-coherence is imported ONLY by the dor
   // signing-armed-mint-darkness-witness), so the "arms nothing" guarantee holds transitively through both. The
   // allowlist is EXACTLY these two (deepEqual, never a subset). ANY OTHER importer, or either consumer being
   // wired into a live gate, goes RED (the intended deliberate-update signal; never silently broaden it).
+  // #94/F19 SOUNDNESS: the inline literal-require scan below is complete only if NO computed require() exists in
+  // the tree (a require(base+name) would slip past silently). Fail RED the instant one is added.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importers = [];
   const walk = (d) => {
     for (const e of fs.readdirSync(d, { withFileTypes: true })) {

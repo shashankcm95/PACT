@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 const MODULE_REL = 'identity/signed-edge.js';
 
 let pass = 0; let fail = 0;
@@ -43,6 +44,9 @@ test('precondition: the src/ enumeration is non-empty (else "nothing requires it
 });
 
 test('DORMANT: signed-edge is imported ONLY by the W3 mint harness (its FIRST + only src consumer -- W3 exact-set allowlist)', () => {
+  // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
+  // (a require(base+name) would slip past silently). Fail RED the instant one is added.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importers = allSrcFiles(SRC)
     .filter((f) => !/signed-edge\.js$/.test(f))
     // match BOTH the bare and the explicit `.js` form (the W0 CodeRabbit-Major lesson -- do not miss `.js` imports).

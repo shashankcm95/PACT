@@ -31,6 +31,7 @@ function test(name, fn) {
 }
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 
 function jsFilesUnder(dir) {
   const out = [];
@@ -55,6 +56,9 @@ test('(A) CONTAINED-CONSUMERS: the W1 modules have EXACTLY their named importers
   // registration-gate / edge-freshness witnesses; a string-built require would evade it, but none exists here.)
   const files = jsFilesUnder(SRC);
   assert.ok(files.length > 0, 'non-vacuity: the src enumeration must be non-empty');
+  // #94/F19 SOUNDNESS: this witness's own note ("a string-built require would evade it") is now ENFORCED -- fail
+  // RED if any computed require() exists, so the literal importersOf() scans below cannot pass vacuously.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importersOf = (name) => files
     .filter((f) => !new RegExp('[/\\\\]' + name + '\\.js$').test(f))
     .filter((f) => new RegExp('require\\([\'"][^\'"]*' + name + '(?:\\.js)?[\'"]\\)').test(fs.readFileSync(f, 'utf8')))

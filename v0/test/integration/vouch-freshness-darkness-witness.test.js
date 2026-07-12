@@ -17,6 +17,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SRC = path.join(__dirname, '..', '..', 'src');
+const { assertOnlyLiteralRequires, allSrcJsFiles } = require('../_util/require-scan');
 const MODULE_REL = 'trust/vouch-freshness.js';
 
 let pass = 0; let fail = 0;
@@ -44,6 +45,9 @@ test('precondition: the src/ enumeration is non-empty (else "imported by exactly
 });
 
 test('CONTAINED: vouch-freshness is imported ONLY by trust/convert.js (its first + only live consumer)', () => {
+  // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
+  // (a require(base+name) would slip past silently). Fail RED the instant one is added.
+  assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const importers = allSrcFiles(SRC)
     .filter((f) => !/vouch-freshness\.js$/.test(f))
     // match BOTH the bare and explicit `.js` form (the W0 CodeRabbit-Major lesson -- do not miss `.js` imports).
