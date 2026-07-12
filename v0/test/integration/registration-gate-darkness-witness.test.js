@@ -45,7 +45,7 @@ test('precondition: the src/ enumeration is non-empty (else "imported by exactly
   assert.ok(allSrcFiles(SRC).length > 0, 'src enumeration empty -- the witness would disarm silently');
 });
 
-test('CONTAINED: registration-gate is imported ONLY by trust/convert.js (its first + only live consumer)', () => {
+test('CONTAINED: registration-gate is imported ONLY by the trust/authenticated-read chokepoint', () => {
   // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
   // (a require(base+name) would slip past silently). Fail RED the instant one is added.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
@@ -54,9 +54,12 @@ test('CONTAINED: registration-gate is imported ONLY by trust/convert.js (its fir
     // match BOTH the bare and explicit `.js` form (the W0 CodeRabbit-Major lesson -- do not miss `.js` imports).
     .filter((f) => /require\(['"][^'"]*registration-gate(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f).replace(/\\/g, '/'));   // normalize sep (Windows) -- match the sibling witness
-  // EXACT-SET (deepEqual, NEVER .includes): the filter's ONLY legal live consumer is disjointPaths (convert.js).
-  // Any SECOND importer -- a grounding fold, read-gate, a new gate -- goes RED (blast-radius creep).
-  assert.deepEqual(importers.sort(), ['trust/convert.js'], 'registration-gate must be imported ONLY by trust/convert.js; found: ' + importers.join(', '));
+  // W2b (plans/56) RE-CONCEIVED (not re-pointed): the anchoring filter's SOLE importer is now the read-gate
+  // CHOKEPOINT (authenticated-read), which relocated the composition out of convert. This is the STRONGER
+  // invariant -- it goes RED if ANY consumer imports the filter DIRECTLY (bypassing the chokepoint that arms the
+  // whole surface coherently), the exact blast-radius-creep the W2b relocation exists to prevent. EXACT-SET
+  // (deepEqual, NEVER .includes).
+  assert.deepEqual(importers.sort(), ['trust/authenticated-read.js'], 'registration-gate must be imported ONLY by the trust/authenticated-read chokepoint; found: ' + importers.join(', '));
 });
 
 console.log(`\n[registration-gate-darkness-witness] ${pass} passed, ${fail} failed`);

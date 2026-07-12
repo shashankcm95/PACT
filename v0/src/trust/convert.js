@@ -10,9 +10,7 @@
 
 'use strict';
 
-const { verifiedRecords } = require('./read-gate');
-const { filterAnchoredRecords } = require('./registration-gate');
-const { filterFreshVouches } = require('./vouch-freshness');
+const { authenticatedAnchoredRecords } = require('./authenticated-read');
 const { DISJOINT_PATHS_K } = require('./params');
 const { independenceLabel } = require('../independence/weak-flag');
 const { rootOf } = require('../identity/registry');
@@ -85,9 +83,10 @@ function maxVertexDisjointPaths(edges, src, sink) {
  * correctness: both are drop-only filters over the same set (kept set = intersection, commutative).
  */
 function disjointPaths(meCtx, meDid, agentDid) {
-  const verified = verifiedRecords(meCtx.registry, meCtx.storeOpts);
-  const anchored = filterAnchoredRecords(verified, meCtx.registry, meCtx && meCtx.regProvenance);
-  const edges = buildVouchGraph(filterFreshVouches(anchored, meCtx && meCtx.freshness));
+  // W2b (plans/56): the verified -> anchored -> fresh composition moved INTO the authenticated-read chokepoint
+  // (ADR Dec 4) so arming narrows every routed consumer, not just here. Byte-identical (the chokepoint replicates
+  // this exact composition + order); convert.disjointPaths stays the sole ROUTED consumer this wave (§7).
+  const edges = buildVouchGraph(authenticatedAnchoredRecords(meCtx));
   return maxVertexDisjointPaths(edges, meDid, agentDid);
 }
 

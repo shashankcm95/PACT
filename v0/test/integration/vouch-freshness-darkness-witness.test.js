@@ -44,7 +44,7 @@ test('precondition: the src/ enumeration is non-empty (else "imported by exactly
   assert.ok(allSrcFiles(SRC).length > 0, 'src enumeration empty -- the witness would disarm silently');
 });
 
-test('CONTAINED: vouch-freshness is imported ONLY by trust/convert.js (its first + only live consumer)', () => {
+test('CONTAINED: vouch-freshness is imported ONLY by the trust/authenticated-read chokepoint', () => {
   // #94/F19 SOUNDNESS: the literal-require scan below is complete only if NO computed require() exists in the tree
   // (a require(base+name) would slip past silently). Fail RED the instant one is added.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
@@ -52,10 +52,12 @@ test('CONTAINED: vouch-freshness is imported ONLY by trust/convert.js (its first
     .filter((f) => !/vouch-freshness\.js$/.test(f))
     // match BOTH the bare and explicit `.js` form (the W0 CodeRabbit-Major lesson -- do not miss `.js` imports).
     .filter((f) => /require\(['"][^'"]*vouch-freshness(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
-    .map((f) => path.relative(SRC, f));
-  // EXACT-SET (deepEqual, NEVER .includes): the filter's ONLY legal live consumer is disjointPaths (convert.js).
-  // Any SECOND importer -- a grounding fold, read-gate, a new gate -- goes RED (blast-radius creep).
-  assert.deepEqual(importers.sort(), ['trust/convert.js'], 'vouch-freshness must be imported ONLY by trust/convert.js; found: ' + importers.join(', '));
+    .map((f) => path.relative(SRC, f).replace(/\\/g, '/'));
+  // W2b (plans/56) RE-CONCEIVED (not re-pointed): the freshness filter's SOLE importer is now the read-gate
+  // CHOKEPOINT (authenticated-read), which relocated the composition out of convert. Stronger invariant -- goes
+  // RED if ANY consumer imports the filter DIRECTLY (bypassing the chokepoint), the blast-radius-creep W2b
+  // prevents. EXACT-SET (deepEqual, NEVER .includes).
+  assert.deepEqual(importers.sort(), ['trust/authenticated-read.js'], 'vouch-freshness must be imported ONLY by the trust/authenticated-read chokepoint; found: ' + importers.join(', '));
 });
 
 console.log(`\n[vouch-freshness-darkness-witness] ${pass} passed, ${fail} failed`);
