@@ -70,7 +70,7 @@ test('FULL SIGNING SEAM (same-uid; mechanism, NOT custody separation): signSigma
   const rootKeyFile = writeKey(dir, ROOT.privateKeyPem, 0o600);
   // the broker child runs in require-binding mode (controller set in its allowlisted env); signSigmaRoot
   // threads the binding body, brokerSigner forwards it on stdin (Piece C).
-  const signer = brokerSigner({ command: process.execPath, args: [BROKER], env: { PACT_ROOT_KEY_FILE: rootKeyFile, PACT_ROOT_CONTROLLER: CONTROLLER } });
+  const signer = brokerSigner({ command: process.execPath, args: [BROKER], config: { PACT_ROOT_KEY_FILE: rootKeyFile, PACT_ROOT_CONTROLLER: CONTROLLER } });
   const sig = signSigmaRoot(BINDING, { signer });
   assert.ok(sig, 'the sigma-root broker produced a sig');
   assert.ok(verifySigmaRoot({ personaDid: BINDING.personaDid, publicKeyPem: BINDING.publicKeyPem, controller: BINDING.controller, sigmaRoot: sig, rootPublicKeyPem: ROOT.publicKeyPem }), 'verifies under K_root public key');
