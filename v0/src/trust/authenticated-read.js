@@ -14,8 +14,9 @@
 // SHADOW / BYTE-IDENTICAL DISARMED (NS-9): both filters are IDENTITY pass-throughs when their opts are absent, so
 // for a WELL-FORMED meCtx with no regProvenance/freshness the result === verifiedRecords(meCtx.registry,
 // meCtx.storeOpts) element-for-element (the only path any live caller exercises). A DEGENERATE meCtx (null /
-// non-object) additionally gains fail-closed TOTALITY -- it returns [] where the old convert.disjointPaths threw
-// (a deliberate widening, matching the read-gate family's "TOTAL: never throws"). It arms nothing.
+// non-object) OR a hostile-GETTER meCtx additionally gains fail-closed TOTALITY -- it returns [] where the old
+// convert.disjointPaths threw (a deliberate widening, matching the read-gate family's "TOTAL: never throws"). It
+// arms nothing.
 //
 // SCOPE (plans/56 §7, USER-ratified): W2b routes ONLY convert.disjointPaths through here (a pure positive
 // VOUCH-graph read -- monotonic-safe). The other consumers are NAMED residuals: routing the PER-PERSONA anchoring
@@ -39,12 +40,27 @@ const { filterFreshVouches } = require('./vouch-freshness');
  */
 function authenticatedAnchoredRecords(meCtx) {
   const mc = (meCtx && typeof meCtx === 'object') ? meCtx : {}; // TOTALITY: a degenerate meCtx normalizes to {} -> []
+  // SNAPSHOT the meCtx reads inside a guarded try (CodeRabbit Major): a hostile `registry`/`storeOpts`/
+  // `regProvenance`/`freshness` GETTER or Proxy would else throw at the property read, BEFORE the drop-closed
+  // filters run -- violating the "never throws" contract. Read each ONCE here; a throw fails CLOSED -> [] (the
+  // read-gate family's empty=no-trust convention). Downstream then sees PLAIN snapshotted values (no getters).
+  // (A real caller's meCtx is plain data built by the trust engine; this is defense-in-depth for a hostile
+  // in-memory caller -- it also strengthens the pre-refactor convert.disjointPaths, which threw on such a getter.)
+  let registry;
+  let storeOpts;
+  let regProvenance;
+  let freshness;
+  try {
+    ({ registry, storeOpts, regProvenance, freshness } = mc);
+  } catch {
+    return [];
+  }
   // order: verified -> anchored -> fresh (ADR Decision 4; the two filters are drop-only + commutative -- a COST
-  // choice, per convert.js). `mc` is always an object here, so no per-opt `mc &&` guard is needed (an absent opt
-  // is `undefined` -> the filter disarms). This reproduces convert.disjointPaths' verified->anchored->fresh order.
-  const verified = verifiedRecords(mc.registry, mc.storeOpts);
-  const anchored = filterAnchoredRecords(verified, mc.registry, mc.regProvenance);
-  return filterFreshVouches(anchored, mc.freshness);
+  // choice, per convert.js). An absent opt is `undefined` -> the filter disarms. Reproduces convert.disjointPaths'
+  // verified->anchored->fresh composition + order.
+  const verified = verifiedRecords(registry, storeOpts);
+  const anchored = filterAnchoredRecords(verified, registry, regProvenance);
+  return filterFreshVouches(anchored, freshness);
 }
 
 module.exports = { authenticatedAnchoredRecords };

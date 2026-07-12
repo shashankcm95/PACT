@@ -103,6 +103,19 @@ test('totality: a null / degenerate meCtx yields [] and NEVER throws', () => {
   }
 });
 
+test('totality (hostile getter): a throwing registry/storeOpts getter fails CLOSED -> [] (CodeRabbit Major)', () => {
+  // the "never throws" contract must hold for a hostile-OBJECT meCtx too, not just null/primitives -- a throwing
+  // top-level getter would else escape at the property read, before the drop-closed filters run.
+  const hostileReg = {};
+  Object.defineProperty(hostileReg, 'registry', { enumerable: true, get() { throw new Error('boom'); } });
+  let out;
+  assert.doesNotThrow(() => { out = authenticatedAnchoredRecords(hostileReg); }, 'a throwing registry getter must NOT throw');
+  assert.deepEqual(out, [], 'a hostile meCtx getter fails closed to the empty set');
+  const hostileStore = { registry: reg.createRegistry() };
+  Object.defineProperty(hostileStore, 'storeOpts', { enumerable: true, get() { throw new Error('boom'); } });
+  assert.doesNotThrow(() => authenticatedAnchoredRecords(hostileStore), 'a throwing storeOpts getter must NOT throw');
+});
+
 test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monotonic-safe set (convert.js today)', () => {
   // W2b routes ONLY convert.disjointPaths (a positive VOUCH-graph read). Routing a NEGATIVE-evidence consumer
   // (creator-standing/premise-score/direct/cross-verify-demote/stake-anchor-SLASH/consensus) through here would

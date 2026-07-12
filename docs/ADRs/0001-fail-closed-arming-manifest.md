@@ -76,7 +76,10 @@ arm-resolution contract is a trust-boundary migration.
    struck clauses were corrected by the W2b VERIFY board; the load-bearing decision stands.**
 
    > **Amended 2026-07-12 (W2b build — plans/56 §6/§7).** Two implementation clauses above were corrected by the
-   > W2b VERIFY board; the load-bearing decision (ONE fail-closed chokepoint, whole-surface coverage, NS-4) stands.
+   > W2b VERIFY board. The chokepoint PRIMITIVE is built and `convert.disjointPaths` routes through it; but
+   > **whole-surface NS-4 coverage remains a FUTURE architectural goal, NOT delivered by W2b** — F6 stays OPEN
+   > (narrowed, not closed). What stands is the *shape* of the eventual close (ONE fail-closed chokepoint); the
+   > negative-leg monotonic re-derivation that would actually achieve whole-surface coverage is unbuilt.
    > **(a) Location:** the composition lives in a NEW `v0/src/trust/authenticated-read.js`, NOT `read-gate.js` —
    > read-gate keeps its ADR-0002 sig-only SRP; the chokepoint fans in `{read-gate, registration-gate,
    > vouch-freshness}` (acyclic). **(b) Scope:** "route all EIGHT" is WRONG — the per-persona anchoring filter on a

@@ -35,6 +35,11 @@ the whole trust surface (NS-4: the Sybil defense must cover every fold, not one)
 
 ## §2 Design — `authenticatedAnchoredRecords(meCtx)`
 
+> ⚠️ **§2–§4 are the PRE-RESOLUTION design — SUPERSEDED by §6 (VERIFY board) + §7 (USER-ratified narrowed build)
+> + §8 (VALIDATE).** They still say "Add to `read-gate.js`" + "route the 8 consumers"; the SHIPPED build lives in a
+> NEW `trust/authenticated-read.js` and routes ONLY `convert.disjointPaths` (the route-all-8 premise inverts
+> monotonicity). Read §6/§7/§8 for the canonical wave record; §2–§4 are kept for the design trail.
+
 Add to `read-gate.js` (ADR Dec 4; layering-legal per P4):
 
 ```text
