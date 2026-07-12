@@ -57,8 +57,9 @@ test('(A) STRUCTURAL: no live-fold module pulls admission-gate into the require 
   assert.deepEqual(leaked, [], 'NO fold module may pull admission-gate into the require graph while it is DARK -- leaked via: ' + leaked.join(', '));
 });
 
-test('(B) BEHAVIORAL non-vacuity: disarmed ADMITS a would-reject persona; the same persona is REJECTED when armed', () => {
+test('(B) BEHAVIORAL non-vacuity: a FULLY-armed gate ADMITS a valid persona but REJECTS a bad sig via the VERIFIER (not the arm path)', () => {
   const A = require('../../src/trust/admission-gate'); // lazy -- AFTER test (A)'s require.cache check
+  const S = require('../../src/identity/sigma-root');
   const ROOT = generateEdgeKeypair();
   const PERSONA = generateEdgeKeypair();
   const DID = 'did:key:zPersona';
@@ -66,13 +67,26 @@ test('(B) BEHAVIORAL non-vacuity: disarmed ADMITS a would-reject persona; the sa
   const r = reg.createRegistry();
   reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
   reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem });
-  const badSig = 'x'.repeat(88); // present-but-invalid -> would REJECT when armed
-  const disarmed = A.admissionDecision({ registry: r, personaDid: DID, sigmaRoot: badSig }); // no arm -> dark
-  const armed = A.admissionDecision({ admissionArmed: true, signingArmed: true, registry: r, personaDid: DID, sigmaRoot: badSig });
+  const goodSig = S.signSigmaRoot({ personaDid: DID, publicKeyPem: PERSONA.publicKeyPem, controller: CONTROLLER }, { privateKeyPem: ROOT.privateKeyPem });
+  const badSig = 'x'.repeat(88); // present-but-invalid
+  // ARM the FULL 4-signal surface (plans/55 / ADR-Dec-3 all-or-none). A 2-signal arm is a PARTIAL arm that REJECTS
+  // via the ARM path -- which would make this witness VACUOUS (the sigma-root verifier could be deleted and it
+  // stays green). Arming all 4 forces the reject to come from VERIFICATION, proven by the admit-on-good-sig companion.
+  const ARM = { admissionArmed: true, signingArmed: true, anchoringArmed: true, freshnessArmed: true };
+  const disarmed = A.admissionDecision({ registry: r, personaDid: DID, sigmaRoot: badSig }); // no arm -> clean baseline
+  const armedGood = A.admissionDecision({ ...ARM, registry: r, personaDid: DID, sigmaRoot: goodSig });
+  const armedBad = A.admissionDecision({ ...ARM, registry: r, personaDid: DID, sigmaRoot: badSig });
   assert.equal(disarmed.admit, true, 'the DARK default admits the persona');
   assert.equal(disarmed.armed, false);
-  assert.equal(armed.admit, false, 'the SAME persona is rejected when armed -- the gate genuinely CAN reject (non-vacuous)');
-  assert.equal(armed.armed, true);
+  assert.equal(disarmed.reason, 'disarmed-passthrough', 'the clean-baseline passthrough token is anchored (byte-identical contract)');
+  // NON-VACUITY: a fully-armed gate + VALID sig ADMITS (the armed VERIFICATION path is genuinely reached), and the
+  // SAME fully-armed gate + BAD sig REJECTS *via the verifier* (reason sigma-root-unverified, NOT the
+  // arm-indeterminate short-circuit). Delete the verifier and armedGood flips -> RED.
+  assert.equal(armedGood.admit, true, 'a fully-armed gate ADMITS a valid root-signed persona (verification path reachable)');
+  assert.equal(armedGood.reason, 'sigma-root-verified');
+  assert.equal(armedBad.admit, false, 'the SAME fully-armed gate REJECTS a bad sig');
+  assert.equal(armedBad.armed, true);
+  assert.equal(armedBad.reason, 'sigma-root-unverified', 'the reject is the VERIFIER, not the partial-arm path');
 });
 
 console.log(`\n[admission-gate-darkness-witness] ${pass} passed, ${fail} failed`);

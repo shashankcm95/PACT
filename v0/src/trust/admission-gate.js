@@ -1,30 +1,38 @@
-// PACT v0 -- trust/admission-gate.js  (plans/33 W2 -- the DARK sigma_root armed admission gate)
+// PACT v0 -- trust/admission-gate.js  (plans/55 W2a -- the DARK sigma_root armed admission gate, now keyed to the
+// fail-closed arming MANIFEST)
 //
 // The ENFORCEMENT DECISION for W1's sigma_root verifier: WHEN ARMED, turns the advisory verifier's FAIL into a
-// REJECT. It ships DARK -- disarmed by default (a pure admit-all pass-through = byte-identical to today, since
-// there is no admission gate today), armed ONLY by injection (PACT owns NO live arm flag -- plans/28), and WIRED
-// TO NOTHING (the admission-gate-darkness-witness proves no fold pulls this into the require graph). It is the
-// FIRST consumer of arming-coherence's admissionArmed arm. It arms nothing, gates nothing, hardens nothing today.
+// REJECT. It ships DARK -- import-dark (the admission-gate-darkness-witness proves no fold pulls it into the
+// require graph) and arms nothing. It is the FIRST live CONSUMER of the Wave-1 arming manifest (plans/54):
+// admission-gate reads its enable state from resolveArmedContext (ADR-0001 Dec 1/3) instead of the 2-signal
+// armingDecision. This closes #82 (F7): a garbage admission token can no longer silently disarm to admit-all.
 //
-// It does NOT advance the trust frontier (NS-9): only the operator's out-of-band root-key attestation HARDENS
-// (OQ-NS-6/NS-7), and this module does not touch it. This is ready-to-arm plumbing whose hard part is the
-// fail-closed decision -- NEVER a trust advance.
+// THE FOUR-STATE DECISION (VERIFY board §6 CRITICAL -- a two-way `armed ? verify : admit-all` is the fail-open):
+//   (1) ctx.armed                            -> ARMED: verify the root-signed sigma_root (unchanged from today);
+//   (2) disarmedBaseline && !hadMisconfig    -> admit-all pass-through = byte-identical to today (CLEAN baseline);
+//   (3) disarmedBaseline && hadMisconfig     -> REJECT (the #82 close: a garbage arm token is a DIRTY baseline);
+//   (4) else (partial arm)                   -> REJECT (F9-narrow: an incoherent/partial arm fails closed).
+// States (3)+(4) are the fail-closed else. ADR-Dec-3 all-or-none: admission arms ONLY when the whole 4-signal
+// surface {admission,signing,anchoring,freshness} is coherently armed -- so a PARTIAL arm (was admit-all, F4-A)
+// now REJECTS. NS-9: this NARROWS F9 (admission refuses an incoherent arm) but does not CLOSE it until
+// anchoring/freshness/broker also route through the manifest (they still hold their fail-open defaults). Under no
+// live arm the gate is the CLEAN baseline -> admit-all, byte-identical to today.
 //
-// TRUSTED INPUTS (VERIFY hacker L1/H1 + CodeRabbit Major -- disclosed): `registry` + the arm signal
-// (`admissionArmed`/`signingArmed`) are TRUSTED non-actor inputs in `input`; `grandfather` is a TRUSTED policy
-// OVERRIDE passed on a SEPARATE `policy` arg -- a crypto-BYPASSING callback (`() => true` admits with no valid
-// sigma_root) must NEVER be forwardable from an attacker record (a caller spreading `{...record}` into `input`
-// can't smuggle a grandfather). The `input` record fields (`personaDid`/`sigmaRoot`) are attacker-influenced,
-// which is why the arm is read on its OWN path, independent of them (C1). `registry` stays in `input` as a
-// disclosed residual: unlike grandfather it is crypto-GATED data -- a fake registry still needs a seeded root key
-// + a signed sigma_root (the root-key-squat recursion), not a bypass callback.
+// TRUSTED INPUTS + C1 (VERIFY hacker, disclosed): the arm signals (`*Armed`) + `registry` are TRUSTED non-actor
+// inputs; `grandfather` is a TRUSTED policy OVERRIDE on a SEPARATE `policy` arg (a crypto-BYPASSING callback must
+// NEVER be forwardable from an attacker record). The `input` record fields (`personaDid`/`sigmaRoot`) are
+// attacker-influenced. C1 is preserved on a TWO-PHASE structure: (a) the arm read is guarded + OWN-property-only
+// (a polluted Object.prototype must not flip the gate armed; a throwing arm getter fails CLOSED, never disarms) and
+// passes PLAIN values to the manifest; (e) the armed-path record read is a SEPARATE guarded try (a poisoned record
+// getter REJECTS, never collapses the arm to admit).
 //
-// LAYERING (NS-11): trust/ may import lib/ + identity/ (the trust ban is ['grounding']). This imports
-// arming-coherence (trust/), registration-provenance (identity/), refuse-alert (lib/) -- no upward cycle.
+// LAYERING (NS-11): trust/ may import lib/ + identity/. This imports arming-manifest (trust/),
+// registration-provenance (identity/), refuse-alert (lib/) -- no upward cycle. It no longer imports
+// arming-coherence: the 4-signal manifest supersedes the 2-signal armingDecision for this consumer.
 
 'use strict';
 
-const { armingDecision } = require('./arming-coherence');
+const { resolveArmedContext } = require('./arming-manifest');
 const { assessRegistrationFromRegistry, R3_VERIFIES } = require('../identity/registration-provenance');
 const { refuseAlert } = require('../lib/refuse-alert');
 
@@ -32,38 +40,49 @@ const { refuseAlert } = require('../lib/refuse-alert');
  * admissionDecision(input) -> { admit:boolean, armed:boolean, reason:string, provenance?:object }. PURE
  * (no state), fail-CLOSED when armed, and NEVER throws.
  *
- * C1 CORRECTION (VERIFY hacker CRITICAL): the arm signal is read on its OWN guarded path, INDEPENDENT of the
- * attacker-influenced record fields. The W1 template (extract every field in one try, undefined-on-throw) is
- * fail-CLOSED for W1 but INVERTS to fail-OPEN here -- a poisoned personaDid/sigmaRoot/admissionArmed getter would
- * collapse the arm to undefined -> disarmed -> admit-all, so an intended-ARMED gate would silently ADMIT an
- * unverified persona. Read the arm first; the armed branch reads the record fields separately and rejects on ANY
- * read failure.
+ * NOTE on the returned `armed`: it means "the gate acted in ENFORCING / fail-closed mode" -- true for the
+ * ARMED-verify path AND for every fail-closed REJECT (arm-read-failed / partial / garbage / armed-unverified).
+ * It is NOT a mirror of the manifest's `ctx.armed`; only the CLEAN `disarmed-passthrough` returns `armed:false`.
  *
- * @param {{admissionArmed?:*, signingArmed?:*, registry?:object, personaDid?:string, sigmaRoot?:string}} input  per-request: the arm signal + the attacker-influenced record fields.
+ * @param {{admissionArmed?:*, signingArmed?:*, anchoringArmed?:*, freshnessArmed?:*, registry?:object, personaDid?:string, sigmaRoot?:string}} input
+ *   per-request: the 4 arm signals + the attacker-influenced record fields.
  * @param {{grandfather?:Function}} [policy]  the TRUSTED policy context (a SEPARATE arg -- a grandfather OVERRIDE must not be forwardable from an actor record; CodeRabbit Major).
  */
 function admissionDecision(input, policy = {}) {
-  // (a) read the ARM signal ONLY, on its own guarded path. A THROW here (a getter on the trusted arm input) is
-  //     INDETERMINATE -> fail CLOSED (never silently disarm) + emit (VERIFY hacker C1/M1).
-  let admissionArmed;
-  let signingArmed;
+  // (a) read the 4 arm signals on their OWN guarded path, OWN-PROPERTY only (AH10 / security.md NON-BYPASSABLE):
+  //     `own[k]` via Object.hasOwn, never an inherited lookup, so a polluted Object.prototype cannot supply an arm
+  //     signal the caller never set. A THROW here is INDETERMINATE -> fail CLOSED + emit (never silently disarm).
+  //     PLAIN values are handed to the manifest, so a throwing getter is caught HERE and never reaches it.
+  let armIn;
   try {
-    if (input && typeof input === 'object') { admissionArmed = input.admissionArmed; signingArmed = input.signingArmed; }
+    const own = (input && typeof input === 'object') ? input : {};
+    const safe = (k) => (Object.hasOwn(own, k) ? own[k] : undefined);
+    armIn = { admission: safe('admissionArmed'), signing: safe('signingArmed'), anchoring: safe('anchoringArmed'), freshness: safe('freshnessArmed') };
   } catch {
     refuseAlert('admission-arm-unreadable', { class: 'integrity', cause: 'arm-getter-threw' });
     return { admit: false, armed: true, reason: 'arm-read-failed-fail-closed' };
   }
 
-  // (b) arm preflight -- both-or-neither, strict === true, OBSERVABLE on incoherent (the P5-W2 primitive). An
-  //     XOR-incoherent arm yields admissionArmed(out)=false -> falls through to the DISARMED pass-through, and the
-  //     incoherence emits here (VERIFY architect F4-A).
-  const arm = armingDecision({ admissionArmed, signingArmed });
+  // (b) resolve the arm ALL-OR-NONE via the fail-closed manifest (ADR-0001 Dec 1/3). Gate on `armed` ONLY;
+  //     `disarmedBaseline`/`hadMisconfig` distinguish the clean baseline from a dirty/partial one.
+  const ctx = resolveArmedContext(armIn);
 
-  // (c) DISARMED (decided from the ARM ALONE) -> admit-all pass-through = byte-identical to today (no gate).
-  //     DELIBERATE fail-open (VERIFY hacker H1): the arm signal MUST come from a trusted, non-actor path.
-  if (!arm.admissionArmed) return { admit: true, armed: false, reason: 'disarmed-passthrough' };
+  // (c) CLEAN disarmed baseline (nothing armed AND no garbage token) -> admit-all = byte-identical to today. The
+  //     `!hadMisconfig` gate is LOAD-BEARING: a garbage arm token is disarmedBaseline:true BUT hadMisconfig:true,
+  //     so it falls THROUGH to (d) -> REJECT. Without it, a non-strict token silently admits-all (the #82 hole).
+  if (!ctx.armed && ctx.disarmedBaseline && !ctx.hadMisconfig) {
+    return { admit: true, armed: false, reason: 'disarmed-passthrough' };
+  }
 
-  // (d) ARMED -- read the record fields in a SEPARATE try; ANY read failure -> REJECT (fail closed, never admit).
+  // (d) NOT armed and NOT a clean baseline -> a garbage (dirty baseline) or PARTIAL arm -> REJECT (fail-closed),
+  //     OBSERVABLE at the GATE layer with a cause DISTINCT from the manifest's own arm-resolution emit (no dup
+  //     token; refuseAlert is cause-keyed, `reason` positional). The #82 + H4 close.
+  if (!ctx.armed) {
+    refuseAlert('admission-rejected', { class: 'misconfig', cause: ctx.disarmedBaseline ? 'arm-garbage-disarmed' : 'arm-partial' });
+    return { admit: false, armed: true, reason: 'arm-indeterminate-fail-closed' };
+  }
+
+  // (e) ARMED -- read the record fields in a SEPARATE try; ANY read failure -> REJECT (fail closed, C1 preserved).
   let registry;
   let personaDid;
   let sigmaRoot;
@@ -74,8 +93,8 @@ function admissionDecision(input, policy = {}) {
     return { admit: false, armed: true, reason: 'armed-input-unreadable' };
   }
 
-  // (e) verify via the W1 SAFE-PATH wrapper (registry-sourced root key -- NEVER a caller-supplied one; the H2
-  //     close). It is itself never-throws + fail-closed; wrap defensively so a hostile registry cannot throw us OPEN.
+  // (f) verify via the W1 SAFE-PATH wrapper (registry-sourced root key -- NEVER a caller-supplied one). Itself
+  //     never-throws + fail-closed; wrap defensively so a hostile registry cannot throw us OPEN.
   let prov;
   try {
     prov = assessRegistrationFromRegistry(registry, { personaDid, sigmaRoot });
@@ -88,34 +107,30 @@ function admissionDecision(input, policy = {}) {
     return { admit: true, armed: true, reason: 'sigma-root-verified', provenance: prov };
   }
 
-  // (f) unverified -- consult the grandfather SEAM in a DEDICATED try (VERIFY hacker M2): a throw -> NOT
-  //     grandfathered -> REJECT (fail closed); a truthy-non-boolean -> NOT grandfathered (strict === true).
+  // (g) unverified -- consult the grandfather SEAM in a DEDICATED try: a throw -> NOT grandfathered -> REJECT; a
+  //     truthy-non-boolean -> NOT grandfathered (strict === true). grandfather comes ONLY from the SEPARATE TRUSTED
+  //     policy arg, NEVER the attacker-influenced input record (CodeRabbit Major).
   let grandfathered = false;
   try {
-    // grandfather comes from the SEPARATE TRUSTED policy arg, NEVER the attacker-influenced input record
-    // (CodeRabbit Major). Reading it here (inside the dedicated try) fails CLOSED on a throwing getter too.
-    const grandfather = policy && typeof policy === 'object' ? policy.grandfather : undefined;
+    // OWN-property read (VALIDATE hacker HIGH), mirroring the arm read: a plain `policy.grandfather` is a
+    // prototype-CHAIN access, so with a DEFAULT `{}` policy (the normal armed case, no grandfather configured) a
+    // polluted `Object.prototype.grandfather = () => true` would be inherited and crypto-BYPASS verification.
+    const grandfather = (policy && typeof policy === 'object' && Object.hasOwn(policy, 'grandfather')) ? policy.grandfather : undefined;
     grandfathered = typeof grandfather === 'function' && grandfather(personaDid) === true;
   } catch {
     grandfathered = false;
   }
   if (grandfathered) {
-    // a grandfather admission is a NAMED policy exception, OBSERVABLE (not a silent pass). Classed `policy`
-    // (a free-form class refuse-alert tolerates) -- distinct from a `misconfig` REJECT so an operator triaging
-    // by class does not confuse a deliberate policy admit with a remediation gap (VALIDATE code-reviewer LOW).
     refuseAlert('admission-grandfathered', { class: 'policy', cause: 'legacy-persona-no-sigma-root', persona: personaDid });
     return { admit: true, armed: true, reason: 'grandfathered-legacy-persona', provenance: prov };
   }
 
-  // (g) REJECT -- OBSERVABLE, CLASSED by the failing check (VERIFY hacker H2): a present-but-unverified sigma_root
-  //     (ONLY R3 failed) is tamper/forgery -> `integrity`; anything else (absent sigma_root, unseeded root, a
-  //     malformed binding, or the registry-source fail-closed) -> `misconfig` (a legit legacy persona / operator gap).
+  // (h) REJECT -- OBSERVABLE, CLASSED by the failing check: a present-but-unverified sigma_root (ONLY R3 failed) is
+  //     tamper/forgery -> `integrity`; anything else (absent sigma_root, unseeded root, malformed binding) ->
+  //     `misconfig`. WHITELIST, never an exclusion list ("R3 alone failed" is the ONLY forgery shape).
   const failed = (prov && Array.isArray(prov.checks) ? prov.checks : [])
     .filter((c) => c && c.status === 'FAIL')
     .map((c) => c.id);
-  // WHITELIST, not an exclusion list (VALIDATE code-reviewer MED): "R3 alone failed" is the ONLY forgery shape.
-  // An exclusion list (NOT R1 AND NOT R2) would mis-class an R0-binding + R3 failure as `integrity`, and would
-  // need syncing with every future check id registration-provenance might add. A whitelist can never over-class.
   const isForgery = failed.length === 1 && failed[0] === R3_VERIFIES;
   refuseAlert('admission-rejected', { class: isForgery ? 'integrity' : 'misconfig', cause: 'sigma-root-unverified', persona: personaDid });
   return { admit: false, armed: true, reason: 'sigma-root-unverified', provenance: prov };
