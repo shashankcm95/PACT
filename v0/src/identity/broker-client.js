@@ -97,6 +97,17 @@ function hasControlChar(s) {
   for (let i = 0; i < s.length; i++) if (s.charCodeAt(i) < 0x20) return true;
   return false;
 }
+// A caller channel is either absent (undefined -> skip) or a plain object; a truthy non-object (a string/number
+// from a caller typo) must FAIL LOUD, not silently no-op the channel (the same fail-closed-must-be-OBSERVABLE
+// discipline the value gates apply -- else a mistyped opts.config leaves the broker UNARMED with no error).
+// [CodeRabbit nitpick]
+function requireChannelObject(v, name) {
+  if (v === undefined) return null;
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+    throw new TypeError('brokerSigner: ' + name + ' must be a plain object when set (a mistyped channel would otherwise silently no-op)');
+  }
+  return v;
+}
 // Assign each key of a caller channel into the (null-proto) child env, applying the shared discipline (dunder
 // reject -> channel-specific membership `reject(k)` -> string-value gate -> control-char gate) then the assignment.
 // `reject` returns an error message (throw) or null (allow). A single leaf so the two channels can't diverge.
@@ -139,15 +150,17 @@ function brokerSigner(opts = {}) {
   if (typeof opts.keyFile === 'string') env.PACT_BROKER_KEY_FILE = opts.keyFile;
   // (1) config channel — a positive allowlist (fail-closed on any non-config key). The allowlist IS the gate; a
   // reserved/sudo/benign key is refused simply by NOT being a CONFIG_ENV_KEYS member (no second gate needed).
-  if (opts.config && typeof opts.config === 'object') {
-    assignChannel(env, opts.config, 'opts.config', (k) =>
+  const configObj = requireChannelObject(opts.config, 'opts.config');
+  if (configObj) {
+    assignChannel(env, configObj, 'opts.config', (k) =>
       CONFIG_ENV_KEYS.has(k) ? null : 'brokerSigner: opts.config may only set an allowlisted config var (' + k + ' is not one — a benign extra goes in opts.env)');
   }
   // (2) extras channel — a negative gate over the unbounded benign tail. Order: config-member (use opts.config) ->
   // sudo caller-signal (WHO-forge) -> reserved code-exec (#85). The config-member arm fires INDEPENDENTLY of the
   // reserved arm, so a future reserved-set edit cannot drop a config key back into the benign tail.
-  if (opts.env && typeof opts.env === 'object') {
-    assignChannel(env, opts.env, 'opts.env', (k) => {
+  const extrasObj = requireChannelObject(opts.env, 'opts.env');
+  if (extrasObj) {
+    assignChannel(env, extrasObj, 'opts.env', (k) => {
       if (CONFIG_ENV_KEYS.has(k)) return 'brokerSigner: opts.env may not set the config var ' + k + ' — use opts.config';
       if (CALLER_SIGNAL_ENV.has(k)) return 'brokerSigner: opts.env may not set the sudo caller-signal ' + k + ' (not a caller channel — it forges the WHO gate)';
       if (isReservedEnvKey(k)) return 'brokerSigner: opts.env may not set a reserved broker-child environment variable (' + k + ')' + (k === 'PACT_BROKER_KEY_FILE' ? ' — use opts.keyFile for the key path' : '');
