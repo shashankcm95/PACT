@@ -12,7 +12,7 @@
 'use strict';
 
 const { verifySigmaRoot } = require('./sigma-root');
-const { lookupPublicKey, lookupRootKey, rootOf } = require('./registry');
+const { lookupPublicKey, lookupRootKey, lookupSigmaRoot, rootOf } = require('./registry');
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 
@@ -94,14 +94,28 @@ function assessRegistrationFromRegistry(reg, opts) {
     residuals: [],
   });
   try {
-    let personaDid, sigmaRoot;
-    if (opts && typeof opts === 'object') ({ personaDid, sigmaRoot } = opts);
+    let personaDid, optsSigma;
+    if (opts && typeof opts === 'object') {
+      // own-prop BOTH reads (VALIDATE hacker MEDIUM-2 -- the sibling of the mint-site gap): a bare destructure
+      // inherits a polluted Object.prototype key when the caller omits it. optsSigma is the load-bearing one -- a
+      // polluted sigma would flip R1-present on a value the caller never supplied, corrupting the gates' misconfig-
+      // vs-integrity telemetry class; personaDid pollution is fail-closed at the lookup but own-prop'd for parity.
+      personaDid = Object.hasOwn(opts, 'personaDid') ? opts.personaDid : undefined;
+      optsSigma = Object.hasOwn(opts, 'sigmaRoot') ? opts.sigmaRoot : undefined;
+    }
     if (!isStr(personaDid)) return failClosed('personaDid missing');
     const publicKeyPem = lookupPublicKey(reg, personaDid);
     const controller = rootOf(reg, personaDid);
     if (!publicKeyPem || !controller) return failClosed('persona not registered -- no frozen row to source the binding from');
     const rootPublicKeyPem = lookupRootKey(reg, controller);
     if (!rootPublicKeyPem) return failClosed('root key not seeded for ' + controller + ' -- fail-closed (isKnownRoot is NOT an anchor)');
+    // plans/57 W3 (#83): source the sigma_root REGISTRY-WINS. The registration-bound sigma (immutable, first-writer,
+    // own-prop via lookupSigmaRoot) is AUTHORITATIVE; the caller-supplied opts.sigmaRoot is a fallback ONLY when the
+    // row carries none, and can NEVER override a bound one -- even a FAILING bound (else opts would be a downgrade
+    // surface: VERIFY-hacker HIGH-2). This makes the assessor fully registry-sourced on all 4 facts for a BOUND
+    // persona; a legacy persona with no bound sigma still sources it from the opts fallback (honesty LOW-3).
+    const boundSigma = lookupSigmaRoot(reg, personaDid);
+    const sigmaRoot = boundSigma !== null ? boundSigma : optsSigma;
     return assessRegistrationProvenance({ personaDid, publicKeyPem, controller, sigmaRoot, rootPublicKeyPem });
   } catch { return failClosed('malformed registry or opts -- fail-closed'); }
 }

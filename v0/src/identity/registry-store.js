@@ -34,9 +34,13 @@ const { canonicalJsonSerialize } = require('../lib/canonical-json');
 // the row cap backstops a caller who hands `deserializeRegistry` a parsed array directly (bypassing the byte cap).
 const MAX_REGISTRY_BYTES = 1024 * 1024;   // 1 MiB pre-parse read/DoS bound.
 // Row cap = the replay backstop for a direct deserialize caller AND the "loadable ⟹ re-serializable" ceiling:
-// canonical-json's MAX_CANONICAL_NODES=10000 caps a `{personas,rootKeys}` serialization at ~2500 rows
-// (~4 nodes/persona-row), so 2000 keeps a loaded registry always re-serializable (VALIDATE code-reviewer).
-const MAX_REGISTRY_ROWS = 2000;
+// canonical-json's MAX_CANONICAL_NODES=10000 caps a `{personas,rootKeys}` serialization. A SERIALIZED persona row
+// is up to 5 canonical nodes since plans/57 W3 (obj + personaDid + humanUid + publicKeyPem + the OPTIONAL sigmaRoot);
+// a rootKeys row is 3. The cap dropped 2000 -> 1900 so even an ALL-sigma registry at the cap stays re-serializable
+// (1900*5 + wrapper = ~9503 < 10000; the empirical ceiling is exactly 1999 all-sigma rows, so 1900 keeps clear
+// headroom). Preserves the "loadable => re-serializable" invariant (VERIFY-hacker MEDIUM-3). NOTE: a pre-W3 registry
+// of 1901-2000 no-sigma rows would now be refused at load -- a v0/placeholder-fixture non-issue.
+const MAX_REGISTRY_ROWS = 1900;
 
 // A file-trust refusal (foreign owner / others-writable / symlink / oversized) is a DISTINCT class from a
 // malformed-JSON parse error or a first-writer immutability throw. Tag it so a caller (custody-verify) can
@@ -62,7 +66,15 @@ function serializeRegistry(reg) {
     throw new TypeError('serializeRegistry: not a registry (expected {personas:Map, rootKeys:Map})');
   }
   const personas = [...reg.personas.entries()]
-    .map(([personaDid, row]) => ({ personaDid, humanUid: row.humanUid, publicKeyPem: row.publicKeyPem }))
+    .map(([personaDid, row]) => ({
+      personaDid,
+      humanUid: row.humanUid,
+      publicKeyPem: row.publicKeyPem,
+      // plans/57 W3 (#83): carry the OPTIONAL sigma_root OWN-PROP + conditionally -- a no-sigma row serializes
+      // byte-identically to the pre-W3 form (VERIFY-hacker HIGH-1: never read/emit an inherited Object.prototype
+      // sigmaRoot). deserialize round-trips it because registerPersona now destructures `sigmaRoot`.
+      ...(Object.hasOwn(row, 'sigmaRoot') ? { sigmaRoot: row.sigmaRoot } : {}),
+    }))
     .sort((a, b) => (a.personaDid < b.personaDid ? -1 : a.personaDid > b.personaDid ? 1 : 0));
   const rootKeys = [...reg.rootKeys.entries()]
     .map(([humanUid, rootPublicKeyPem]) => ({ humanUid, rootPublicKeyPem }))

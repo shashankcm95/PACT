@@ -136,5 +136,60 @@ test('H2: assessRegistrationFromRegistry fail-closes on an unregistered persona 
   });
 });
 
+// ===================== plans/57 W3 (#83): registry-WINS sourcing of the registration-bound sigma_root =========
+// D2: assessRegistrationFromRegistry sources the sigma_root REGISTRY-WINS -- the immutable bound row value is
+// authoritative; opts.sigmaRoot is a fallback ONLY when the row has none (and can NEVER override a bound one,
+// even a FAILING bound). This makes the assessor fully registry-sourced on all 4 sigma_root facts.
+
+const OTHER_ROOT = generateEdgeKeypair();
+const BAD_SIG = S.signSigmaRoot(BINDING, { privateKeyPem: OTHER_ROOT.privateKeyPem }); // signed by the WRONG root -> will not verify under ROOT
+
+test('W3 #83 NARROW: the registration-bound sigma_root travels with registration -- PASSES with NO opts.sigmaRoot (a NARROW, NOT a close: the same-uid recursion below stays open)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
+  reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem, sigmaRoot: GOOD_SIG });
+  const out = P.assessRegistrationFromRegistry(r, { personaDid: DID }); // NO opts.sigmaRoot
+  assert.equal(out.sigmaRootChecksPassed, true, 'the registration-bound sigma_root verifies with no out-of-band map');
+  assertInvariant(out);
+});
+
+test('W3 registry-WINS: a valid bound sigma_root beats a DIFFERENT (bogus) opts.sigmaRoot (opts cannot override the bound one)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
+  reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem, sigmaRoot: GOOD_SIG });
+  const out = P.assessRegistrationFromRegistry(r, { personaDid: DID, sigmaRoot: 'bogus-opts-sigma' });
+  assert.equal(out.sigmaRootChecksPassed, true, 'the bound (valid) sigma wins; the bogus opts value is ignored');
+  assertInvariant(out);
+});
+
+test('W3 anti-downgrade (ARCH MEDIUM-2): a NON-verifying bound sigma_root + a VALID opts.sigmaRoot still FAILS (opts cannot RESCUE a failing bound)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
+  // bind a sigma that does NOT verify under the seeded root (it was signed by OTHER_ROOT)
+  reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem, sigmaRoot: BAD_SIG });
+  // supply a genuinely-valid opts.sigmaRoot -- registry-wins means it is IGNORED; the failing bound wins
+  const out = P.assessRegistrationFromRegistry(r, { personaDid: DID, sigmaRoot: GOOD_SIG });
+  assert.equal(out.sigmaRootChecksPassed, false, 'registry-wins: a failing bound sigma is NOT rescued by a valid opts -- opts can never override (not a downgrade surface)');
+  assertInvariant(out);
+});
+
+test('W3 migration fallback: a legacy persona (NO bound sigma_root) falls back to a valid opts.sigmaRoot (back-compat)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
+  reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem }); // no bound sigma
+  const out = P.assessRegistrationFromRegistry(r, { personaDid: DID, sigmaRoot: GOOD_SIG });
+  assert.equal(out.sigmaRootChecksPassed, true, 'the injected-map (opts) fallback still works for a persona with no bound sigma');
+  assertInvariant(out);
+});
+
+test('W3 fail-closed: no bound sigma_root AND no opts.sigmaRoot -> FAIL (R1 absent)', () => {
+  const r = reg.createRegistry();
+  reg.registerRoot(r, { humanUid: CONTROLLER, rootPublicKeyPem: ROOT.publicKeyPem });
+  reg.registerPersona(r, { personaDid: DID, humanUid: CONTROLLER, publicKeyPem: PERSONA.publicKeyPem });
+  const out = P.assessRegistrationFromRegistry(r, { personaDid: DID });
+  assert.equal(out.sigmaRootChecksPassed, false, 'no sigma from either source -> fail-closed');
+  assertInvariant(out);
+});
+
 console.log(`\n[registration-provenance] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
