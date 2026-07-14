@@ -4,7 +4,7 @@ plan: 58
 epic: 96
 item: F6
 issue: 83-part-2
-status: DESIGN (pre-VERIFY) — ADR candidate
+status: VERIFY-done → ADR-0003 authored (PR #121); Wave-1 build pending
 ---
 
 # plans/58 — F6: the negative-leg monotonic re-derivation (EPIC #96, #83 Part 2)
@@ -21,6 +21,14 @@ All SHADOW / arms nothing. The goal: define the invariant under which a fold CAN
 without inverting monotonic-narrow, classify every fold against it, and phase the rollout.
 
 ## The refined invariant (TWO conditions, both required)
+
+> **⚠️ SUPERSEDED (2026-07-14) — do NOT build from this section, the map, or the rollout that follow.** The
+> VERIFY board (architect + hacker) corrected the invariant to **THREE conditions** and re-cut the fold map. The
+> two-condition form below, the `direct`/`stake-anchor` "Wave 2 by-type split" map rows, and the matching rollout
+> entries **INVERT NS-9** (anchoring the subject's own CLAIM/STAKE un-resolves its own CONTEST/SLASH → RAISES
+> trust). The authoritative design is **§"VERIFY board result … design CORRECTED"** at the END of this document,
+> ratified in `docs/ADRs/0003-fold-routing-monotonic-anchoring-invariant.md`. This section is retained only as
+> the pre-VERIFY draft record.
 
 **NS-9 (monotonic-narrow):** for any subject `S`, `trust_armed(S) <= trust_disarmed(S)`.
 
@@ -50,8 +58,8 @@ record can only HOLD-OR-LOWER the subject's trust. That requires BOTH:
 | `reach` | pure-positive, monotone (UNION size + weakest-link MIN) | **Wave 1** — route wholesale |
 | `verification-strength` | pure-positive, monotone (weakest-link MIN, `s=0`) | **Wave 1** — route wholesale |
 | `cross-verify` | pure-positive, monotone (SUM→SL-exp, `s=0`; no CONTEST enters) | **Wave 1** — route wholesale |
-| `direct` | mixed by-TYPE | **Wave 2** — anchor CLAIM (subject's own +); keep CONTEST raw |
-| `stake-anchor` | mixed by-TYPE | **Wave 2** — anchor STAKE (subject's own +); keep SLASH + its enabling CLAIM raw |
+| `direct` | mixed by-TYPE | ~~**Wave 2** — anchor CLAIM~~ **SUPERSEDED (inverts NS-9 — see §VERIFY board result): Wave 2-raw-resolution; keep the subject's own CLAIM + `agentClaimIds` RAW** |
+| `stake-anchor` | mixed by-TYPE | ~~**Wave 2** — anchor STAKE~~ **SUPERSEDED (inverts NS-9 — see §VERIFY board result): OPEN — no separable leg + no arm channel** |
 | `creator-standing` | mixed by-TYPE + gating | **Wave 2** — anchor the CONFIRM r-leg only; keep CONTEST s-leg + CLAIM-gate + the subject's own PREMISE anchor raw |
 | `premise-score` | mixed by-TYPE + gating | **Wave 2** — anchor the CONFIRM r-leg only; keep CONTEST s-leg + PREMISE-binding + CLAIM-gate raw |
 | `standing` (shared leaf) | context-dependent (dual-use CLAIM gate) | NOT anchorable at the leaf — the safe/raw seam lives in the 5 CONSUMERS, not `standing.js` |
