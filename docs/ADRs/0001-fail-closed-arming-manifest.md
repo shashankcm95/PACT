@@ -88,6 +88,12 @@ arm-resolution contract is a trust-boundary migration.
    > the other consumers are NAMED residuals (negative-leg anchoring needs a monotonic re-derivation; `consensus`
    > cascades to `direct`'s CONTEST leg; `stake-anchor` has no arm channel; freshness is a VOUCH-only no-op for the
    > 6 non-VOUCH folds). **F6 is NARROWED, not closed (NS-9).**
+   >
+   > **REFINED BY ADR-0003 (2026-07-14).** The "negative-leg monotonic re-derivation" this amendment named as
+   > unbuilt is now defined: ADR-0003 supplies the per-fold anchor-eligibility invariant (external-positive +
+   > monotone-aggregation + no-co-consumed-set) and the fold-routing map (Wave 1 = `cross-verify` /
+   > `verification-strength` / `reach` safe now; `direct`/`creator-standing`/`premise-score` = leg-split;
+   > `consensus`/`stake-anchor` = OPEN). Decision 4's *shape* (one fail-closed chokepoint) stands.
 
 5. **Authenticate `human_uid` at registration BEFORE any gate consumes `rootOf`.** — Bind a persona to a root
    only via a root-signed `sigma_root` at registration (`v0/src/identity/registry.js`), so the Sybil unit
