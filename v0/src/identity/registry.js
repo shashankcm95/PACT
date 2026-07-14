@@ -40,23 +40,38 @@ function createRegistry() {
  * (same-uid in-process, the freeze's own threat model). The stored row is `Object.freeze`d as cheap
  * defense-in-depth against an in-place row mutation.
  * @param {object} reg
- * @param {{personaDid:string, humanUid:string, publicKeyPem:string}} entry
+ * @param {{personaDid:string, humanUid:string, publicKeyPem:string, sigmaRoot?:string}} entry
  * @throws {TypeError} on a missing field, or a re-register that would mutate an established persona's row.
  */
-function registerPersona(reg, { personaDid, humanUid, publicKeyPem }) {
+function registerPersona(reg, { personaDid, humanUid, publicKeyPem, ...rest }) {
   if (typeof personaDid !== 'string' || !personaDid) throw new TypeError('personaDid required');
   if (typeof humanUid !== 'string' || !humanUid) throw new TypeError('humanUid required');
   if (typeof publicKeyPem !== 'string' || !publicKeyPem) throw new TypeError('publicKeyPem required');
+  // OPTIONAL sigma_root (plans/57 W3 #83 -- the registration-time root-signed binding), read OWN-PROP at the MINT
+  // site (VALIDATE HIGH -- the 4th read B1's read-side sweep missed): a plain `sigmaRoot` destructure is a [[Get]]
+  // that walks the prototype chain, so a polluted Object.prototype.sigmaRoot would be BAKED into the frozen row as
+  // an OWN prop, defeating every read-side own-prop guard one layer upstream. Object-rest copies OWN-enumerable
+  // props only, so Object.hasOwn(rest, ...) is own-safe. RECORD-ONLY (INV-18): a boundary type-check ONLY -- the M1
+  // idiom (`typeof !== 'string' || !v` rejects []/{}/empty), NEVER a crypto verify (that is the armed filter's job).
+  const sigmaRoot = Object.hasOwn(rest, 'sigmaRoot') ? rest.sigmaRoot : undefined;
+  if (sigmaRoot !== undefined && (typeof sigmaRoot !== 'string' || !sigmaRoot)) {
+    throw new TypeError('registerPersona: sigmaRoot, when present, must be a non-empty string (RECORD-ONLY -- not verified here)');
+  }
   const existing = reg.personas.get(personaDid);
   if (existing !== undefined) {
     // established persona: exact-row idempotent OR fail-closed. A write-time INTEGRITY guard (reject a
-    // conflicting overwrite), NOT a read-time trust/score decision -- INV-18 "registry, never oracle" holds.
-    if (existing.humanUid !== humanUid || existing.publicKeyPem !== publicKeyPem) {
-      throw new TypeError('registerPersona: persona ' + personaDid + ' is already registered with a different binding — the (humanUid, publicKeyPem) row is IMMUTABLE (first-writer-wins; a key-swap/rebind is refused). Rotate via a new DID.');
+    // conflicting overwrite), NOT a read-time trust/score decision -- INV-18 "registry, never oracle" holds. The
+    // compare EXTENDS to the OPTIONAL sigma_root read OWN-PROP with the raw `undefined` sentinel (VERIFY-hacker
+    // HIGH-1/MEDIUM-4): a no-sigma row has no own `sigmaRoot`, so a plain `existing.sigmaRoot` would inherit a
+    // polluted Object.prototype; and the sentinel (NOT lookupSigmaRoot's null) keeps an identical legacy no-sigma
+    // re-register idempotent (undefined === undefined), while a CHANGE/ADD/REMOVE of the sigma is a rejected mutation.
+    const existingSigma = Object.hasOwn(existing, 'sigmaRoot') ? existing.sigmaRoot : undefined;
+    if (existing.humanUid !== humanUid || existing.publicKeyPem !== publicKeyPem || existingSigma !== sigmaRoot) {
+      throw new TypeError('registerPersona: persona ' + personaDid + ' is already registered with a different binding — the (humanUid, publicKeyPem, sigmaRoot) row is IMMUTABLE (first-writer-wins; a key-swap/rebind/sigma-change is refused). Rotate via a new DID.');
     }
     return reg; // idempotent no-op
   }
-  reg.personas.set(personaDid, Object.freeze({ humanUid, publicKeyPem }));
+  reg.personas.set(personaDid, Object.freeze({ humanUid, publicKeyPem, ...(sigmaRoot !== undefined ? { sigmaRoot } : {}) }));
   reg.roots.add(humanUid);
   return reg;
 }
@@ -76,6 +91,14 @@ function lookupPublicKey(reg, personaDid) {
 function rootOf(reg, personaDid) {
   const p = reg && reg.personas.get(personaDid);
   return p ? p.humanUid : null;
+}
+
+/** The registration-bound sigma_root for a persona, or null (plans/57 W3 #83). OWN-PROP + null-safe
+ *  (VERIFY-hacker HIGH-1 / arch NIT-5): the OPTIONAL field is read own-only so a no-sigma row does NOT inherit a
+ *  polluted Object.prototype; an unregistered persona -> null (mirrors lookupPublicKey / lookupRootKey). */
+function lookupSigmaRoot(reg, personaDid) {
+  const p = reg && reg.personas.get(personaDid);
+  return p && Object.hasOwn(p, 'sigmaRoot') ? p.sigmaRoot : null;
 }
 
 /**
@@ -118,4 +141,4 @@ function lookupRootKey(reg, humanUid) {
   return k || null;
 }
 
-module.exports = { createRegistry, registerPersona, registerRoot, isKnownRoot, lookupPublicKey, lookupRootKey, rootOf };
+module.exports = { createRegistry, registerPersona, registerRoot, isKnownRoot, lookupPublicKey, lookupRootKey, lookupSigmaRoot, rootOf };

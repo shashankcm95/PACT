@@ -354,5 +354,60 @@ test('plan44 armed load M1: the parent-open finally releases the fd on each refu
   } finally { cleanup(p); }
 });
 
+// ===================== plans/57 W3 (#83): sigma_root round-trip + the recomputed node-cost cap =====================
+// serializeRegistry carries the OPTIONAL sigma_root (own-prop, conditional -> byte-identical for a no-sigma row);
+// deserialize round-trips it because registerPersona now destructures sigmaRoot. The row cap dropped (a sigma-bearing
+// row is 5 canonical nodes, not 4) so a full registry stays re-serializable (VERIFY-hacker MEDIUM-3).
+
+const P_SIG = 'c2lnbWEtcm91bmQtdHJpcA'; // placeholder bound sigma (serialize RECORDS, never verifies)
+
+test('W3 round-trip: a bound sigma_root survives serialize -> parse -> deserialize; a no-sigma row stays no-sigma', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zHera', humanUid: 'human:merlin', publicKeyPem: P_KEY_A, sigmaRoot: P_SIG });
+  reg.registerPersona(r, { personaDid: 'did:key:zBob', humanUid: 'human:alice', publicKeyPem: P_KEY_B }); // no sigma
+  const back = store.deserializeRegistry(JSON.parse(store.serializeRegistry(r)));
+  assert.equal(reg.lookupSigmaRoot(back, 'did:key:zHera'), P_SIG, 'the bound sigma survives the round-trip');
+  assert.equal(reg.lookupSigmaRoot(back, 'did:key:zBob'), null, 'a no-sigma persona stays no-sigma');
+  assert.equal(reg.lookupPublicKey(back, 'did:key:zHera'), P_KEY_A, 'the other fields are intact');
+});
+
+test('W3 HIGH-1 serialize own-prop: a polluted Object.prototype.sigmaRoot does NOT inject a bogus key into a no-sigma row (byte-identity)', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zBob', humanUid: 'human:alice', publicKeyPem: P_KEY_B }); // no sigma
+  const clean = store.serializeRegistry(r);
+  Object.prototype.sigmaRoot = 'POLLUTED'; // ambient pollution; restored in finally
+  try {
+    assert.equal(store.serializeRegistry(r), clean, 'serialize reads sigmaRoot own-prop: a no-sigma row must serialize byte-identically under pollution');
+  } finally {
+    delete Object.prototype.sigmaRoot;
+  }
+});
+
+test('W3 MEDIUM-3 cap invariant: MAX_REGISTRY_ROWS all-sigma personas still RE-SERIALIZE (loadable => re-serializable held)', () => {
+  const r = reg.createRegistry();
+  for (let i = 0; i < store.MAX_REGISTRY_ROWS; i++) {
+    reg.registerPersona(r, { personaDid: 'did:key:z' + i, humanUid: 'human:' + i, publicKeyPem: P_KEY_A, sigmaRoot: 'sig' + i });
+  }
+  assert.doesNotThrow(() => store.serializeRegistry(r), 'a full all-sigma registry at the cap must be re-serializable (5 nodes/row must fit MAX_CANONICAL_NODES)');
+});
+
+test('W3 determinism: a bound sigma_root does not disturb byte-identity across insertion order', () => {
+  const r1 = reg.createRegistry();
+  reg.registerPersona(r1, { personaDid: 'did:key:zB', humanUid: 'human:x', publicKeyPem: P_KEY_B, sigmaRoot: 'sigB' });
+  reg.registerPersona(r1, { personaDid: 'did:key:zA', humanUid: 'human:x', publicKeyPem: P_KEY_A, sigmaRoot: 'sigA' });
+  const r2 = reg.createRegistry();
+  reg.registerPersona(r2, { personaDid: 'did:key:zA', humanUid: 'human:x', publicKeyPem: P_KEY_A, sigmaRoot: 'sigA' });
+  reg.registerPersona(r2, { personaDid: 'did:key:zB', humanUid: 'human:x', publicKeyPem: P_KEY_B, sigmaRoot: 'sigB' });
+  assert.equal(store.serializeRegistry(r1), store.serializeRegistry(r2), 'sigma-bearing rows still serialize order-independently');
+});
+
+test('W3 MEDIUM-4 deserialize: a same-DID pair with CONFLICTING sigma_roots throws (first-writer at the load boundary)', () => {
+  const obj = { personas: [
+    { personaDid: 'did:key:zHera', humanUid: 'human:merlin', publicKeyPem: P_KEY_A, sigmaRoot: 'sig1' },
+    { personaDid: 'did:key:zHera', humanUid: 'human:merlin', publicKeyPem: P_KEY_A, sigmaRoot: 'sig2' },
+  ] };
+  assert.throws(() => store.deserializeRegistry(obj), /IMMUTABLE|different|first-writer|already registered/i, 'a conflicting bound sigma on load must throw, not silently keep first-writer');
+});
+
 console.log(`\n[registry-store] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

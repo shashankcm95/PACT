@@ -146,5 +146,89 @@ test('additive: the root-key model does not disturb the existing persona functio
   assert.equal(reg.lookupRootKey(r, 'human:alice'), ROOT_KEY_A, 'the root key coexists');
 });
 
+// ===================== plans/57 W3 (#83): sigma_root binding at registration =====================
+// RECORD-ONLY capture (INV-18): registerPersona stores an OPTIONAL sigma_root; it type-checks the field at the
+// boundary but NEVER crypto-verifies it (that is the read-time armed filter's job). First-writer immutability
+// extends to the sigma_root. All reads of the OPTIONAL field are own-property (Object.hasOwn) -- a no-sigma row
+// has no own `sigmaRoot`, so a plain read would inherit a polluted Object.prototype (VERIFY-hacker HIGH-1).
+
+const SIG_A = 'c2lnbWEtQQ'; // placeholder sigma strings -- registerPersona RECORDS, never verifies (INV-18)
+const SIG_B = 'c2lnbWEtQg';
+
+test('W3 capture: registerPersona records an OPTIONAL sigmaRoot in the frozen row; lookupSigmaRoot returns it', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zA', humanUid: 'human:a', publicKeyPem: KEY_A, sigmaRoot: SIG_A });
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zA'), SIG_A, 'the bound sigma_root is captured + looked up');
+});
+
+test('W3 back-compat: a persona registered WITHOUT a sigmaRoot -> lookupSigmaRoot null; unregistered -> null (null-safe)', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zB', humanUid: 'human:b', publicKeyPem: KEY_A });
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zB'), null, 'no bound sigma -> null (own-prop, not undefined)');
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zGhost'), null, 'unregistered persona -> null, never throws (null-safe helper)');
+});
+
+test('W3 HIGH-1 prototype pollution: a polluted Object.prototype.sigmaRoot does NOT leak into a no-sigma persona (own-prop read)', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zB', humanUid: 'human:b', publicKeyPem: KEY_A });
+  Object.prototype.sigmaRoot = 'POLLUTED-garbage-sigma'; // ambient pollution; restored in finally
+  try {
+    assert.equal(reg.lookupSigmaRoot(r, 'did:key:zB'), null, 'own-prop read: a no-sigma row must NOT return the inherited polluted value');
+  } finally {
+    delete Object.prototype.sigmaRoot;
+  }
+});
+
+test('W3 type-check (M1 idiom): a present non-string / empty / [] / {} sigmaRoot is REJECTED; absent is allowed', () => {
+  const r = reg.createRegistry();
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:z1', humanUid: 'h', publicKeyPem: KEY_A, sigmaRoot: '' }), /sigmaRoot|string/i, 'empty string rejected');
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:z2', humanUid: 'h', publicKeyPem: KEY_A, sigmaRoot: [] }), /sigmaRoot|string/i, '[] rejected (bare truthiness would pass it)');
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:z3', humanUid: 'h', publicKeyPem: KEY_A, sigmaRoot: {} }), /sigmaRoot|string/i, '{} rejected');
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:z4', humanUid: 'h', publicKeyPem: KEY_A, sigmaRoot: 123 }), /sigmaRoot|string/i, 'number rejected');
+  assert.doesNotThrow(() => reg.registerPersona(r, { personaDid: 'did:key:z5', humanUid: 'h', publicKeyPem: KEY_A }), 'absent sigmaRoot is allowed (optional)');
+});
+
+test('W3 first-writer immutability (sigma dimension): CHANGE / REMOVE of a sigmaRoot are REJECTED; identical is idempotent', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zC', humanUid: 'human:c', publicKeyPem: KEY_A, sigmaRoot: SIG_A });
+  assert.doesNotThrow(() => reg.registerPersona(r, { personaDid: 'did:key:zC', humanUid: 'human:c', publicKeyPem: KEY_A, sigmaRoot: SIG_A }), 'identical 4-tuple is idempotent');
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:zC', humanUid: 'human:c', publicKeyPem: KEY_A, sigmaRoot: SIG_B }), /immutable|already registered/i, 'a sigma CHANGE on an established persona is rejected');
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:zC', humanUid: 'human:c', publicKeyPem: KEY_A }), /immutable|already registered/i, 'REMOVING the sigma (present -> undefined) is a mutation -> rejected');
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zC'), SIG_A, 'the ORIGINAL sigma survives every rejected mutation');
+});
+
+test('W3 first-writer: ADD (undefined -> present) is REJECTED; a legacy no-sigma persona re-registers idempotently', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zD', humanUid: 'human:d', publicKeyPem: KEY_A }); // no sigma
+  assert.throws(() => reg.registerPersona(r, { personaDid: 'did:key:zD', humanUid: 'human:d', publicKeyPem: KEY_A, sigmaRoot: SIG_A }), /immutable|already registered/i, 'ADDING a sigma to an established persona is rejected (a later writer must not bind one)');
+  assert.doesNotThrow(() => reg.registerPersona(r, { personaDid: 'did:key:zD', humanUid: 'human:d', publicKeyPem: KEY_A }), 'identical no-sigma re-register is idempotent (undefined === undefined)');
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zD'), null, 'still no bound sigma');
+});
+
+test('W3 HIGH-1 MINT-SITE pollution: a polluted Object.prototype.sigmaRoot BEFORE register is NOT baked into a no-sigma row (own-prop mint, VALIDATE HIGH)', () => {
+  const r = reg.createRegistry();
+  Object.prototype.sigmaRoot = 'POLLUTED-at-mint'; // pollute BEFORE the write -- a plain destructure would inherit + bake it in
+  try {
+    reg.registerPersona(r, { personaDid: 'did:key:zMint', humanUid: 'human:mint', publicKeyPem: KEY_A }); // NO sigma supplied
+  } finally {
+    delete Object.prototype.sigmaRoot;
+  }
+  const row = r.personas.get('did:key:zMint');
+  assert.equal(Object.hasOwn(row, 'sigmaRoot'), false, 'the frozen row must NOT carry an OWN sigmaRoot the caller never supplied (object-rest own-prop mint)');
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zMint'), null, 'no bound sigma survives after a pollution-active mint');
+});
+
+test('W3 HIGH-1 conflict-compare pollution: a polluted Object.prototype.sigmaRoot does not break idempotency of a no-sigma re-register (own-prop sentinel both sides)', () => {
+  const r = reg.createRegistry();
+  reg.registerPersona(r, { personaDid: 'did:key:zIdem', humanUid: 'human:idem', publicKeyPem: KEY_A }); // no sigma, clean
+  Object.prototype.sigmaRoot = 'POLLUTED-compare'; // both the incoming destructure AND existing.sigmaRoot must read own-prop
+  try {
+    assert.doesNotThrow(() => reg.registerPersona(r, { personaDid: 'did:key:zIdem', humanUid: 'human:idem', publicKeyPem: KEY_A }), 'an identical no-sigma re-register stays idempotent under pollution (undefined === undefined via own-prop reads)');
+  } finally {
+    delete Object.prototype.sigmaRoot;
+  }
+  assert.equal(reg.lookupSigmaRoot(r, 'did:key:zIdem'), null, 'still no bound sigma');
+});
+
 console.log(`\n[registry] ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
