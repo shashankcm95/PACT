@@ -34,18 +34,16 @@ folds anchored. SHADOW / arms nothing; disarmed is byte-identical (the W2b choke
 - These bound the blast radius to `reach` + `verification-strength`; the mixed folds
   (`creator-standing`/`premise-score`/`direct`/`consensus`) pass their OWN raw `recs` and are UNTOUCHED.
 
-## The change (TWO load swaps — the recs-seam rule: swap the internal FALLBACK only)
+## The change (THREE load swaps — the recs-seam rule: swap the internal FALLBACK only)
 
-1. **`grounding/verification-strength.js:53`** —
-   `const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts);` →
-   `const recs = authenticatedAnchoredRecords(meCtx);`. It threads this `recs` into every `crossVerify`
-   (`:56`), so cross-verify's CONFIRM count anchors here (transitively). Import
-   `authenticatedAnchoredRecords` from `../trust/authenticated-read`.
-2. **`grounding/reach.js:46`** — swap the read inside the existing guard:
-   `(reg && meCtx.storeOpts) ? verifiedRecords(reg, meCtx.storeOpts) : []` →
-   `(reg && meCtx.storeOpts) ? authenticatedAnchoredRecords(meCtx) : []` (keep the guard verbatim so a
-   degenerate meCtx still yields `[]` with no behavior change). Import the chokepoint. reach's ACCEPT
-   envelope anchors; its `threshold_flag` anchors via `verificationStrength` (`:62`).
+1. **`grounding/verification-strength.js`** — swap its `verifiedRecords` load to
+   `authenticatedAnchoredRecords(meCtx)`. It threads this `recs` into every `crossVerify` call, so
+   cross-verify's full input anchors here (transitively). Import `authenticatedAnchoredRecords` from
+   `../trust/authenticated-read`.
+2. **`grounding/reach.js`** — swap the ACCEPT-scan read inside the existing `(reg && meCtx.storeOpts)`
+   guard to `authenticatedAnchoredRecords(meCtx)` (keep the guard verbatim so a degenerate meCtx still
+   yields `[]` with no behavior change). Import the chokepoint. reach's ACCEPT envelope anchors; its
+   `threshold_flag` anchors via `verificationStrength`.
 3. **`grounding/cross-verify.js`** — swap the internal FALLBACK to `recs || authenticatedAnchoredRecords`
    (ADR-0003 Decision 3). Dead for all live callers (they pass `recs`); this makes a future STANDALONE
    armed caller ANCHOR by default (fail-safe), and cross-verify is anchored on the `verification-strength`

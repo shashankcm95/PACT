@@ -118,8 +118,9 @@ test('totality (hostile getter): a throwing registry/storeOpts getter fails CLOS
 
 test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monotonic-safe set (convert + F6-Wave-1 pure-positive folds)', () => {
   // The routed set is the ADR-0003 monotonic-safe subset: convert.disjointPaths (positive VOUCH-graph read) +
-  // F6 Wave-1 (plans/59) reach + verification-strength (pure-positive + monotone; cross-verify anchors
-  // transitively via verification-strength -- its own leaf fallback stays raw, dead for live callers). Routing a
+  // F6 Wave-1 (plans/59) reach + verification-strength + cross-verify (pure-positive + monotone; cross-verify's
+  // internal fallback is swapped to the chokepoint per ADR Dec-3, and it is also fed anchored recs on the
+  // verification-strength path -- dead for live callers, who pass recs; a standalone armed caller anchors). Routing a
   // NEGATIVE-evidence consumer (creator-standing/premise-score/direct/stake-anchor-SLASH/consensus) through here
   // would INVERT monotonic-narrow when armed (a dropped un-anchored accuser RAISES trust) -- those stay Wave-2/OPEN.
   // A NEW importer beyond this reviewed set is a DELIBERATE-UPDATE signal requiring a monotonicity review + an

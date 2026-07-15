@@ -56,7 +56,7 @@ in the first-draft map that the board caught before any code was written.
    | Fold | Class | Disposition |
    |---|---|---|
    | `convert` (disjoint_paths) | pure-positive, monotone (max-flow) | DONE (W2b) |
-   | `cross-verify` | pure-positive, monotone (SUM→SL-exp, `s=0`) | **Wave 1** — its internal fallback swapped to the chokepoint (`recs || authenticatedAnchoredRecords`, per Decision 3) AND fed anchored `recs` via `verification-strength`. The fallback is dead for all live callers (they pass `recs`); a future STANDALONE armed caller ANCHORS by default (fail-safe). Built plans/59. |
+   | `cross-verify` | pure-positive, monotone (SUM→SL-exp, `s=0`) | **Wave 1** — its internal fallback swapped to the chokepoint (the `recs`-or-`authenticatedAnchoredRecords` fallback, per Decision 3) AND fed anchored `recs` via `verification-strength`. The fallback is dead for all live callers (they pass `recs`); a future STANDALONE armed caller ANCHORS by default (fail-safe). Built plans/59. |
    | `verification-strength` | pure-positive, monotone (weakest-link MIN over graph-fixed roots) | **Wave 1** — swap the `:53` load to the chokepoint (feeds cross-verify anchored). Built plans/59. |
    | `reach` | pure-positive (UNION + threshold); INV-13 display-only, never gates | **Wave 1** — swap the `:46` load (in-guard). Built plans/59. |
    | `creator-standing` | mixed (role hazard) | **Wave 2-CLEAN** — anchor the external CONFIRM r-leg ONLY |
