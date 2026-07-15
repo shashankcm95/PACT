@@ -65,6 +65,12 @@ read-path gate arms, changing the read-chokepoint contract is a trust-boundary m
    ALSO land when a read-path gate arms. Revisit trigger: **the operator elects to arm a read-path gate** (NS-7,
    operator-only — Claude never arms).
 
+   > **See ADR-0003 (2026-07-14).** The `authenticated-read.js` chokepoint is ALSO the seam ADR-0003 governs (the
+   > fold-routing monotonic-anchoring invariant). Two arming-boundary read-contract decisions now co-locate here:
+   > this Decision 3 (whether `root_valid` + inclusion become read requirements) and ADR-0003 (which folds may be
+   > routed through the chokepoint at all). An editor changing the `authenticated-read.js` contract must reconcile
+   > BOTH so they cannot drift.
+
 4. **Guard against silent drift until then** — a cross-reference comment at BOTH chokepoints (`receiveFrame` and
    `verifiedRecords`) points here, so an editor changing the authentication check-set in one path is confronted
    with the other path and this ADR. This is the cheap, no-behavior-change half of the "name it once" fix; the
