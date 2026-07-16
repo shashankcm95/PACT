@@ -40,16 +40,18 @@ subject's own PREMISE binding all read `rawRecs`.
 - Body swap: `findBoundPremise(gate, ...)` + `earnedStandingPersonas(gate)` (gates read RAW); the CONFIRM loop
   iterates `confirmSet`. The entanglement-demote operates on the CONFIRM-derived `perHumanDecay`.
 
-**Backward-compat proof:** every current caller passes ONE array as the 4th arg and no 5th (and no detector) →
+**Backward-compat proof:** every LEGACY single-array caller (verification-strength + standalone — NOT the Wave-2
+callers below, which deliberately pass both) passes ONE array as the 4th arg and no 5th (and no detector) →
 `anchoredRecs = undefined` → `confirmSet = gate` → both legs read the same array → **byte-identical**.
 - `verification-strength.js:63` passes the anchored set as `recs` (Wave-1 wholesale, pure-positive) → both legs
   read anchored → unchanged (its `findBoundPremise`-floors-on-un-anchored-creator behavior is preserved).
 - A standalone caller (no `recs`) → `gate = authenticatedAnchoredRecords` (fallback), `confirmSet = gate` → both
   anchored → unchanged (the Wave-1 T4 fallback-anchors pin still holds).
 
-**The Wave-2 callers** (`creatorStanding`/`premiseScore`) load BOTH arrays from ONE `verifiedRecords` read
-(subset-by-construction) and pass BOTH, with the SAME `reg` snapshot feeding verify + anchor (MED-1):
-```
+**The Wave-2 callers** (`creatorStanding`/`premiseScore`) are the intended exception — they load BOTH arrays from
+ONE `verifiedRecords` read (subset-by-construction) and pass BOTH, with the SAME `reg` snapshot feeding verify +
+anchor (MED-1):
+```js
 const reg = meCtx.registry;                                        // ONE snapshot (verify + anchor)
 const recs = verifiedRecords(reg, meCtx.storeOpts);                // RAW: s-leg + subject/earned gates
 const anchoredRecs = authenticatedAnchoredRecordsFrom(recs, reg, meCtx); // CONFIRM r-leg (derived from the SAME read)
