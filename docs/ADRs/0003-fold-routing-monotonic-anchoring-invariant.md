@@ -43,13 +43,20 @@ in the first-draft map that the board caught before any code was written.
      consumer such as `wcons`, which threads its RAW `recs` into `direct()`, is anchored through the back
      door and its mean inverts).
 
-2. **Three named hazards make the map auditable by ROLE, not by record type.** A fold inverts under anchoring
+2. **Four named hazards make the map auditable by ROLE, not by record type.** A fold inverts under anchoring
    via exactly one of: **(a) POLARITY** — a negative record TYPE (CONTEST/SLASH); **(b) AGGREGATION** — a
    non-monotone MEAN; **(c) PROPAGATION/ROLE** — a gating/enabling/resolution record whose polarity is set by
    its CONSUMING leg, not its type (the `earnedStandingPersonas` CLAIM set, `agentClaimIds`, `stakeIds`,
-   `contestedClaimIds`, the creator-bind). Hazard (c) is invisible to a record-type split — the SAME
-   `earnedStandingPersonas` set gates a POSITIVE leg in `cross-verify` (safe to shrink) and the NEGATIVE crater
-   in `direct` (shrinking un-craters → RAISES trust). Classification is therefore per-consuming-leg.
+   `contestedClaimIds`, the creator-bind); **(d) DOWNSTREAM-COMPOSITION** (added 2026-07-16, plan 61) — a fold that
+   is fold-level-monotone but feeds a DOWNSTREAM aggregation whose WEIGHT depends on the anchored quantity. `direct`
+   is monotone in `rEv`, but `model.js trust()` blends it as `alpha·directE + (1-alpha)·consE` with
+   `alpha = alpha(rEv+sEv)`; anchoring `rEv` shifts the blend weight off DIRECT and can RAISE `trust()`. Hazard (c)
+   is invisible to a record-type split — the SAME `earnedStandingPersonas` set gates a POSITIVE leg in
+   `cross-verify` (safe to shrink) and the NEGATIVE crater in `direct` (shrinking un-craters → RAISES trust);
+   hazard (d) is invisible to a per-FOLD split — a fold's monotonicity is NECESSARY-but-not-SUFFICIENT.
+   **Anchor-eligibility (the 3 conditions) must therefore be checked at the SUBJECT'S-TRUST granularity (the public
+   `trust()` output), NOT the fold in isolation** — trace the anchored quantity into every downstream weight/mean.
+   Classification is per-consuming-leg AND per-downstream-consumer.
 
 3. **The fold-routing map (this is the load-bearing artifact).**
 
@@ -61,7 +68,7 @@ in the first-draft map that the board caught before any code was written.
    | `reach` | pure-positive (UNION + threshold); INV-13 display-only, never gates | **Wave 1** — swap the `:46` load (in-guard). Built plans/59. |
    | `creator-standing` | mixed (role hazard) | **Wave 2-CLEAN** — anchor the external CONFIRM r-leg ONLY |
    | `premise-score` | mixed (role hazard) | **Wave 2-CLEAN** — anchor the external CONFIRM r-leg ONLY |
-   | `direct` | mixed (subject's own CLAIM is dual-role) | **Wave 2-raw-resolution** — anchor `rEv`, keep `agentClaimIds`/`contestedClaimIds`/crater RAW |
+   | `direct` | fold-monotone BUT feeds `model.js`'s `rEv`-weighted alpha-blend MEAN | **OPEN** (reclassified 2026-07-16, plan 61 VERIFY — was "Wave 2-raw-resolution"). The raw-resolution split (anchor `rEv`, keep `agentClaimIds`/`contestedClaimIds`/crater RAW) IS fold-monotone, but `direct` is the SOLE fold consumed by `model.js trust() = alpha·directE + (1-alpha)·consE` where `alpha = alpha(rEv+sEv)`. Anchoring `rEv` lowers `alpha`, shifts weight off DIRECT onto consensus, and RAISES `trust()` when `consE > directE` — the SAME mean-hazard as consensus (hazard (d) below). Needs the alpha-blend re-derivation (base `alpha` on the RAW count). See Validation 2026-07-16. |
    | `standing` (shared leaf) | dual-use gate | NOT anchorable at the leaf — the seam lives in each of the 5 consumers |
    | `stake-anchor` | positive leg NOT separable from the SLASH resolution set; no arm channel today | **OPEN** |
    | `consensus`/`wcons` | weighted MEAN + nested `direct()` negative leg per weight | **OPEN** |
@@ -96,6 +103,8 @@ re-derived the monotonicity from `s=0` + SUM + MIN-over-graph-fixed-roots). Fold
 - **`direct`/`stake-anchor` inversion** (architect HIGH) — the first draft said "anchor the subject's CLAIM/
   STAKE", which drops the subject's own resolution set and un-resolves its CONTEST/SLASH → trust rises to
   novice. Corrected: subject-authored records stay RAW; `direct` → raw-resolution split; `stake-anchor` → OPEN.
+  (`direct`'s raw-resolution split was ITSELF later reclassified OPEN on 2026-07-16 — hazard (d); see the
+  2026-07-16 Validation subsection below. This 2026-07-14 line records only the first-draft correction.)
 - **`consensus` un-anchorable for TWO reasons** (hacker HIGH) — the mean AND the nested `direct()` negative leg
   per voucher weight; a monotone-lower-bound estimator would inherit the contest-leg (no cheap fix).
 - **The `recs`-seam rule** (hacker MED) — condition (3)'s "internal fallback only, never caller-supplied `recs`".
@@ -103,13 +112,30 @@ re-derived the monotonicity from `s=0` + SUM + MIN-over-graph-fixed-roots). Fold
   dual-role bug (a dropped SUBJECT). Witnesses must cover: a dropped un-anchored SUBJECT with craters/slash; a
   dropped CONTESTER crossing the crater `>=2` boundary; `wcons` byte-identical across any `direct` change.
 
+### Validation — `direct` reclassified to OPEN (2026-07-16, plan 61 VERIFY board)
+
+Architect + hacker (BOTH NEEDS-REVISION, matching HIGH) on the plan-61 `direct` raw-resolution build, with
+independent concrete reproducers. **The 2026-07-14 map put `direct` in "Wave-2-raw-resolution" by analyzing the
+fold in ISOLATION — it missed that `direct` feeds `model.js trust()`, a MEAN whose weight `alpha = alpha(rEv+sEv)`
+depends on the anchored `rEv`.** The raw-resolution split is genuinely fold-monotone (`E(DIRECT)_armed <=
+E(DIRECT)_disarmed`; the dual-role CLAIM set stays raw so a dropped un-anchored CLAIM never un-resolves a CONTEST),
+but `model.js` standalone (the SOLE armed path — `consensus` passes raw `recs`) computes
+`trust = alpha·directE + (1-alpha)·consE`; arming lowers `rEv` → lowers `alpha` → shifts weight onto the unchanged
+`consE`, RAISING `trust()` when `consE > directE` (reproducer: `rEv=3→0`, `wcons=0.95` → `0.894 → 0.95`, +0.056).
+This is **hazard (d) DOWNSTREAM-COMPOSITION** (Decision 2). `direct` is reclassified OPEN (map + Deferred);
+anchor-eligibility must henceforth be checked at the SUBJECT'S-`trust()` granularity, not the fold. The fold-level
+split analysis + the `reg`-single-snapshot (MED-1) and dedup-representative over-narrow LOWs are recorded in plan 61
+for the eventual re-derivation.
+
 ## Consequences
 
 - **Easier:** Wave 1 (`cross-verify` + `verification-strength` + `reach`) can be built immediately and safely,
   taking #83 Part 2 from 1/9 to 4/9 folds anchored, with a mechanical, board-confirmed monotonicity guarantee.
-- **Harder:** whole-surface NS-4 coverage is NOT one change — it is Wave 1 (wholesale) + Wave 2 (per-fold leg
-  splits, needing the two-array `crossVerify`) + two OPEN re-derivations. "Route all folds" is retired as a
-  single step.
+- **Harder:** whole-surface NS-4 coverage is NOT one change — it is Wave 1 (wholesale) + Wave-2-CLEAN (the
+  `creator-standing`/`premise-score` leg splits, the two-array `crossVerify`, BUILT #123) + **THREE OPEN
+  re-derivations** (`direct` — reclassified 2026-07-16 — plus `consensus` + `stake-anchor`). "Route all folds" is
+  retired as a single step; and a fold that is fold-level-monotone can still be OPEN when a downstream consumer's
+  weight moves with the anchored quantity (hazard (d), `direct`).
 - **New residual (disclosed):** the anchoring boundary now carries a per-fold eligibility obligation — a new
   fold, or a new negative leg on an existing anchored fold, must be re-audited against the 3 conditions before
   it may be routed. The `s=0` guard (Decision 5) makes the most dangerous drift (a new negative leg on
@@ -124,7 +150,15 @@ re-derived the monotonicity from `s=0` + SUM + MIN-over-graph-fixed-roots). Fold
 - **`stake-anchor` anchoring** — needs (i) an arm channel (`createStakeAnchor`/`stakeOf` take no `regProvenance`
   today — ADR-0001's 2026-07-12 amendment) AND (ii) a re-derivation, since its positive leg (locked/unlocked
   from `stakeIds`) is not separable from the SLASH resolution set. Revisit at the same time as `consensus`.
-- **`direct` Wave-2-raw-resolution + the two-array `crossVerify` (Wave 2-CLEAN)** — designed here, built later.
+- **`direct` — RECLASSIFIED to OPEN (2026-07-16, plan 61 VERIFY; was "Wave-2-raw-resolution").** The
+  raw-resolution split is fold-monotone, but `direct` feeds `model.js trust() = alpha·directE + (1-alpha)·consE`
+  with `alpha = alpha(rEv+sEv)` (hazard (d)) — anchoring `rEv` shifts the blend weight off DIRECT onto consensus and
+  RAISES `trust()` when `consE > directE`. Un-anchorable until the alpha-blend is re-derived: base `alpha` on the
+  RAW interaction count (`rEv_raw + sEv`) and use the anchored `rEv` ONLY for `directE`, giving
+  `trust_armed = alpha_raw·directE_armed + (1-alpha_raw)·consE <= trust_disarmed`. That is a TRUST-MATH change to
+  the core blend (its own design + ADR) — co-deferred with `consensus`/`stake-anchor`. The OPEN bucket is now 3.
+- **Two-array `crossVerify` (Wave-2-CLEAN)** — BUILT (#123, plan 60): `creator-standing` + `premise-score`
+  anchor the CONFIRM r-leg only. #83 Part-2 at 6/9.
 - **Co-arming proof obligation** — the F6 monotonicity is analyzed with the entanglement detector DORMANT
   (the default); the joint `anchoring + entanglementDetector` armed case needs its own witness. Scoped out until
   the detector arms.
