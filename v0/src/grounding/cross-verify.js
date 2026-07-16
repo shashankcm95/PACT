@@ -20,7 +20,7 @@
 
 'use strict';
 
-const { verifiedRecords } = require('../trust/read-gate');
+const { authenticatedAnchoredRecords } = require('../trust/authenticated-read');
 const { opinion, expectation } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
@@ -76,7 +76,14 @@ function findBoundPremise(recs, reg, premiseId) {
  * @returns {{strength:number, r:number, n_confirmers:number, label:object, advisory:true}}
  */
 function crossVerify(premiseId, meCtx, now, recs) {
-  const all = recs || verifiedRecords(meCtx.registry, meCtx.storeOpts);
+  // F6 Wave-1 / ADR-0003 Decision 3: anchor at the internal FALLBACK (`recs || authenticatedAnchoredRecords`,
+  // never on a caller-supplied `recs`). cross-verify is pure-positive (`s=0` below), so anchoring only NARROWS.
+  // The fallback is DEAD for every live caller today (all 3 pass `recs`: verification-strength, creator-standing,
+  // premise-score) -- on the verification-strength path the passed `recs` is ALREADY anchored; on the
+  // creator-standing/premise-score (Wave-2) paths it is RAW. The swap here makes a future STANDALONE caller
+  // ANCHOR-by-default under arming (fail-safe: the raw path yields a HIGHER, less-narrowed strength -- the
+  // de-anchoring direction). DISARMED it is byte-identical to verifiedRecords.
+  const all = recs || authenticatedAnchoredRecords(meCtx);
   const reg = meCtx.registry;
   const FLOOR = { strength: 0, r: 0, n_confirmers: 0, label: independenceLabel({ topological: 0 }), advisory: true };
 

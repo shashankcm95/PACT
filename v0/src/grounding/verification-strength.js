@@ -14,7 +14,7 @@
 'use strict';
 
 const { getNode } = require('../atms/claim');
-const { verifiedRecords } = require('../trust/read-gate');
+const { authenticatedAnchoredRecords } = require('../trust/authenticated-read');
 const { crossVerify } = require('./cross-verify');
 
 /**
@@ -50,7 +50,14 @@ function collectRootPremises(graph, startId) {
 function verificationStrength(claimId, graph, meCtx, now) {
   const roots = collectRootPremises(graph, claimId);
   if (roots.length === 0) return 0; // MIN of an EMPTY set = 0, NEVER +Infinity (the catastrophe)
-  const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts); // load ONCE, pass to each root (no O(N+1))
+  // F6 Wave-1 (plans/59, ADR-0003): route through the anchoring chokepoint. DISARMED (no meCtx.regProvenance/
+  // freshness -- every caller today) this is byte-identical to verifiedRecords; ARMED it drops un-anchored
+  // records, monotonically NARROWING the (pure-positive, s=0) weakest-link MIN. The anchored recs is threaded
+  // into each crossVerify (below). filterAnchoredRecords is PER-PERSONA over ALL record types, so this narrows
+  // crossVerify's FULL input set -- the PREMISE creator-binding (findBoundPremise -> floor 0 if the creator is
+  // un-anchored), the earned-standing CLAIM gate, AND the CONFIRM count -- every effect drop-only (monotone).
+  // Anchored at this internal load only (never a caller-supplied recs) -- the recs-seam.
+  const recs = authenticatedAnchoredRecords(meCtx); // load ONCE, pass to each root (no O(N+1))
   let min = Infinity;
   for (const premiseId of roots) {
     const strength = crossVerify(premiseId, meCtx, now, recs).strength;

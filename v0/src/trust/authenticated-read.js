@@ -3,8 +3,11 @@
 // THE anchoring/freshness read chokepoint. It composes the sig-only read-gate (verifiedRecords, INV-14) with the
 // two authorization filters into ONE set: verified -> anchored -> fresh. A consumer that reads through here gets
 // the WHOLE authenticated-anchored-fresh set, so arming the anchoring/freshness Sybil defense (NS-4) narrows every
-// consumer LATER routed through it. THIS wave routes ONLY convert.disjointPaths (the #81/F6 relocation); the other
-// consumers are NAMED residuals (see SCOPE below) -- routing them is not mechanical (the monotonicity inversion).
+// consumer routed through it. ROUTED SET (ADR-0003 monotonic-safe subset): convert.disjointPaths (W2b) + F6
+// Wave-1 reach + verification-strength + cross-verify (all pure-positive + monotone). The NEGATIVE-evidence
+// consumers (creator-standing/premise-score/direct/stake-anchor/consensus) are NAMED residuals -- routing them is
+// not mechanical (the monotonicity inversion; Wave-2/OPEN per ADR-0003). The importer-set guard in
+// authenticated-read.test.js enforces this exact set.
 //
 // DEEP MODULE / SRP (VERIFY board §6 Q1): this is a THIN composition ABOVE the primitives -- read-gate stays the
 // minimal sig-only INV-14 chokepoint (its ADR-0002 header stays true), and the two filters keep their "sits

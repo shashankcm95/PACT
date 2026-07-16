@@ -16,7 +16,7 @@
 
 const { rootOf } = require('../identity/registry');
 const { getNode } = require('../atms/claim');
-const { verifiedRecords } = require('../trust/read-gate');
+const { authenticatedAnchoredRecords } = require('../trust/authenticated-read');
 const { verificationStrength } = require('./verification-strength');
 
 // A claim's CLAIMED grounding on [0,1]. Resolution (plan §3.5 left `groundingClaim` unbound — see the
@@ -43,7 +43,11 @@ function groundingClaim(claim) {
 function reach(claimId, claimCtx = {}) {
   const meCtx = claimCtx.meCtx || {};
   const reg = meCtx.registry;
-  const recs = (reg && meCtx.storeOpts) ? verifiedRecords(reg, meCtx.storeOpts) : [];
+  // F6 Wave-1 (plans/59, ADR-0003): route the ACCEPT scan through the anchoring chokepoint (guard preserved
+  // verbatim -- a degenerate meCtx still yields []). DISARMED byte-identical; ARMED narrows the UNION envelope
+  // (pure-positive; reach is INV-13 display-only, never gates). reach's threshold_flag anchors via
+  // verificationStrength (below), which routes independently.
+  const recs = (reg && meCtx.storeOpts) ? authenticatedAnchoredRecords(meCtx) : [];
   const roots = new Set();
   for (const a of recs) {
     if (a.type !== 'ACCEPT' || !a.payload) continue;

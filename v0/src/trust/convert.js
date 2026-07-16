@@ -85,7 +85,8 @@ function maxVertexDisjointPaths(edges, src, sink) {
 function disjointPaths(meCtx, meDid, agentDid) {
   // W2b (plans/56): the verified -> anchored -> fresh composition moved INTO the authenticated-read chokepoint
   // (ADR Dec 4) so arming narrows every routed consumer, not just here. Byte-identical (the chokepoint replicates
-  // this exact composition + order); convert.disjointPaths stays the sole ROUTED consumer this wave (§7).
+  // this exact composition + order). convert.disjointPaths was the FIRST routed consumer; F6 Wave-1 (plans/59,
+  // ADR-0003) added reach + verification-strength + cross-verify (the pure-positive monotonic-safe set).
   const edges = buildVouchGraph(authenticatedAnchoredRecords(meCtx));
   return maxVertexDisjointPaths(edges, meDid, agentDid);
 }
