@@ -28,28 +28,35 @@ subject's own PREMISE binding all read `rawRecs`.
   the terminal external-positive **accumulator**, NEVER to the gates — even though anchoring the gates would also
   be monotone-safe. Minimal anchored surface = auditable surface (defends against a future negative leg reusing a
   gate — hazard (c)).
-- `anchoredRecs` — NEW optional 5th arg: the CONFIRM accumulator set. **Defaults to `recs` when omitted.**
-- Internal loads: `const gate = recs || authenticatedAnchoredRecords(meCtx);` (standalone → anchored, fail-safe,
-  unchanged) and `const confirmSet = anchoredRecs || gate;`.
-- Body swap: `findBoundPremise(gate, ...)` + `earnedStandingPersonas(gate)` (was `all`); the CONFIRM loop iterates
-  `confirmSet` (was `all`). The entanglement-demote operates on the CONFIRM-derived `perHumanDecay` (from
-  `confirmSet`) unchanged.
+- `anchoredRecs` — NEW optional 5th arg: the CONFIRM accumulator set.
+- `crossVerify` is TOTAL: it snapshots the meCtx reads (`registry`, `entanglementDetector`) ONCE inside a guarded
+  try → `FLOOR` on a hostile getter (matches the chokepoint family).
+- **`confirmSet` resolution (final, post-VALIDATE — supersedes the `anchoredRecs || gate` draft):**
+  `const gate = recs || authenticatedAnchoredRecords(meCtx)` (standalone → anchored fallback, fail-safe); then
+  - **detector present** → `confirmSet = gate` (CO-ARM fail-close, takes precedence — see the A9 finding below); else
+  - `anchoredRecs` **omitted** → `confirmSet = gate` (byte-identical single-array default); else
+  - `anchoredRecs` **an array** → `confirmSet = anchoredRecs` (the Wave-2 split); else
+  - `anchoredRecs` **present-but-non-array** → `confirmSet = []` (fail CLOSED — never a silent de-anchor to raw).
+- Body swap: `findBoundPremise(gate, ...)` + `earnedStandingPersonas(gate)` (gates read RAW); the CONFIRM loop
+  iterates `confirmSet`. The entanglement-demote operates on the CONFIRM-derived `perHumanDecay`.
 
-**Backward-compat proof:** every current caller passes ONE array as the 4th arg and no 5th →
+**Backward-compat proof:** every current caller passes ONE array as the 4th arg and no 5th (and no detector) →
 `anchoredRecs = undefined` → `confirmSet = gate` → both legs read the same array → **byte-identical**.
 - `verification-strength.js:63` passes the anchored set as `recs` (Wave-1 wholesale, pure-positive) → both legs
   read anchored → unchanged (its `findBoundPremise`-floors-on-un-anchored-creator behavior is preserved).
 - A standalone caller (no `recs`) → `gate = authenticatedAnchoredRecords` (fallback), `confirmSet = gate` → both
   anchored → unchanged (the Wave-1 T4 fallback-anchors pin still holds).
 
-**The Wave-2 callers** (`creatorStanding`/`premiseScore`) load BOTH arrays and pass BOTH:
+**The Wave-2 callers** (`creatorStanding`/`premiseScore`) load BOTH arrays from ONE `verifiedRecords` read
+(subset-by-construction) and pass BOTH, with the SAME `reg` snapshot feeding verify + anchor (MED-1):
 ```
-const rawRecs = verifiedRecords(meCtx.registry, meCtx.storeOpts);   // s-leg + subject/earned gates
-const anchoredRecs = authenticatedAnchoredRecords(meCtx);           // CONFIRM r-leg accumulator
-...crossVerify(premiseId, meCtx, now, rawRecs, anchoredRecs).r      // r-leg anchored
-...contestEvidence/contestSurvival(rawRecs, ...)                    // s-leg RAW (unchanged)
+const reg = meCtx.registry;                                        // ONE snapshot (verify + anchor)
+const recs = verifiedRecords(reg, meCtx.storeOpts);                // RAW: s-leg + subject/earned gates
+const anchoredRecs = authenticatedAnchoredRecordsFrom(recs, reg, meCtx); // CONFIRM r-leg (derived from the SAME read)
+...crossVerify(premiseId, meCtx, now, recs, anchoredRecs).r        // r-leg anchored
+...contestEvidence/contestSurvival(recs, ...)                      // s-leg RAW (unchanged)
 ```
-The premise-SET iteration in `creatorStanding` stays on `rawRecs` (dropping an un-anchored SUBJECT premise from the
+The premise-SET iteration in `creatorStanding` stays on `recs` (dropping an un-anchored SUBJECT premise from the
 aggregate would remove a possibly-net-negative term → inversion; the subject-premise is condition-(1)-ineligible).
 
 ## Three ADR conditions — satisfied

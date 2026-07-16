@@ -192,6 +192,24 @@ test('A3 creatorStanding: an un-anchored 2nd contester keeps the crater >=2 arme
   assert.equal(armed.opinion.s, disarmed.opinion.s, 's-leg (craterized) is RAW -> identical armed/disarmed');
 });
 
+// ---------- A5: the subject-PREMISE binding reads the RAW gate (regression guard vs a gate->confirmSet switch) ----------
+
+test('A5 raw premise-binding: an UN-anchored creator PREMISE + an anchored earned CONFIRM -> armed r>0 (gate reads RAW)', () => {
+  const w = anchWorld();
+  const creator = 'human:did:key:zCr';
+  w.addPersona('did:key:zCr', false);   // UN-anchored creator -> its PREMISE record DROPS from the anchored set
+  w.addPersona('did:key:zK', true);     // anchored earned confirmer -> its CONFIRM survives arming
+  w.earn('did:key:zK');
+  const prem = makePremise({ statement: 'a5', scope: SCOPE, creator });
+  w.emit('did:key:zCr', 'PREMISE', { statement: 'a5', scope: SCOPE, creator });
+  w.emit('did:key:zK', 'CONFIRM', { target_premise_id: prem.id });
+  // ARMED: findBoundPremise reads the RAW gate, so the un-anchored creator's PREMISE is STILL found; the anchored
+  // confirmer's CONFIRM counts -> r>0. If findBoundPremise were switched from `gate` to `confirmSet` (anchored),
+  // the un-anchored premise would drop -> FLOOR r=0 -- this witness trips RED on that regression.
+  const armed = premiseScore(prem.id, w.armedCtx());
+  assert.ok(armed.r > 0, 'the subject-premise binding is found on the RAW gate even when the creator is un-anchored');
+});
+
 // ---------- A9: co-armed anchoring + entanglement-detector must NOT invert the r-leg (the HIGH the board found) ----------
 
 test('A9 co-armed detector+anchoring: r_armed <= r_disarmed (anchoring skipped while the detector is present)', () => {
