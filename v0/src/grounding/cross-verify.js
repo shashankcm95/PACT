@@ -70,31 +70,78 @@ function findBoundPremise(recs, reg, premiseId) {
  * @param {string} premiseId  the ATMS content-address premise id
  * @param {{registry:object, storeOpts:object}} meCtx
  * @param {number} [now] epoch ms for decay
- * @param {object[]} [recs] pre-scanned verifiedRecords output — pass it to avoid an O(N+1) re-scan when a
- *   caller (creatorStanding / verificationStrength / premiseScore) already loaded the verified log. The
- *   contract mirrors direct(): `recs` MUST be verifiedRecords output (INV-14); omit it to self-scan.
+ * @param {object[]} [recs] the RAW/GATE set (verifiedRecords output) — pass it to avoid an O(N+1) re-scan when a
+ *   caller already loaded the verified log. Used for the GATES: findBoundPremise (the subject-PREMISE binding) +
+ *   earnedStandingPersonas (the earned CLAIM gate). The contract mirrors direct(): `recs` MUST be verifiedRecords
+ *   output (INV-14); omit it to self-scan (falls back to the anchored chokepoint — fail-safe).
+ * @param {object[]} [anchoredRecs] the F6 Wave-2 (ADR-0003 Decision 4) two-array split: the CONFIRM ACCUMULATOR
+ *   set. Defaults to the GATE set (`recs` when supplied, else the anchored fallback) — so a single-array caller is
+ *   byte-identical. A Wave-2 caller (creatorStanding/premiseScore) passes the ANCHORED set here + the RAW set as
+ *   `recs`, so ONLY the positive CONFIRM leg anchors (condition 3: anchor the terminal accumulator, at leg
+ *   granularity; the gates + the caller's s-leg stay RAW). Meaningful ONLY alongside `recs`. CONTRACT (mirrors
+ *   `recs`): MUST be verifiedRecords / authenticatedAnchoredRecordsFrom output (a plain array, never a Proxy) --
+ *   the accumulator loop is not species/iterator-hardened. A present-but-non-array value fails CLOSED to []
+ *   (never a silent de-anchor to the raw gate). See the confirmSet resolution below.
  * @returns {{strength:number, r:number, n_confirmers:number, label:object, advisory:true}}
  */
-function crossVerify(premiseId, meCtx, now, recs) {
-  // F6 Wave-1 / ADR-0003 Decision 3: anchor at the internal FALLBACK (`recs || authenticatedAnchoredRecords`,
-  // never on a caller-supplied `recs`). cross-verify is pure-positive (`s=0` below), so anchoring only NARROWS.
-  // The fallback is DEAD for every live caller today (all 3 pass `recs`: verification-strength, creator-standing,
-  // premise-score) -- on the verification-strength path the passed `recs` is ALREADY anchored; on the
-  // creator-standing/premise-score (Wave-2) paths it is RAW. The swap here makes a future STANDALONE caller
-  // ANCHOR-by-default under arming (fail-safe: the raw path yields a HIGHER, less-narrowed strength -- the
-  // de-anchoring direction). DISARMED it is byte-identical to verifiedRecords.
-  const all = recs || authenticatedAnchoredRecords(meCtx);
-  const reg = meCtx.registry;
+function crossVerify(premiseId, meCtx, now, recs, anchoredRecs) {
+  // GATE set (RAW): the subject-PREMISE binding + earned CLAIM gate. Standalone (no recs) -> the anchored chokepoint
+  // fallback (fail-safe; ADR-0003 Dec 3). CONFIRM ACCUMULATOR set (confirmSet): the ONLY leg that anchors under the
+  // Wave-2 two-array split.
+  //   - anchoredRecs OMITTED (every single-array caller: verification-strength/standalone/pre-Wave-2) -> confirmSet
+  //     = gate -> byte-identical (both legs read one array).
+  //   - anchoredRecs an ARRAY (the Wave-2 split) -> the anchored positive-evidence set narrows ONLY the r-leg.
+  //   - anchoredRecs present-but-NON-ARRAY -> fail CLOSED to [] (r=0), NEVER a silent de-anchor to the raw gate
+  //     (a narrowing filter must fail closed -- VERIFY hacker MED). NOTE: the CO-ARM guard below takes PRECEDENCE
+  //     -- when a detector is present, confirmSet=gate wins over the []-floor (a non-array 5th arg + a co-armed
+  //     detector yields gate, not []). That is still NS-9-safe (gate=raw=the disarmed baseline for the two-array
+  //     folds); the []-floor is the fail-closed path for the detector-ABSENT case (the only live shape).
+  //
+  // CO-ARM FAIL-CLOSE (VERIFY hacker HIGH / ADR-0003 Deferred, dated 2026-07-16): anchoring DROPS un-anchored
+  // CONFIRMs from confirmSet BEFORE the entanglement-demote clusters over [...perHumanDecay.keys()] (below).
+  // Removing a confirmer can change the cluster topology so survivors ESCAPE a collapse the disarmed superset
+  // suffers -> the anchored r can EXCEED the disarmed r (a demonstrated NS-9 inversion: r_armed=2 > r_disarmed=1).
+  // Anchoring and the demote do NOT commute. Until the joint re-derivation lands (min(r_anchored,r_raw) clamp),
+  // fail SAFE: when the detector is present, force confirmSet = gate (skip anchoring) -- so under a co-armed
+  // detector these folds FORFEIT their NS-4 anchoring narrowing entirely (confirmSet=gate=raw) to stay NS-9-safe.
+  // For the two-array folds (creator-standing/premise-score, whose gate is RAW) this yields r_armed == r_disarmed
+  // (the de-anchor direction is NS-9-safe). RESIDUAL: verification-strength passes an already-anchored `recs` as its
+  // gate, so the leaf cannot de-anchor it -- its co-arming residual stays deferred (ADR-0003). SNAPSHOT the detector
+  // field ONCE (VALIDATE hacker MED): reading meCtx.entanglementDetector twice (here + the demote's detectorFn) lets
+  // a two-face getter desync detectorPresent from detectorFn and resurrect the inversion -- matches the module
+  // family's "read the arm signal ONCE" discipline (authenticated-read.js snapshots, both evalArm variants).
   const FLOOR = { strength: 0, r: 0, n_confirmers: 0, label: independenceLabel({ topological: 0 }), advisory: true };
+  // TOTALITY (CodeRabbit Major / VALIDATE): SNAPSHOT the meCtx signal reads ONCE inside a guarded try. A hostile
+  // `registry`/`entanglementDetector` getter or Proxy would else THROW and ESCAPE crossVerify (pre-existing: the
+  // pre-Wave-2 leaf read both unguarded). Fail CLOSED -> FLOOR, matching the authenticated-read chokepoint family's
+  // "never throws" totality (meCtx is trusted DI today; this is defense-in-depth for a future non-DI caller). The
+  // ONE detector read is reused for the co-arm guard AND the demote's detectorFn below (a two-face getter would
+  // else desync them and resurrect the inversion -- module family's "read the arm signal ONCE" discipline).
+  const mc = (meCtx && typeof meCtx === 'object') ? meCtx : null;
+  if (!mc) return FLOOR; // degenerate meCtx (null/non-object) -> floor (chokepoint totality)
+  let detector;
+  let reg;
+  try {
+    detector = mc.entanglementDetector;
+    reg = mc.registry;
+  } catch {
+    return FLOOR;
+  }
+  const detectorPresent = !!detector;
+  const gate = recs || authenticatedAnchoredRecords(meCtx); // authenticatedAnchoredRecords is itself TOTAL
+  let confirmSet;
+  if (detectorPresent || anchoredRecs === undefined) confirmSet = gate;
+  else confirmSet = Array.isArray(anchoredRecs) ? anchoredRecs : [];
 
-  const premise = findBoundPremise(all, reg, premiseId);
+  const premise = findBoundPremise(gate, reg, premiseId); // GATE (raw) -- subject binding is condition-1-ineligible
   if (!premise) return FLOOR; // unverified creator-claim -> floor 0 (the premise scores for no one)
   const creator = premise.payload.creator;
-  const earned = earnedStandingPersonas(all);
+  const earned = earnedStandingPersonas(gate); // GATE (raw) -- the earned CLAIM gate stays raw (ADR-0003 Dec 4)
 
-  // confirmations: real-target + earned + non-self, keyed by HUMAN (one human = one confirmation).
+  // confirmations: real-target + earned + non-self, keyed by HUMAN (one human = one confirmation). The ACCUMULATOR
+  // reads confirmSet (anchored under the Wave-2 split); the earned/creator gates above stay raw.
   const perHumanDecay = new Map();
-  for (const r of all) {
+  for (const r of confirmSet) {
     if (r.type !== 'CONFIRM' || !r.payload) continue;
     if (r.payload.target_premise_id !== premiseId) continue;       // F3-symmetric: must hit the real premise
     if (!earned.has(r.src_persona_did)) continue;                  // earned-standing gate
@@ -116,7 +163,7 @@ function crossVerify(premiseId, meCtx, now, recs) {
   // SOLE derivation site (research/23 §4.3): we read the label's VERDICT, we never call the detector here.
   const label = independenceLabel(
     { topological: nConfirmers },
-    { confirmerSet: [...perHumanDecay.keys()], detectorFn: meCtx && meCtx.entanglementDetector },
+    { confirmerSet: [...perHumanDecay.keys()], detectorFn: detector }, // the SAME single-snapshot the guard read
   );
   const verdict = label.epistemic;
   if (verdict && typeof verdict === 'object' && verdict.flag === 'ENTANGLEMENT-DETECTED') {

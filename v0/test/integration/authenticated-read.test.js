@@ -116,15 +116,18 @@ test('totality (hostile getter): a throwing registry/storeOpts getter fails CLOS
   assert.doesNotThrow(() => authenticatedAnchoredRecords(hostileStore), 'a throwing storeOpts getter must NOT throw');
 });
 
-test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monotonic-safe set (convert + F6-Wave-1 pure-positive folds)', () => {
-  // The routed set is the ADR-0003 monotonic-safe subset: convert.disjointPaths (positive VOUCH-graph read) +
-  // F6 Wave-1 (plans/59) reach + verification-strength + cross-verify (pure-positive + monotone; cross-verify's
-  // internal fallback is swapped to the chokepoint per ADR Dec-3, and it is also fed anchored recs on the
-  // verification-strength path -- dead for live callers, who pass recs; a standalone armed caller anchors). Routing a
-  // NEGATIVE-evidence consumer (creator-standing/premise-score/direct/stake-anchor-SLASH/consensus) through here
-  // would INVERT monotonic-narrow when armed (a dropped un-anchored accuser RAISES trust) -- those stay Wave-2/OPEN.
+test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monotonic-safe set (convert + F6 Wave-1 + Wave-2-CLEAN r-leg)', () => {
+  // The routed set is the ADR-0003 monotonic-safe subset:
+  //   WHOLESALE (both legs anchor): convert.disjointPaths (positive VOUCH-graph read) + F6 Wave-1 (plans/59)
+  //     reach + verification-strength + cross-verify (pure-positive + monotone; cross-verify's internal fallback
+  //     is the chokepoint per ADR Dec-3).
+  //   PARTIAL / r-leg ONLY (F6 Wave-2-CLEAN, plan 60): creator-standing + premise-score import the `…From` variant
+  //     to derive the anchored CONFIRM accumulator from their single raw read and pass it as crossVerify's 5th
+  //     `anchoredRecs` arg -- their CONTEST s-leg + crater root-count + earned gate + subject-PREMISE binding stay
+  //     RAW (routing the WHOLE input would INVERT monotonic-narrow when armed: a dropped un-anchored accuser RAISES
+  //     trust). direct/stake-anchor/consensus stay Wave-2-raw-resolution/OPEN residuals.
   // A NEW importer beyond this reviewed set is a DELIBERATE-UPDATE signal requiring a monotonicity review + an
-  // ADR-0003 map update, not a mechanical add. EXACT-SET (deepEqual).
+  // ADR-0003 map update, not a mechanical add. EXACT-SET (deepEqual). Matches EITHER export name.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
   const MODULE_ABS = path.join(SRC, 'trust/authenticated-read.js');
   const importers = allSrcJsFiles(SRC)
@@ -132,8 +135,8 @@ test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monot
     .filter((f) => /require\(['"][^'"]*authenticated-read(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f).replace(/\\/g, '/'))
     .sort();
-  assert.deepEqual(importers, ['grounding/cross-verify.js', 'grounding/reach.js', 'grounding/verification-strength.js', 'trust/convert.js'],
-    'authenticated-read must be routed ONLY by the ADR-0003 monotonic-safe set (convert + F6-Wave-1 cross-verify/reach/verification-strength); a new importer needs a monotonicity review; found: ' + importers.join(', '));
+  assert.deepEqual(importers, ['grounding/creator-standing.js', 'grounding/cross-verify.js', 'grounding/premise-score.js', 'grounding/reach.js', 'grounding/verification-strength.js', 'trust/convert.js'],
+    'authenticated-read must be routed ONLY by the ADR-0003 monotonic-safe set (convert + F6 Wave-1 cross-verify/reach/verification-strength + Wave-2-CLEAN creator-standing/premise-score r-leg); a new importer needs a monotonicity review; found: ' + importers.join(', '));
 });
 
 console.log(`\n[authenticated-read] ${pass} passed, ${fail} failed`);

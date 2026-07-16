@@ -21,6 +21,7 @@
 'use strict';
 
 const { verifiedRecords } = require('../trust/read-gate');
+const { authenticatedAnchoredRecordsFrom } = require('../trust/authenticated-read');
 const { opinion, expectation } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
@@ -65,9 +66,10 @@ function contestSurvival(recs, reg, premiseId, now, earned) {
  * @returns {{opinion:object, standing:number, n_premises:number, contested:boolean, advisory:true}}
  */
 function creatorStanding(humanUid, meCtx, now) {
-  const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts);
-  const reg = meCtx.registry;
-  const earned = earnedStandingPersonas(recs);
+  const reg = meCtx.registry;                                        // snapshot ONCE (reused for the read + below)
+  const recs = verifiedRecords(reg, meCtx.storeOpts);                // RAW: the s-leg, crater root-count, earned gate,
+  const anchoredRecs = authenticatedAnchoredRecordsFrom(recs, reg, meCtx); // AND the subject-PREMISE SET iteration stay
+  const earned = earnedStandingPersonas(recs);                       // RAW -- ONLY the CONFIRM r-leg anchors (W2-CLEAN)
 
   let rAgg = 0;
   let sAgg = 0;
@@ -84,9 +86,10 @@ function creatorStanding(humanUid, meCtx, now) {
     if (!premiseId) continue; // malformed premise body — skip (fail-soft)
     nPremises += 1;
 
-    // r-leg: the premise's confirmation survival (decay-weighted distinct humans). Pass the outer scan
-    // so this is ONE verifiedRecords read for the whole human, not N+1 (the coherence-checkpoint fix).
-    rAgg += crossVerify(premiseId, meCtx, now, recs).r;
+    // r-leg: the premise's confirmation survival (decay-weighted distinct humans). Pass BOTH the raw scan (gates)
+    // and the ANCHORED scan (the CONFIRM accumulator) — ONE verifiedRecords read for the whole human (no N+1), the
+    // anchored set derived from that SAME array (F6 W2-CLEAN two-array split; ADR-0003 Dec 4).
+    rAgg += crossVerify(premiseId, meCtx, now, recs, anchoredRecs).r;
 
     // s-leg: contests (decay-weighted distinct EARNED humans), with the asymmetric crater on >=2 earned roots.
     const s = contestSurvival(recs, reg, premiseId, now, earned);

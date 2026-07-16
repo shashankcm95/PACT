@@ -17,6 +17,7 @@
 'use strict';
 
 const { verifiedRecords } = require('../trust/read-gate');
+const { authenticatedAnchoredRecordsFrom } = require('../trust/authenticated-read');
 const { opinion } = require('../trust/opinion');
 const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('../trust/standing');
@@ -54,9 +55,14 @@ function contestEvidence(recs, reg, premiseId, now) {
  * @returns {object} an SL opinion (carries b,d,u,a,expectation) + advisory:true (SHADOW, §0)
  */
 function premiseScore(premiseId, meCtx, now) {
-  const recs = verifiedRecords(meCtx.registry, meCtx.storeOpts);
-  const reg = meCtx.registry;
-  const r = crossVerify(premiseId, meCtx, now, recs).r; // pass the scan (no O(N+1) re-read) — the r-leg
+  const reg = meCtx.registry;                                        // snapshot ONCE (reused for the read + s-leg)
+  const recs = verifiedRecords(reg, meCtx.storeOpts);               // RAW: the s-leg + the crossVerify gates
+  const anchoredRecs = authenticatedAnchoredRecordsFrom(recs, reg, meCtx); // F6 W2-CLEAN: the CONFIRM r-leg accumulator
+  // TWO-ARRAY split (ADR-0003 Dec 4): the r-leg's CONFIRM accumulator reads the ANCHORED set (5th arg); the gates
+  // (findBoundPremise + earned) read RAW `recs` (4th arg). DISARMED anchoredRecs === recs (same reference), so this
+  // is byte-identical. contestEvidence (the NEGATIVE s-leg) stays RAW -- anchoring it would INVERT NS-9. NOTE: only
+  // the regProvenance axis narrows here -- freshness filters VOUCHes only, and the r-leg is CONFIRMs (inert axis).
+  const r = crossVerify(premiseId, meCtx, now, recs, anchoredRecs).r;
   const s = contestEvidence(recs, reg, premiseId, now);
   return { ...opinion(r, s), advisory: true }; // SHADOW marker — uniform with the other score-objects
 }
