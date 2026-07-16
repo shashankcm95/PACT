@@ -128,3 +128,22 @@ re-derived the monotonicity from `s=0` + SUM + MIN-over-graph-fixed-roots). Fold
 - **Co-arming proof obligation** — the F6 monotonicity is analyzed with the entanglement detector DORMANT
   (the default); the joint `anchoring + entanglementDetector` armed case needs its own witness. Scoped out until
   the detector arms.
+  - **UPDATE (2026-07-16, plan 60 Wave-2 VERIFY hacker):** the co-arming case is no longer merely unproven — it is
+    a **demonstrated inversion**. Anchoring drops un-anchored CONFIRMs from `confirmSet` BEFORE the
+    entanglement-demote clusters over `[...perHumanDecay.keys()]` (`cross-verify.js:117`); removing a confirmer can
+    change the cluster topology so survivors ESCAPE a collapse the disarmed superset suffers, so the anchored
+    (subset) `r` can EXCEED the disarmed (superset) `r` (witness: 3 CONFIRMs {A,B,C}, detector flags `[[A,B,C]]`
+    iff linchpin C present, `regProvenance` anchors A,B but not C → `r_armed=2 > r_disarmed=1`, `E=0.75 > 0.667`).
+  - **Wave-2 fail-close (plan 60):** `cross-verify.js` now forces `confirmSet = gate` (skips anchoring) whenever
+    `meCtx.entanglementDetector` is present (a truthy check — the guard fires when a detector is merely PRESENT, not
+    only when it flags). For the **two-array folds** (`creator-standing`/`premise-score`, whose `gate` is RAW) this
+    yields `r_armed == r_disarmed` — NS-9-safe by construction (the INVERSION is discharged + tested, A9 RED-first
+    witness). **Cost, stated honestly:** this is fail-SAFE, not co-arming SUPPORT — under any co-armed detector these
+    folds FORFEIT their NS-4 anchoring narrowing entirely (`confirmSet = gate = raw`), reverting to the disarmed
+    r-leg. The detector field is dormant/SHADOW today, so nothing is lost live; the real close is the `min(r_anchored,
+    r_raw)` clamp that preserves narrowing under a benign co-armed detector (deferred). **RESIDUAL (still deferred):**
+    `verification-strength` passes an already-anchored `recs`
+    as its 4th arg, so the leaf has no RAW baseline to de-anchor to — its co-arming residual stays deferred to a
+    Wave-1 two-array revisit. The full co-arming re-derivation (preserve anchoring's narrowing under a benign
+    co-armed detector via a `min(r_anchored, r_raw)` clamp) is the eventual close; the current guard is the
+    fail-safe interim.
