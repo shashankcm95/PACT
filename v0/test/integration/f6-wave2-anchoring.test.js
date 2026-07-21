@@ -300,6 +300,7 @@ test('s=0 structural guard (two-array path): a CONTEST in the anchored confirmSe
   w.emit('did:key:zCon', 'CONTEST', { target_premise_id: prem.id, target_persona: 'did:key:zC' });
   const after = crossVerify(prem.id, w.meCtx, undefined, w.raw(), w.raw()).strength;
   assert.equal(after, before, 'crossVerify builds opinion(r,0) on the two-array path too -- a CONTEST-derived s would flip this RED');
+  assert.ok(before > 0, 'non-vacuous: there IS a positive strength to have been lowered');
 });
 
 console.log(`\n[f6-wave2-anchoring] ${pass} passed, ${fail} failed`);

@@ -224,7 +224,7 @@ test('T1 pure-positivity guard: a WOULD-COUNT contest does NOT change crossVerif
   // add a would-count CONTEST (same gating shape as a counted CONFIRM: earned + real target + non-self)
   w.emit('did:key:zContester', 'CONTEST', { target_premise_id: prem.id, target_persona: 'did:key:zC' });
   const after = crossVerify(prem.id, w.meCtx).strength;
-  assert.equal(after, before, 'crossVerify is structurally pure-positive (s=0 at :158) -- it ignores CONTEST entirely; a future negative leg would flip this RED');
+  assert.equal(after, before, 'crossVerify is structurally pure-positive (s=0 at :212) -- it ignores CONTEST entirely; a future negative leg would flip this RED');
   assert.ok(before > 0, 'non-vacuous: there IS a positive strength to have been lowered');
 });
 

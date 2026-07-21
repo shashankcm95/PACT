@@ -79,7 +79,7 @@ in the first-draft map that the board caught before any code was written.
    this split. (Recorded so an implementer does not attempt a wholesale route.)
 
 5. **Pure-positivity is a GUARDED invariant, not an incidental fact.** `cross-verify` is anchor-safe only
-   because it builds `opinion(rConfirmers, 0)` with `s=0` (`cross-verify.js:158`); if a future edit threads a
+   because it builds `opinion(rConfirmers, 0)` with `s=0` (`cross-verify.js:212`); if a future edit threads a
    CONTEST-derived `s`, every wholesale-routed consumer silently inverts. Wave 1 MUST add a structural assertion
    (a test) that the SL opinion is built with `s=0`, so a future negative leg trips RED before the anchored path
    can invert.
