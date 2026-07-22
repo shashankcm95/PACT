@@ -22,8 +22,9 @@ Anchoring lowers `rEv`, which lowers BOTH `directE` and `alpha`; a lower `alpha`
 UNCHANGED `consE`, so when `consE > directE` the public `trust()` RISES. Reproducer (`W=2`, base `0.5`, `SAT=5`):
 `rEv_disarmed=3`, `sEv=0`, un-anchored agent, `wcons=0.95` gives disarmed `trust = alpha(3)*0.8 + (1-alpha(3))*0.95
 = 0.894`; armed `rEv=0` gives `alpha=0` and `trust = 0*0.5 + 1*0.95 = 0.95` (`+0.056`, NS-9 violated). Because
-`model.js` calls `direct` STANDALONE (`consensus` passes raw `recs`), every armed `direct` inverts — not an edge
-case.
+`model.js` calls `direct` STANDALONE, every armed standalone `direct` call (the public `trust()` path) inverts —
+not an edge case. (The `consensus` path passes raw `recs`, so its `direct` calls are not anchored and do not
+invert; the inversion is specific to the `model.js` standalone path.)
 
 ADR-0003's Deferred entry named the fix and co-deferred it with `consensus`/`stake-anchor`: *base `alpha` on the
 RAW interaction count and use the anchored `rEv` only for `directE`* — "a TRUST-MATH change to the core blend (its
@@ -66,7 +67,8 @@ trust_armed  = alpha* * directE_armed    + (1 - alpha*) * consE
             <= alpha* * directE_disarmed + (1 - alpha*) * consE  =  trust_disarmed.
 ```
 
-Monotone-narrow at `trust()`. Disarmed, `rEv_anchored = rEv_raw`, so `trust` is byte-identical to today (SHADOW).
+Monotone-narrow at `trust()`. Disarmed, `rEv_anchored = rEv_raw`, so the `trust()` VALUE is identical to today
+(value-identical; the return object gains one additive field — see Decision 2's note) — SHADOW.
 
 **Why `alpha` MUST read the raw count (it is forced, not chosen) — VERIFY-hardened.** `alpha` answers "how much
 has this agent interacted" — the confidence/interaction-count term. The agent DID interact; anchoring is about
@@ -110,7 +112,12 @@ anchored ONLY when a caller does not supply `recs`. The live callers (probe `gre
   mean re-derivation, ADR-0003 Deferred). `wcons`'s per-voucher weight `alpha(d.r + d.s) * d.b` is unchanged.
 
 Disarmed, `authenticatedAnchoredRecordsFrom` returns the input by reference, so `rEv_anchored = rEv_raw` and every
-consumer is byte-identical to today.
+consumer's VALUE is identical to today — **value-identical, not literally byte-identical.** The one shape change is
+ADDITIVE and inert: `direct`'s return gains an `rEv_raw` field (and `model.js`'s `direct:` sub-object with it), but
+no existing consumer reads it (`wcons` reads `d.r`/`d.s`/`d.b`; the advisory `trust()` value is unchanged), so the
+new field cannot move any advisory number. Only a consumer that deep-equals or re-serializes the `direct` object
+sees the extra key — that is the sole disarmed delta, and the build's D6 witness asserts VALUE-equality, not
+object-equality.
 
 **Forward contract (the two-quantity opinion is a new hazard surface).** After this change `direct`'s opinion
 co-locates two quantities on different bases: an anchored `.r`/`.b`/`.u` (for expectation) and a raw `rEv_raw`
@@ -165,8 +172,9 @@ amplification through `alpha`, not merely the base `sEv` magnitude.
   `6/9 -> 7/9`), leaving `consensus` + `stake-anchor` as the OPEN bucket (`2/9`), both still awaiting their own
   mean/stake re-derivations.
 - `model.js`'s `alpha` argument changes from `d.r + d.s` to the raw interaction count. This is a change to the core
-  public blend; disarmed it is byte-identical, but it is the first trust-math edit to `model.js` under F6 and needs
-  the full adversarial obligation below.
+  public blend; disarmed the `trust()` value is unchanged (value-identical; the `direct` object gains an additive
+  `rEv_raw` field), but it is the first trust-math edit to `model.js` under F6 and needs the full adversarial
+  obligation below.
 - `direct` remains un-armable in practice until #86 (Decision 3) is closed and #87 (Decision 4) is ruled on; this
   ADR unblocks the ANCHORING half only.
 - Nothing here arms: `LIVE_SOURCES` stays frozen-empty and `convert.actionable` stays a literal `false`.
@@ -185,7 +193,7 @@ then implement). The first is NEW to this ADR and is the one plan 61 lacked:
 | D2 | un-anchored agent CLAIM WITH a CONTEST against it | `sEv` UNCHANGED (resolution raw); `directE_armed <= directE_disarmed` |
 | D3 | crater `>=2` boundary, 2 earned contesters | crater holds (raw); `sEv` unchanged |
 | D4 | recs-seam: `wcons`/`consensus` armed vs disarmed | byte-identical (its `direct(recs)` stays raw) |
-| D6 | DISARMED byte-identity | standalone `direct` disarmed == pre-diff (`posSet === all` by reference) |
+| D6 | DISARMED value-identity | standalone `direct` disarmed: `posSet === all` by reference, every numeric opinion field == pre-diff; assert VALUE-equality (the added `rEv_raw` field is the only shape delta), not whole-object equality |
 | D7 | proto-pollution / sibling sweep on `posSet`/`posIds` | array-only use; no bake-in |
 | D8 | co-arming absence | `direct` reads no `entanglementDetector` (structural; assert non-vacuously) |
 
