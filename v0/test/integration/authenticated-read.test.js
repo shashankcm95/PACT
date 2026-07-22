@@ -125,7 +125,8 @@ test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monot
   //     to derive the anchored CONFIRM accumulator from their single raw read and pass it as crossVerify's 5th
   //     `anchoredRecs` arg -- their CONTEST s-leg + crater root-count + earned gate + subject-PREMISE binding stay
   //     RAW (routing the WHOLE input would INVERT monotonic-narrow when armed: a dropped un-anchored accuser RAISES
-  //     trust). direct/stake-anchor/consensus stay Wave-2-raw-resolution/OPEN residuals.
+  //     trust). direct routes its positive rEv-leg only (ADR-0004 Wave-3, alpha on the raw count); stake-anchor/
+  //     consensus stay OPEN residuals.
   // A NEW importer beyond this reviewed set is a DELIBERATE-UPDATE signal requiring a monotonicity review + an
   // ADR-0003 map update, not a mechanical add. EXACT-SET (deepEqual). Matches EITHER export name.
   assertOnlyLiteralRequires(allSrcJsFiles(SRC));
@@ -135,8 +136,8 @@ test('CONTAINED (monotonicity guard): the chokepoint is routed ONLY by the monot
     .filter((f) => /require\(['"][^'"]*authenticated-read(?:\.js)?['"]\)/.test(fs.readFileSync(f, 'utf8')))
     .map((f) => path.relative(SRC, f).replace(/\\/g, '/'))
     .sort();
-  assert.deepEqual(importers, ['grounding/creator-standing.js', 'grounding/cross-verify.js', 'grounding/premise-score.js', 'grounding/reach.js', 'grounding/verification-strength.js', 'trust/convert.js'],
-    'authenticated-read must be routed ONLY by the ADR-0003 monotonic-safe set (convert + F6 Wave-1 cross-verify/reach/verification-strength + Wave-2-CLEAN creator-standing/premise-score r-leg); a new importer needs a monotonicity review; found: ' + importers.join(', '));
+  assert.deepEqual(importers, ['grounding/creator-standing.js', 'grounding/cross-verify.js', 'grounding/premise-score.js', 'grounding/reach.js', 'grounding/verification-strength.js', 'trust/convert.js', 'trust/direct.js'],
+    'authenticated-read must be routed ONLY by the monotonic-safe set (ADR-0003: convert + F6 Wave-1 cross-verify/reach/verification-strength + Wave-2-CLEAN creator-standing/premise-score r-leg; ADR-0004 Wave-3: direct rEv-leg); a new importer needs a monotonicity review; found: ' + importers.join(', '));
 });
 
 console.log(`\n[authenticated-read] ${pass} passed, ${fail} failed`);

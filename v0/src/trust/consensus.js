@@ -81,7 +81,10 @@ function wcons(meCtx, meDid, agentDid, now) {
     if (vHuman === meHuman || vHuman === agentHuman) continue; // exclude self-human + target-human
     const d = direct(meCtx, vch.src_persona_did, undefined, now, recs); // config-agnostic: a voucher's
     //   reliability-as-a-source is config-independent (the config-binding is on the TARGET's trust, §1.4).
-    const w = alpha(d.r + d.s) * d.b; // confidence-gated belief — one cheap claim → tiny w; Sybil → 0
+    // ADR-0004 Decision 2: weight on the RAW interaction count (d.rRaw), not the anchored d.r. Value-identical here
+    // (wcons passes raw recs, so direct's posSet === all and d.rRaw === d.r), but reading rRaw literally satisfies
+    // the forward contract instead of relying on the unstated transitive invariant.
+    const w = alpha(d.rRaw + d.s) * d.b; // confidence-gated belief — one cheap claim → tiny w; Sybil → 0
     if (!(w > 0)) continue; // skip non-positive AND NaN (a NaN w must never survive into the tie-break)
     const prev = perHuman.get(vHuman);
     if (beats(w, vch, prev)) perHuman.set(vHuman, { weight: w, vouch: clamp01(vch.payload.value), t: vch.t, seq: vch.seq, record_id: vch.record_id });
