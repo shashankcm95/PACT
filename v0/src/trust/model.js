@@ -23,7 +23,10 @@ const { expectation, novice, alpha } = require('./opinion');
  */
 function trust(meCtx, meDid, agentDid, configHash, now) {
   const d = direct(meCtx, agentDid, configHash, now);
-  const a = alpha(d.r + d.s);                       // interaction count = the DIRECT evidence weight
+  // ADR-0004 (LOAD-BEARING): alpha reads the RAW interaction count (d.rRaw + d.s), NOT the anchored d.r. direct()'s
+  // opinion .r is the ANCHORED positive; basing alpha on it lets arming lower alpha, shift weight onto consE, and
+  // RAISE trust() when consE > directE (hazard d, the +0.056 inversion). Do NOT "clean up" by re-coupling to d.r.
+  const a = alpha(d.rRaw + d.s);                     // provenance-invariant interaction count = the DIRECT evidence weight
   const wc = wcons(meCtx, meDid, agentDid, now);
   const directE = expectation(d);
   const consE = wc.defined ? wc.value : expectation(novice()); // cold-start ⇒ novice prior (never NaN)

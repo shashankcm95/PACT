@@ -29,6 +29,7 @@ const { rootOf } = require('../identity/registry');
 const { earnedStandingPersonas } = require('./standing');
 const { decayWeight } = require('./decay');
 const { CRATER_MULTIPLIER } = require('./params');
+const { authenticatedAnchoredRecordsFrom } = require('./authenticated-read');
 
 // decayWeight now lives in ./decay (a pure leaf) — re-exported below for backward compat (trust.test.js
 // imports it from here). The local definition was extracted at the coherence checkpoint.
@@ -40,11 +41,13 @@ const { CRATER_MULTIPLIER } = require('./params');
  * @param {string|undefined} configHash bucket; undefined = all buckets; else match (config_hash ?? 'unknown')
  * @param {number} [now] epoch ms for decay
  * @param {object[]} [recs] pre-scanned verified records (perf: lets wcons avoid O(N) re-scans)
- * @returns {object} a Subjective Logic opinion (carries r,s)
+ * @returns {object} a Subjective Logic opinion over the ANCHORED positive leg (.r/.b/.d/.u carry the anchored
+ *   count), plus `rRaw`: the RAW (provenance-invariant) positive weight for model.js's alpha (ADR-0004). Disarmed,
+ *   rRaw === r. Consumers that fold this into a weighted mean MUST weight on rRaw (Decision 2 forward contract).
  */
 function direct(meCtx, agentDid, configHash, now, recs) {
-  const all = recs || verifiedRecords(meCtx.registry, meCtx.storeOpts);
-  const reg = meCtx.registry;
+  const reg = meCtx.registry;                       // snapshot once (one judge-source; MED-1)
+  const all = recs || verifiedRecords(reg, meCtx.storeOpts);
   const inBucket = (r) => configHash === undefined || (r.config_hash ?? 'unknown') === configHash;
 
   // agent's CLAIMs in this bucket, DEDUPED by idempotency_key (the plan's counting unit).
@@ -64,9 +67,23 @@ function direct(meCtx, agentDid, configHash, now, recs) {
     agentClaimIds.has(r.payload.target_claim_id));
   const contestedClaimIds = new Set(validContests.map((c) => c.payload.target_claim_id));
 
-  // positive evidence (decay-weighted, uncontested)
-  let rEv = 0;
-  for (const c of agentClaims) if (!contestedClaimIds.has(c.record_id)) rEv += decayWeight(c, now);
+  // POSITIVE-leg anchoring (ADR-0004 Decision 1): anchor ONLY the rEv accumulator, at the internal `recs ||`
+  // fallback (Decision 3 recs-seam) — dead when a caller passes `recs`, so `wcons` stays RAW/un-anchored. The
+  // resolution set (agentClaimIds), sEv, and the crater below all read `all` (RAW), so a dropped un-anchored CLAIM
+  // never un-resolves a CONTEST (the dual-role trap). Disarmed, posSet === all by reference (value-identity).
+  const posSet = recs || authenticatedAnchoredRecordsFrom(all, reg, meCtx);
+  const posIds = new Set(posSet.map((r) => r.record_id));
+
+  // positive evidence (decay-weighted, uncontested). rEvRaw = the RAW interaction weight = model.js's alpha basis
+  // (provenance-invariant); rEvAnchored = the anchored subset = directE's basis. Disarmed they are equal.
+  let rEvRaw = 0;
+  let rEvAnchored = 0;
+  for (const c of agentClaims) {
+    if (contestedClaimIds.has(c.record_id)) continue;
+    const wgt = decayWeight(c, now);
+    rEvRaw += wgt;
+    if (posIds.has(c.record_id)) rEvAnchored += wgt;
+  }
 
   // a persona has EARNED STANDING if it authored >=1 CLAIM in me's log (it has interacted — not a
   // zero-history Sybil). Non-recursive (one level).
@@ -86,7 +103,9 @@ function direct(meCtx, agentDid, configHash, now, recs) {
   for (const w of perHumanDecay.values()) sEv += w; // distinct humans inform
   if (corroboratingHumans.size >= 2) sEv *= CRATER_MULTIPLIER; // disjoint EARNED corroboration craters
 
-  return opinion(rEv, sEv);
+  // opinion from the ANCHORED positive (directE's basis); rRaw carries the RAW interaction weight so model.js can
+  // base alpha on the provenance-invariant count (ADR-0004 Decision 2). Disarmed, rEvAnchored === rEvRaw.
+  return { ...opinion(rEvAnchored, sEv), rRaw: rEvRaw };
 }
 
 module.exports = { direct, decayWeight };

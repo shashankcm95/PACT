@@ -230,7 +230,7 @@ test('T1 pure-positivity guard: a WOULD-COUNT contest does NOT change crossVerif
 
 // ---------- T3: ARMED cross-fold isolation (the mixed folds never read regProvenance) ----------
 
-test('T3 armed isolation: creator-standing / premise-score / direct are BYTE-IDENTICAL armed-vs-disarmed', () => {
+test('T3 armed isolation: creator-standing / premise-score stay deepEqual; direct NOW NARROWS (ADR-0004 Wave-3)', () => {
   const w = anchWorld();
   const creator = 'human:did:key:zCr';
   w.addPersona('did:key:zCr', false);         // UN-anchored creator (would drop if the fold anchored)
@@ -254,7 +254,10 @@ test('T3 armed isolation: creator-standing / premise-score / direct are BYTE-IDE
 
   assert.deepEqual(creatorStanding(creator, w.armedCtx()), creatorStanding(creator, w.meCtx), 'creator-standing ignores regProvenance');
   assert.deepEqual(premiseScore(prem.id, w.armedCtx()), premiseScore(prem.id, w.meCtx), 'premise-score ignores regProvenance');
-  assert.deepEqual(direct(w.armedCtx(), 'did:key:zAgent'), direct(w.meCtx, 'did:key:zAgent'), 'direct ignores regProvenance');
+  // ADR-0004 (Wave-3): direct now ANCHORS its positive rEv leg -- zAgent is un-anchored, so its uncontested CLAIM
+  // drops from rEv armed (was asserted byte-identical pre-Wave-3; creator-standing/premise-score stay deepEqual here
+  // because their CONFIRM r-leg confirmer zK IS anchored and the s-leg is raw).
+  assert.ok(direct(w.armedCtx(), 'did:key:zAgent').r < direct(w.meCtx, 'did:key:zAgent').r, 'direct NARROWS under arming (un-anchored agent CLAIM drops from rEv)');
 });
 
 console.log(`\n[f6-wave1-anchoring] ${pass} passed, ${fail} failed`);
